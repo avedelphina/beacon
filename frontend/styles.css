@@ -74,6 +74,16 @@ body {
 
 .tabs { display: flex; gap: 0.25rem; }
 
+.whoami {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--slate);
+}
+
 .tab {
   font-family: var(--font-mono);
   font-size: 0.8rem;

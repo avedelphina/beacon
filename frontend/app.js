@@ -510,6 +510,12 @@ renderHosts();
 renderAgents();
 populateHostSelect();
 
+fetch("/auth/me").then((r) => (r.ok ? r.json() : null)).then((user) => {
+  if (!user) return; // auth disabled — nothing to show
+  document.getElementById("whoami-name").textContent = user.name || user.email || user.sub;
+  document.getElementById("whoami").hidden = false;
+});
+
 setInterval(() => {
   if (document.getElementById("agents-view").classList.contains("active")) renderAgents();
 }, 30000);

@@ -58,6 +58,10 @@ and `beacon` (reads it). `fleet/` is bind-mounted too, so your inventory
 persists across rebuilds and is editable from the host. See
 [Teleport / tbot](#teleport--tbot) for the details.
 
+Copy `.env.example` to `.env` and fill it in to require login — see
+[Authentication](#authentication). No `.env`, no login: Beacon runs open,
+same as local dev.
+
 ## Data model
 
 ### `fleet/hosts.yaml`
@@ -171,6 +175,46 @@ pattern is what a leaked/cloned credential looks like), and will lock the
 bot out if it sees it. Switching from the bare-process run to the Docker
 sidecar means stopping the host process first, not running both.
 
+## Authentication
+
+Login against [Zitadel](https://zitadel.com) (or any OIDC provider) via
+authorization code + PKCE — `backend/auth.py`. Optional: set nothing and
+Beacon runs open, same as before this existed. Set `ZITADEL_ISSUER` and
+`ZITADEL_CLIENT_ID` and every route except `/auth/*` requires a logged-in
+session — a browser hitting `/` gets redirected to `/auth/login`, an
+unauthenticated API call gets a clean 401.
+
+**Zitadel setup:**
+
+1. Create a **Web** application, auth method **PKCE** (public client — no
+   secret to manage or leak).
+2. Redirect URI: `http://localhost:8642/auth/callback` for local testing;
+   add your real domain's equivalent alongside it when you have one —
+   Zitadel apps take multiple redirect URIs.
+3. Copy the generated client ID into `.env` (see `.env.example`):
+
+   ```bash
+   ZITADEL_ISSUER=https://id.example.com
+   ZITADEL_CLIENT_ID=<the generated numeric ID>
+   BEACON_SESSION_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+   ```
+
+The client ID isn't sensitive (PKCE public clients don't hold a secret) —
+`BEACON_SESSION_SECRET` is what actually needs protecting, it signs the
+session cookie. `.env` is gitignored; `docker-compose.yml` reads it
+automatically.
+
+Session is a signed cookie (Starlette's `SessionMiddleware`, `itsdangerous`)
+holding `sub`/`email`/`name` from the verified ID token — no server-side
+session store, no database. The GUI shows who's logged in top-right with a
+logout link once `/auth/me` returns a user.
+
+**Not covered here**: the MCP server (`mcp/server.py`) has no auth yet —
+it's a separate problem (service-to-service, not a browser redirect flow;
+Zitadel service-user client_credentials for this instance is still being
+debugged). Don't expose port 8643 beyond a trusted network until that's
+sorted.
+
 ## MCP server
 
 `mcp/server.py` exposes the fleet over the [Model Context Protocol](https://modelcontextprotocol.io)
@@ -214,6 +258,7 @@ service name).
 ```
 backend/
   app.py          FastAPI routes
+  auth.py         Zitadel OIDC login (PKCE) + the auth-gating middleware
   store.py        fleet/ YAML read/write
   ssh.py          the one place that shells out to `ssh`
   schemas.py      Host/Agent pydantic models
@@ -231,6 +276,7 @@ tbot/
 mcp/
   server.py       MCP server — a client of Beacon's own HTTP API
   Dockerfile
+.env.example      Zitadel issuer/client ID/session secret template
 Dockerfile        the beacon image
 docker-compose.yml
 ```

@@ -12,3 +12,6 @@ tbot/tbot.log
 fleet/hosts.yaml
 fleet/agents/*.yaml
 fleet/decommissioned/
+
+# real Zitadel config + session secret — see .env.example
+.env

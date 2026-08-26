@@ -31,6 +31,10 @@ services:
     volumes:
       - ./fleet:/app/fleet
       - ./tbot/data:/tbot-data:ro
+    environment:
+      - ZITADEL_ISSUER=${ZITADEL_ISSUER:-}
+      - ZITADEL_CLIENT_ID=${ZITADEL_CLIENT_ID:-}
+      - BEACON_SESSION_SECRET=${BEACON_SESSION_SECRET:-}
     depends_on:
       - tbot
     restart: unless-stopped

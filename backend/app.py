@@ -3,8 +3,9 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel
+from starlette.middleware.sessions import SessionMiddleware
 
-from . import store
+from . import auth, store
 from .drivers import get_driver
 from .schemas import Agent, Host
 
@@ -18,6 +19,12 @@ class DecommissionRequest(BaseModel):
     remove_user: bool = False
 
 app = FastAPI(title="Beacon", version="0.1.0")
+
+app.include_router(auth.router)
+app.add_middleware(auth.AuthMiddleware)
+# Outermost — added last, so it runs first and request.session exists by
+# the time AuthMiddleware reads it.
+app.add_middleware(SessionMiddleware, secret_key=auth.SESSION_SECRET, https_only=False)
 
 
 @app.exception_handler(store.NotFound)

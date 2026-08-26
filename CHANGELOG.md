@@ -5,6 +5,34 @@ Versioning follows [Semantic Versioning](https://semver.org/) once there's
 an API worth being stable about — pre-1.0, breaking changes can land in a
 minor bump.
 
+## [0.3.0] — 2026-08-27
+
+### Added
+
+- Login against Zitadel (or any OIDC provider) via authorization code +
+  PKCE (`backend/auth.py`). Every route except `/auth/*` requires a
+  session once `ZITADEL_ISSUER`/`ZITADEL_CLIENT_ID` are set — unset,
+  Beacon still runs open. Session is a signed cookie
+  (`itsdangerous`/`SessionMiddleware`), no server-side session store.
+  GUI shows the logged-in user + a logout link.
+- `.env.example` for the three vars this needs; `docker-compose.yml`'s
+  `beacon` service reads them from `.env` (gitignored).
+- Verified end to end: unauthenticated `/` redirects to `/auth/login`,
+  unauthenticated `/api/*` gets a clean 401, and a real login against a
+  live Zitadel instance completes the full round trip (PKCE challenge,
+  code exchange, ID token signature verification via JWKS, session
+  cookie) both locally and containerized.
+
+### Known gaps
+
+- MCP server (port 8643) has no auth yet. Zitadel service-user
+  `client_credentials` for machine-to-machine auth hit a `client not
+  found` error across every combination tried (both auth-header styles,
+  three regenerated secrets, numeric and named client ID, org-scoped and
+  unscoped) — looks structural on the Zitadel/proxy side, not a
+  credential issue, and needs the instance's own audit log to diagnose.
+  Don't expose 8643 beyond a trusted network until this is sorted.
+
 ## [0.2.0] — 2026-08-26
 
 ### Added
