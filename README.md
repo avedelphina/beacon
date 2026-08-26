@@ -43,12 +43,20 @@ Open `http://localhost:8642`.
 
 ```bash
 cp fleet/hosts.yaml.example fleet/hosts.yaml   # first run only
+
+# only needed once, ever — establishes tbot's stored identity in
+# ./tbot/storage. Get a token from `tctl bots add beacon --roles=agent`.
+# Skip this if a host in hosts.yaml only uses ssh.key, not config_file.
+./tbot/run.sh <join-token>
+# Ctrl-C once it logs "Fetched new bot identity" — the compose stack takes it from here.
+
 docker compose up -d --build
 ```
 
-`fleet/` is bind-mounted, so your inventory persists across rebuilds and is
-editable from the host. See [Teleport / tbot](#teleport--tbot) for what the
-second bind mount in `docker-compose.yml` is for.
+Two services: `tbot` (renews the Machine ID identity into `./tbot/data`)
+and `beacon` (reads it). `fleet/` is bind-mounted too, so your inventory
+persists across rebuilds and is editable from the host. See
+[Teleport / tbot](#teleport--tbot) for the details.
 
 ## Data model
 
@@ -127,30 +135,66 @@ This prints a join token. First run of tbot consumes it; every renewal after
 that uses tbot's own stored identity, so the token is never needed again
 unless `tbot/storage/` is wiped.
 
-**Running tbot:**
+**Running tbot — two ways:**
+
+- **Docker (recommended, matches `docker-compose.yml`)**: the `tbot`
+  service builds `tbot/Dockerfile` and runs continuously alongside `beacon`,
+  writing to `./tbot/data` (bind-mounted, shared with the `beacon`
+  container at `/tbot-data`) and persisting its own renewable identity in
+  `./tbot/storage`. First-ever run still needs a token — see
+  [Quickstart → Docker](#docker) — every run after reuses stored state, no
+  token needed, and both containers coming up fresh just resumes renewal
+  where it left off (confirmed: handing an established `./tbot/storage`
+  from a host-process run over to the container mid-session renewed clean,
+  generation N → N+1, no clone-detection lockout).
+- **Bare host process** (`./tbot/run.sh`) — useful for local (non-Docker)
+  dev. Writes to the same `tbot/data`/`tbot/storage` layout.
 
 ```bash
 ./tbot/run.sh <join-token>   # first run
 ./tbot/run.sh                # every run after
 ```
 
-This writes `tbot/data/ssh_config` (plus keys, certs, `known_hosts`) and
-renews continuously. Point a host's `ssh.config_file` at that path and
-`ssh.address` at the Teleport-qualified node name
-(`<node>.<your-cluster-domain>`).
+Either way this produces `tbot/data/ssh_config` (plus keys, certs,
+`known_hosts`) and renews continuously. Point a host's `ssh.config_file` at
+that path (`/tbot-data/ssh_config` from inside the `beacon` container,
+`tbot/data/ssh_config` for a bare local run) and `ssh.address` at the
+Teleport-qualified node name (`<node>.<your-cluster-domain>`).
 
 `tbot/data/` and `tbot/storage/` are gitignored — they're private key
 material, never committed.
 
-**Docker note**: `docker-compose.yml` bind-mounts `./tbot/data` into the
-container at the *same absolute path* it has on the host. The generated
-`ssh_config` hardcodes `IdentityFile`/`CertificateFile`/`UserKnownHostsFile`
-as absolute paths under wherever `--destination` pointed when tbot ran, so
-the mount target has to match rather than get remapped — this also means
-`fleet/hosts.yaml`'s `ssh.config_file` value works unchanged in and out of
-the container. tbot itself isn't containerized yet; it runs as a host
-process and the container just reads its output. A real tbot sidecar
-container is the natural next step.
+Only run one tbot at a time against a given `./tbot/storage` — Teleport
+tracks a strictly-increasing generation counter per identity specifically
+to detect two processes renewing from the same stored credential (that
+pattern is what a leaked/cloned credential looks like), and will lock the
+bot out if it sees it. Switching from the bare-process run to the Docker
+sidecar means stopping the host process first, not running both.
+
+## MCP server
+
+`mcp/server.py` exposes the fleet over the [Model Context Protocol](https://modelcontextprotocol.io)
+— a thin client of Beacon's own HTTP API, same contract the web GUI uses.
+Runs as its own service (`docker compose up` starts it on `:8643`, endpoint
+`/mcp`, streamable-http transport).
+
+Two tiers, matching the API's own read/write split:
+
+- **Read-only** (`list_hosts`, `list_agents`, `get_agent`, `get_status`,
+  `get_logs`, `reconcile_check`, `config_diff`) — unrestricted. An agent
+  asking "what's broken" is exactly what Beacon is for.
+- **Mutating** (`deploy`, `apply_fix`, `push_config`, `decommission`) — each
+  takes a `confirm: bool = False` parameter. Called without it, the tool
+  describes what it *would* do and does nothing; only `confirm=true`
+  actually runs it. This is on top of whatever confirmation UI the MCP
+  client itself provides (tools are also annotated `destructiveHint=true`
+  for clients that read that) — a misread instruction here is a much worse
+  failure mode than a misclick, so it gets two independent gates, not one.
+
+Point any MCP client at `http://localhost:8643/mcp` (or `http://mcp:8643/mcp`
+from inside the compose network). `BEACON_URL` env var controls which
+Beacon instance it talks to (defaults to `http://beacon:8642`, the compose
+service name).
 
 ## API reference
 
@@ -182,7 +226,11 @@ fleet/
 frontend/
   index.html, app.js, styles.css   no build step
 tbot/
-  run.sh          starts the Teleport Machine ID bot
-Dockerfile
+  Dockerfile      the tbot sidecar image
+  run.sh          starts tbot as a bare host process (local dev)
+mcp/
+  server.py       MCP server — a client of Beacon's own HTTP API
+  Dockerfile
+Dockerfile        the beacon image
 docker-compose.yml
 ```

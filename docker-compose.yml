@@ -1,22 +1,46 @@
-# tbot itself is not containerized yet — it runs as a host process
-# (./tbot/run.sh) and this just bind-mounts its output directory in
-# read-only. Containerizing tbot as a proper sidecar (its own image,
-# writing to a shared volume instead of a host bind mount) is the natural
-# next step once we've picked a Teleport image/tag to pin to.
+# tbot generates ssh_config with IdentityFile/CertificateFile/
+# UserKnownHostsFile baked in as absolute paths under --destination — both
+# containers mount that output at the same internal path (/tbot-data) so
+# those paths resolve identically in whichever container reads the file.
+# fleet/hosts.yaml's ssh.config_file should point at /tbot-data/ssh_config.
 #
-# Mounted at the SAME absolute path it lives at on the host: the
-# ssh_config tbot generates has IdentityFile/CertificateFile/
-# UserKnownHostsFile baked in as absolute paths under its --destination
-# dir, so the mount target has to match rather than get remapped — this
-# also means fleet/hosts.yaml's ssh.config_file works unchanged in and
-# out of the container. Fragile across machines (see README note); fine
-# for running Beacon on the same box as its tbot.
+# tbot needs a join token only once, ever: `tctl bots add beacon
+# --roles=agent` on the cluster, then either pass it as TBOT_TOKEN the
+# first time this comes up, or (as here) just reuse an already-established
+# ./tbot/storage from a prior `tbot/run.sh` — tbot renews from its own
+# stored identity after that and never needs the token again.
 services:
+  tbot:
+    build: ./tbot
+    volumes:
+      - ./tbot/data:/tbot-data
+      - ./tbot/storage:/tbot-storage
+    command:
+      - start
+      - identity
+      - --destination=file:///tbot-data
+      - --storage=file:///tbot-storage
+      - --proxy-server=teleport.cqre.net:443
+      - --join-method=token
+    restart: unless-stopped
+
   beacon:
     build: .
     ports:
       - "8642:8642"
     volumes:
       - ./fleet:/app/fleet
-      - ./tbot/data:/Users/avedelphina/Local/CQRE-Product/beacon/tbot/data:ro
+      - ./tbot/data:/tbot-data:ro
+    depends_on:
+      - tbot
+    restart: unless-stopped
+
+  mcp:
+    build: ./mcp
+    environment:
+      - BEACON_URL=http://beacon:8642
+    ports:
+      - "8643:8643"
+    depends_on:
+      - beacon
     restart: unless-stopped

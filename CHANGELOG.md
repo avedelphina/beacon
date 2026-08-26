@@ -5,6 +5,24 @@ Versioning follows [Semantic Versioning](https://semver.org/) once there's
 an API worth being stable about — pre-1.0, breaking changes can land in a
 minor bump.
 
+## [0.2.0] — 2026-08-26
+
+### Added
+
+- tbot Machine ID sidecar (`tbot/Dockerfile`, `tbot` service in
+  `docker-compose.yml`) — no longer a bare host process the container just
+  reads from. Verified live: handed an already-established `tbot/storage`
+  identity from a running host process to the container mid-session and it
+  renewed clean (generation 4 → 5), no clone-detection lockout.
+- MCP server (`mcp/server.py`, `mcp` service, port 8643) exposing the fleet
+  over the Model Context Protocol — a thin client of Beacon's own HTTP API.
+  Read tools (status/logs/list/reconcile-check/config-diff) unrestricted;
+  mutating tools (deploy/apply_fix/push_config/decommission) require an
+  explicit `confirm=true`, describing the action instead of taking it
+  otherwise. Verified live against a real MCP client: tool listing,
+  annotations, all 13 real fleet agents round-tripped correctly, confirm
+  gating held on both `deploy` and `decommission`.
+
 ## [0.1.0] — 2026-08-26
 
 Initial build: a working fleet console for Hermes agents, end to end.
