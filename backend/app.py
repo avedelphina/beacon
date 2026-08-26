@@ -18,7 +18,7 @@ class DecommissionRequest(BaseModel):
     purge: bool = False
     remove_user: bool = False
 
-app = FastAPI(title="Beacon", version="0.1.0")
+app = FastAPI(title="Beacon", version="0.3.0")
 
 app.include_router(auth.router)
 app.add_middleware(auth.AuthMiddleware)
