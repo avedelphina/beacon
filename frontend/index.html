@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beacon</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="dot"></span>BEACON</div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="hosts">Hosts</button>
+    <button class="tab" data-tab="agents">Agents</button>
+  </nav>
+</header>
+
+<main class="page">
+
+  <section id="hosts-view" class="view active">
+    <div class="view-head">
+      <h1>Hosts</h1>
+      <button class="btn primary" id="add-host">+ Add host</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Address</th><th>SSH user</th><th>Key</th><th>Port</th><th>Tags</th><th></th></tr></thead>
+        <tbody id="hosts-body"></tbody>
+      </table>
+    </div>
+    <p class="empty" id="hosts-empty" hidden>No hosts yet. Add one to get started.</p>
+  </section>
+
+  <section id="agents-view" class="view">
+    <div class="view-head">
+      <h1>Agents</h1>
+      <button class="btn primary" id="add-agent">+ Add agent</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Status</th><th>ID</th><th>Type</th><th>Host</th><th>Profile</th><th>Owner</th><th></th></tr></thead>
+        <tbody id="agents-body"></tbody>
+      </table>
+    </div>
+    <p class="empty" id="agents-empty" hidden>No agents yet. Add one to get started.</p>
+  </section>
+
+</main>
+
+<div class="modal-backdrop" id="host-modal">
+  <form class="modal" id="host-form">
+    <h2 id="host-modal-title">Add host</h2>
+    <label>ID <span class="hint">(lowercase, letters/numbers/dashes)</span>
+      <input name="id" required pattern="[a-z0-9][a-z0-9-]*">
+    </label>
+    <label>Address <input name="address" required placeholder="10.20.4.11"></label>
+    <div class="field-row">
+      <label>SSH user <input name="ssh_user" required placeholder="deploy"></label>
+      <label>SSH port <input name="ssh_port" type="number" value="22" required></label>
+    </div>
+    <label>SSH key path <input name="ssh_key" required placeholder="~/.ssh/fleet_ed25519"></label>
+    <label>Tags <span class="hint">(comma separated)</span> <input name="tags" placeholder="prod, edge, eu"></label>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary">Save</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal-backdrop" id="agent-modal">
+  <form class="modal" id="agent-form">
+    <h2 id="agent-modal-title">Add agent</h2>
+    <label>ID <span class="hint">(lowercase, letters/numbers/dashes)</span>
+      <input name="id" required pattern="[a-z0-9][a-z0-9-]*">
+    </label>
+    <div class="field-row">
+      <label>Type <input name="type" required value="hermes"></label>
+      <label>Profile <input name="profile" placeholder="primary"></label>
+    </div>
+    <label>Host <select name="host" id="agent-host-select" required></select></label>
+    <label>Owner <input name="owner" placeholder="tom"></label>
+    <label>Notes <input name="notes"></label>
+    <label>Desired config <span class="hint">(JSON)</span>
+      <textarea name="desired" rows="14" spellcheck="false">{
+  "install_mode": "simple",
+  "os_user": "",
+  "service": "",
+  "log_path": "",
+  "config": {},
+  "env_keys": []
+}</textarea>
+    </label>
+    <p class="hint" style="margin:-0.3rem 0 0">install_mode: simple | add-profile | new-user. "config" is the config.yaml keys Beacon manages (e.g. {"model":{"default":"..."}}) — Check drift / Push only look at what's declared here. "env_keys" lists expected .env key names only, values never leave the host.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary">Save</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal-backdrop" id="inspect-modal">
+  <div class="modal">
+    <h2 id="inspect-title">Inspect</h2>
+    <div id="inspect-status" class="inspect-status"></div>
+    <div class="inspect-logs-head">
+      <span class="hint">Logs</span>
+      <button type="button" class="link-btn" id="inspect-load-logs">Load logs</button>
+    </div>
+    <pre id="inspect-logs" class="inspect-logs">—</pre>
+    <div class="inspect-logs-head">
+      <span class="hint">Config</span>
+      <button type="button" class="link-btn" id="inspect-config-diff">Check drift</button>
+    </div>
+    <div id="inspect-config-results" class="reconcile-results"></div>
+    <div class="inspect-logs-head">
+      <span class="hint"></span>
+      <button type="button" class="link-btn" id="inspect-config-push">Push config</button>
+    </div>
+    <pre id="inspect-config-push-output" class="inspect-logs" hidden></pre>
+
+    <div class="inspect-logs-head">
+      <span class="hint">Reconcile</span>
+      <button type="button" class="link-btn" id="inspect-reconcile">Check</button>
+    </div>
+    <div id="inspect-reconcile-results" class="reconcile-results"></div>
+
+    <div class="inspect-logs-head">
+      <span class="hint">Deploy</span>
+      <button type="button" class="link-btn" id="inspect-deploy">Run deploy</button>
+    </div>
+    <pre id="inspect-deploy-output" class="inspect-logs" hidden></pre>
+
+    <div class="inspect-logs-head">
+      <span class="hint">Decommission</span>
+      <button type="button" class="link-btn danger" id="inspect-decommission">Decommission…</button>
+    </div>
+    <pre id="inspect-decommission-output" class="inspect-logs" hidden></pre>
+
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+hosts:
+  # Direct SSH with a static key.
+  - id: edge-01
+    address: 10.20.4.11
+    ssh:
+      user: deploy
+      key: ~/.ssh/fleet_ed25519
+      port: 22
+    tags: [prod, edge]
+
+  # Via a Teleport tbot identity instead — see tbot/README.md. address is
+  # the Teleport-qualified node name; config_file replaces key entirely.
+  - id: alice
+    address: alice.teleport.example.com
+    ssh:
+      user: deploy
+      config_file: /absolute/path/to/tbot/data/ssh_config
+      port: 22
+    tags: [prod, teleport]

@@ -1,0 +1,22 @@
+# tbot itself is not containerized yet — it runs as a host process
+# (./tbot/run.sh) and this just bind-mounts its output directory in
+# read-only. Containerizing tbot as a proper sidecar (its own image,
+# writing to a shared volume instead of a host bind mount) is the natural
+# next step once we've picked a Teleport image/tag to pin to.
+#
+# Mounted at the SAME absolute path it lives at on the host: the
+# ssh_config tbot generates has IdentityFile/CertificateFile/
+# UserKnownHostsFile baked in as absolute paths under its --destination
+# dir, so the mount target has to match rather than get remapped — this
+# also means fleet/hosts.yaml's ssh.config_file works unchanged in and
+# out of the container. Fragile across machines (see README note); fine
+# for running Beacon on the same box as its tbot.
+services:
+  beacon:
+    build: .
+    ports:
+      - "8642:8642"
+    volumes:
+      - ./fleet:/app/fleet
+      - ./tbot/data:/Users/avedelphina/Local/CQRE-Product/beacon/tbot/data:ro
+    restart: unless-stopped
