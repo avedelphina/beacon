@@ -50,6 +50,21 @@ const api = {
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     return r.json();
   },
+  async restart(id) {
+    const r = await fetch(`/api/agents/${id}/restart`, { method: "POST" });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+  },
+  async listPlugins(id) {
+    const r = await fetch(`/api/agents/${id}/plugins`);
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+  },
+  async updatePlugin(id, plugin) {
+    const r = await fetch(`/api/agents/${id}/plugins/${plugin}/update`, { method: "POST" });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+  },
 };
 
 function statusPill(state) {
@@ -215,6 +230,13 @@ async function openInspect(id) {
   const deployOut = document.getElementById("inspect-deploy-output");
   deployOut.hidden = true;
   deployOut.textContent = "";
+  const restartOut = document.getElementById("inspect-restart-output");
+  restartOut.hidden = true;
+  restartOut.textContent = "";
+  document.getElementById("inspect-plugins-results").innerHTML = "";
+  const updateAgentOut = document.getElementById("inspect-update-agent-output");
+  updateAgentOut.hidden = true;
+  updateAgentOut.textContent = "";
   document.getElementById("inspect-reconcile-results").innerHTML = "";
   document.getElementById("inspect-config-results").innerHTML = "";
   const configPushOut = document.getElementById("inspect-config-push-output");
@@ -388,6 +410,109 @@ document.getElementById("inspect-deploy").addEventListener("click", async (e) =>
   } finally {
     btn.disabled = false;
     refreshStatuses(await api.list("agents"));
+  }
+});
+
+document.getElementById("inspect-restart").addEventListener("click", async (e) => {
+  if (!currentInspectId) return;
+  if (!confirm(`Restart ${currentInspectId}'s gateway?`)) return;
+  const btn = e.target;
+  const out = document.getElementById("inspect-restart-output");
+  out.hidden = false;
+  out.textContent = "restarting…";
+  btn.disabled = true;
+  try {
+    const result = await api.restart(currentInspectId);
+    out.textContent = result.output || (result.ok ? "done" : "failed");
+  } catch (err) {
+    out.textContent = `[error] ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    refreshStatuses(await api.list("agents"));
+  }
+});
+
+function renderPlugins(plugins) {
+  const el = document.getElementById("inspect-plugins-results");
+  el.innerHTML = "";
+  if (!plugins.length) {
+    el.innerHTML = '<div class="finding info"><span class="sev"></span><span class="summary">no plugins</span></div>';
+    return;
+  }
+  const sevFor = { enabled: "ok", disabled: "warn" };
+  for (const p of plugins) {
+    const row = document.createElement("div");
+    row.className = `finding ${sevFor[p.status] || "info"}`;
+    const canUpdate = p.source === "git";
+    row.innerHTML = `
+      <span class="sev"></span>
+      <span class="summary"><code>${p.name}</code> v${p.version} — ${p.status} (${p.source})</span>
+      ${canUpdate ? `<button type="button" class="link-btn" data-update-plugin="${p.name}">Update</button>` : ""}
+    `;
+    el.appendChild(row);
+  }
+  el.querySelectorAll("[data-update-plugin]").forEach((btn) =>
+    btn.addEventListener("click", () => runUpdatePlugin(btn.dataset.updatePlugin, btn))
+  );
+}
+
+async function runListPlugins() {
+  if (!currentInspectId) return;
+  const el = document.getElementById("inspect-plugins-results");
+  el.innerHTML = '<div class="finding info"><span class="sev"></span><span class="summary">loading…</span></div>';
+  try {
+    renderPlugins(await api.listPlugins(currentInspectId));
+  } catch (err) {
+    el.innerHTML = `<div class="finding critical"><span class="sev"></span><span class="summary">${err.message}</span></div>`;
+  }
+}
+
+document.getElementById("inspect-plugins-list").addEventListener("click", runListPlugins);
+
+async function runUpdatePlugin(plugin, btn) {
+  if (!currentInspectId) return;
+  if (!confirm(`Update plugin "${plugin}" on ${currentInspectId}? Note: if the update trips Hermes's own security scan, it can auto-disable the plugin — including a live messaging platform.`)) return;
+  btn.disabled = true;
+  btn.textContent = "updating…";
+  try {
+    const result = await api.updatePlugin(currentInspectId, plugin);
+    if (result.disabled_by_scan) {
+      alert(`Update ran, but Hermes's security scan flagged the new code and auto-disabled "${plugin}". If it served a messaging platform, that platform is now down. Review the findings on the host, then re-enable manually if you trust them.\n\n${result.output}`);
+    } else if (!result.ok) {
+      alert(`Update failed:\n${result.output}`);
+    }
+  } catch (err) {
+    alert(err.message);
+  }
+  await runListPlugins();
+}
+
+document.getElementById("inspect-update-agent").addEventListener("click", async (e) => {
+  if (!currentInspectId) return;
+  if (!confirm(`Update hermes itself on ${currentInspectId}'s host? This updates the shared code checkout — every profile on that install is affected, not just this one.`)) return;
+  const btn = e.target;
+  const out = document.getElementById("inspect-update-agent-output");
+  out.hidden = false;
+  out.textContent = "";
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`/api/agents/${currentInspectId}/update`, { method: "POST" });
+    if (!resp.ok) {
+      out.textContent = `[error] ${(await resp.json()).detail || resp.statusText}`;
+      return;
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out.textContent += decoder.decode(value, { stream: true });
+      out.scrollTop = out.scrollHeight;
+    }
+  } catch (err) {
+    out.textContent += `\n[error] ${err.message}`;
+  } finally {
+    btn.disabled = false;
   }
 });
 

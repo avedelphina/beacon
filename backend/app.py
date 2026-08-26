@@ -18,7 +18,7 @@ class DecommissionRequest(BaseModel):
     purge: bool = False
     remove_user: bool = False
 
-app = FastAPI(title="Beacon", version="0.3.0")
+app = FastAPI(title="Beacon", version="0.4.0")
 
 app.include_router(auth.router)
 app.add_middleware(auth.AuthMiddleware)
@@ -110,6 +110,30 @@ def get_agent_logs(id_: str, lines: int = 200) -> dict:
     return {"text": driver.logs(agent, host, lines=lines)}
 
 
+@app.get("/api/agents/{id_}/plugins")
+def get_agent_plugins(id_: str) -> list[dict]:
+    agent = store.get_agent(id_)
+    host = store.get_host(agent.host)
+    driver = get_driver(agent.type)
+    return driver.list_plugins(agent, host)
+
+
+@app.post("/api/agents/{id_}/plugins/{plugin}/update")
+def update_agent_plugin(id_: str, plugin: str) -> dict:
+    agent = store.get_agent(id_)
+    host = store.get_host(agent.host)
+    driver = get_driver(agent.type)
+    return driver.update_plugin(agent, host, plugin)
+
+
+@app.post("/api/agents/{id_}/restart")
+def restart_agent(id_: str) -> dict:
+    agent = store.get_agent(id_)
+    host = store.get_host(agent.host)
+    driver = get_driver(agent.type)
+    return driver.restart(agent, host)
+
+
 @app.post("/api/agents/{id_}/deploy")
 def deploy_agent(id_: str) -> StreamingResponse:
     agent = store.get_agent(id_)
@@ -121,6 +145,27 @@ def deploy_agent(id_: str) -> StreamingResponse:
     # validation error (e.g. bad install_mode) raises synchronously and comes
     # back as a clean 400 instead of surfacing mid-stream after a 200 already
     # went out.
+    try:
+        first = next(gen)
+    except StopIteration:
+        first = None
+
+    def body():
+        if first is not None:
+            yield first + "\n"
+        for line in gen:
+            yield line + "\n"
+
+    return StreamingResponse(body(), media_type="text/plain")
+
+
+@app.post("/api/agents/{id_}/update")
+def update_agent(id_: str) -> StreamingResponse:
+    agent = store.get_agent(id_)
+    host = store.get_host(agent.host)
+    driver = get_driver(agent.type)
+    gen = driver.update_agent(agent, host)
+
     try:
         first = next(gen)
     except StopIteration:

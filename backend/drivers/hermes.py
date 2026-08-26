@@ -483,11 +483,83 @@ def _fix_command(agent: Agent, fix: str) -> str:
     raise ValueError(f"unknown fix {fix!r}, must be one of {sorted(FIXES)}")
 
 
-def apply_fix(agent: Agent, host: Host, fix: str) -> dict:
-    _validate_agent(agent)
-    inner = f"{RUNTIME_ENV}; {PATH_PREFIX}; {_fix_command(agent, fix)}"
-    result = ssh.run(host, _wrap_for_user(agent, host, inner), timeout=60)
+def _run_command(agent: Agent, host: Host, command: str, timeout: int = 60) -> dict:
+    inner = f"{RUNTIME_ENV}; {PATH_PREFIX}; {command}"
+    result = ssh.run(host, _wrap_for_user(agent, host, inner), timeout=timeout)
 
     if result.returncode is None or result.returncode == 255:
         return {"ok": False, "output": result.stderr.strip() or "ssh connection failed"}
     return {"ok": result.ok, "output": (result.stdout + result.stderr).strip()}
+
+
+def apply_fix(agent: Agent, host: Host, fix: str) -> dict:
+    _validate_agent(agent)
+    return _run_command(agent, host, _fix_command(agent, fix))
+
+
+def restart(agent: Agent, host: Host) -> dict:
+    """Plain `gateway restart` — the everyday operate action, distinct from
+    reconcile's problem-triggered fixes (works regardless of current state).
+    Longer timeout than _run_command's default: a graceful restart drains
+    the old process and waits for the new one to report runtime-ready,
+    which took longer than 60s in practice.
+    """
+    _validate_agent(agent)
+    return _run_command(agent, host, f"{_cmd_prefix(agent)} gateway restart", timeout=120)
+
+
+PLUGIN_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+
+def list_plugins(agent: Agent, host: Host) -> list[dict]:
+    _validate_agent(agent)
+    result = _run_command(agent, host, f"{_cmd_prefix(agent)} plugins list --json", timeout=30)
+    if not result["ok"]:
+        raise RuntimeError(result["output"])
+    try:
+        return json.loads(result["output"])
+    except json.JSONDecodeError:
+        if "No plugins installed" in result["output"]:
+            return []
+        raise RuntimeError(f"couldn't parse plugin list: {result['output']}")
+
+
+def update_plugin(agent: Agent, host: Host, plugin: str) -> dict:
+    """Note: `name` from list_plugins() is the manifest name, which isn't
+    always what `plugins update` expects — it wants the installed directory
+    name (e.g. list_plugins reports "deltachat", the update target is
+    "deltachat-platform"). Found on a real box; there's no clean way to
+    resolve one from the other short of guessing, so the caller needs the
+    "source"/install-dir identifier, not the display name.
+    """
+    _validate_agent(agent)
+    if not PLUGIN_NAME_RE.match(plugin):
+        raise ValueError(f"plugin name {plugin!r} must match {PLUGIN_NAME_RE.pattern}")
+    result = _run_command(agent, host, f"{_cmd_prefix(agent)} plugins update {shlex.quote(plugin)}", timeout=90)
+    # An update can introduce a new revision that Hermes's own security scan
+    # flags — real box, real example: the scanner's traversal/exfiltration
+    # heuristics fired on a plugin's own test fixtures (strings like
+    # "../../../etc/passwd" as TEST DATA for path-traversal *prevention*
+    # tests), and Hermes auto-disabled the plugin as a result — silently
+    # taking down whatever platform it served until someone notices and
+    # re-enables it. Surface that as a first-class flag, not something
+    # buried in a wall of scan-report text.
+    result["disabled_by_scan"] = "has been disabled" in result["output"]
+    return result
+
+
+def update_agent(agent: Agent, host: Host) -> Iterator[str]:
+    """`hermes update` — the shared code checkout, not a per-profile thing
+    (matches how a real box showed the same code-level bug across every
+    profile sharing one install). Runs as whichever OS user this agent's
+    install actually lives under, not scoped by -p profile.
+    """
+    _validate_agent(agent)
+    script = f"""\
+{RUNTIME_ENV}
+{PATH_PREFIX}
+echo "[beacon] updating hermes"
+hermes update --yes
+echo "[beacon] done"
+"""
+    yield from ssh.stream_script(host, _wrap_for_user(agent, host, script), timeout=300)

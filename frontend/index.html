@@ -114,6 +114,24 @@
       <button type="button" class="link-btn" id="inspect-load-logs">Load logs</button>
     </div>
     <pre id="inspect-logs" class="inspect-logs">—</pre>
+
+    <div class="inspect-logs-head">
+      <span class="hint">Operate</span>
+      <button type="button" class="link-btn" id="inspect-restart">Restart gateway</button>
+    </div>
+    <div id="inspect-restart-output" class="inspect-status" hidden></div>
+
+    <div class="inspect-logs-head">
+      <span class="hint">Plugins</span>
+      <button type="button" class="link-btn" id="inspect-plugins-list">List plugins</button>
+    </div>
+    <div id="inspect-plugins-results" class="reconcile-results"></div>
+    <div class="inspect-logs-head">
+      <span class="hint"></span>
+      <button type="button" class="link-btn" id="inspect-update-agent">Update hermes…</button>
+    </div>
+    <pre id="inspect-update-agent-output" class="inspect-logs" hidden></pre>
+
     <div class="inspect-logs-head">
       <span class="hint">Config</span>
       <button type="button" class="link-btn" id="inspect-config-diff">Check drift</button>

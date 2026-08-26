@@ -14,8 +14,14 @@ import os
 import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 BEACON_URL = os.environ.get("BEACON_URL", "http://beacon:8642")
+# A static shared-secret bearer token, not OIDC — MCP clients are typically
+# configured with a fixed API key, not walked through a browser login.
+# Unset, this runs open (same opt-in-via-env convention as backend/auth.py).
+BEACON_MCP_TOKEN = os.environ.get("BEACON_MCP_TOKEN")
 
 mcp = MCPServer("beacon", instructions=__doc__)
 
@@ -23,14 +29,20 @@ READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 DESTRUCTIVE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False)
 
 
+# Same token as BearerAuthMiddleware requires of MCP's own callers, reused
+# here as MCP's credential when it in turn calls Beacon — Beacon's own
+# AuthMiddleware accepts it exactly the same way (see backend/auth.py).
+_BEACON_HEADERS = {"Authorization": f"Bearer {BEACON_MCP_TOKEN}"} if BEACON_MCP_TOKEN else {}
+
+
 async def _get(path: str, **params) -> object:
-    async with httpx.AsyncClient(base_url=BEACON_URL, timeout=30) as client:
+    async with httpx.AsyncClient(base_url=BEACON_URL, timeout=30, headers=_BEACON_HEADERS) as client:
         r = await client.get(path, params=params)
     return _unwrap(r)
 
 
 async def _post(path: str, json: dict | None = None, timeout: float = 120) -> object:
-    async with httpx.AsyncClient(base_url=BEACON_URL, timeout=timeout) as client:
+    async with httpx.AsyncClient(base_url=BEACON_URL, timeout=timeout, headers=_BEACON_HEADERS) as client:
         r = await client.post(path, json=json or {})
     return _unwrap(r)
 
@@ -149,5 +161,53 @@ async def decommission(agent_id: str, purge: bool = False, remove_user: bool = F
     return await _post(f"/api/agents/{agent_id}/decommission", json={"purge": purge, "remove_user": remove_user})
 
 
+@mcp.tool(annotations=READ_ONLY)
+async def list_plugins(agent_id: str) -> object:
+    """List an agent's installed plugins — name, version, enabled/disabled, source."""
+    return await _get(f"/api/agents/{agent_id}/plugins")
+
+
+@mcp.tool(annotations=DESTRUCTIVE)
+async def restart(agent_id: str, confirm: bool = False) -> object:
+    """Restart an agent's gateway service. Requires confirm=true."""
+    if not confirm:
+        return f"Would restart {agent_id!r}. Call again with confirm=true to actually run it."
+    return await _post(f"/api/agents/{agent_id}/restart")
+
+
+@mcp.tool(annotations=DESTRUCTIVE)
+async def update_plugin(agent_id: str, plugin: str, confirm: bool = False) -> object:
+    """Update one installed plugin (git pull) by name — see list_plugins for names.
+    Requires confirm=true."""
+    if not confirm:
+        return f"Would update plugin {plugin!r} on {agent_id!r}. Call again with confirm=true to actually run it."
+    return await _post(f"/api/agents/{agent_id}/plugins/{plugin}/update")
+
+
+@mcp.tool(annotations=DESTRUCTIVE)
+async def update_agent(agent_id: str, confirm: bool = False) -> str:
+    """Update Hermes itself (`hermes update`) on the agent's shared code checkout —
+    affects every profile on that install, not just this one. Requires confirm=true."""
+    if not confirm:
+        return f"Would run `hermes update` for {agent_id!r} (affects every profile sharing its install). Call again with confirm=true to actually run it."
+    return await _post(f"/api/agents/{agent_id}/update", timeout=300)
+
+
+class BearerAuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        if not BEACON_MCP_TOKEN:
+            return await call_next(request)
+        if request.headers.get("authorization") != f"Bearer {BEACON_MCP_TOKEN}":
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return await call_next(request)
+
+
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=8643)
+    import uvicorn
+
+    if not BEACON_MCP_TOKEN:
+        print("[mcp] WARNING: BEACON_MCP_TOKEN not set — running with no auth", flush=True)
+
+    http_app = mcp.streamable_http_app(host="0.0.0.0")
+    http_app.add_middleware(BearerAuthMiddleware)
+    uvicorn.run(http_app, host="0.0.0.0", port=8643)

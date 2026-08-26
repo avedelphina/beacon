@@ -35,6 +35,7 @@ services:
       - ZITADEL_ISSUER=${ZITADEL_ISSUER:-}
       - ZITADEL_CLIENT_ID=${ZITADEL_CLIENT_ID:-}
       - BEACON_SESSION_SECRET=${BEACON_SESSION_SECRET:-}
+      - BEACON_MCP_TOKEN=${BEACON_MCP_TOKEN:-}
     depends_on:
       - tbot
     restart: unless-stopped
@@ -43,6 +44,7 @@ services:
     build: ./mcp
     environment:
       - BEACON_URL=http://beacon:8642
+      - BEACON_MCP_TOKEN=${BEACON_MCP_TOKEN:-}
     ports:
       - "8643:8643"
     depends_on:

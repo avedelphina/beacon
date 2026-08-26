@@ -119,6 +119,9 @@ stale in that direction.
 | **Troubleshoot** | Recent log tail — the app-level log file, falling back to `journalctl` when a unit has never started successfully. | `GET /api/agents/{id}/logs` |
 | **Reconcile** | Diagnoses drift patterns found in the wild — an orphaned unit (profile dir deleted, unit left behind), a unit stuck `failed`, installed-but-not-started, linger disabled. Dry run by default; each finding names a `fix` to apply individually. | `GET` (dry run) / `POST` (apply one fix) `/api/agents/{id}/reconcile` |
 | **Config** | Compares `desired.config`/`desired.env_keys` against the live `config.yaml` and `.env` **key names only** (secret values never leave the host). Push runs `hermes config set` per declared key, then restarts the gateway if it's active. | `GET`/`POST /api/agents/{id}/config-diff` |
+| **Plugins** | Lists installed plugins with version, enabled/disabled state, and source. Updating one (git pull) can trip Hermes's own security scan and auto-disable it — that's surfaced as a `disabled_by_scan` flag, not left buried in scan-report text, because it silently took a live messaging platform offline once already in testing. | `GET /api/agents/{id}/plugins`, `POST /api/agents/{id}/plugins/{name}/update` |
+| **Restart** | Plain `gateway restart` — the everyday operate action, works regardless of current state. Distinct from Reconcile's problem-triggered fixes. | `POST /api/agents/{id}/restart` |
+| **Update** | `hermes update` on the shared code checkout — affects every profile on that install, not just one agent's record of it. Streamed. | `POST /api/agents/{id}/update` |
 | **Decommission** | Stops and uninstalls the gateway, optionally purges the profile's data (refused for the default profile — that directory is shared with every other profile on the install) and optionally deletes the OS account. Moves the YAML record to `fleet/decommissioned/` rather than deleting it. | `POST /api/agents/{id}/decommission` (streamed) |
 
 ## Teleport / tbot
@@ -209,11 +212,11 @@ holding `sub`/`email`/`name` from the verified ID token — no server-side
 session store, no database. The GUI shows who's logged in top-right with a
 logout link once `/auth/me` returns a user.
 
-**Not covered here**: the MCP server (`mcp/server.py`) has no auth yet —
-it's a separate problem (service-to-service, not a browser redirect flow;
-Zitadel service-user client_credentials for this instance is still being
-debugged). Don't expose port 8643 beyond a trusted network until that's
-sorted.
+The MCP server has its own auth — see [MCP server](#mcp-server) — a static
+`BEACON_MCP_TOKEN` rather than OIDC, since Zitadel service-user
+`client_credentials` for this instance never got resolved (see the v0.3.0
+changelog entry) and a static API key is the more natural fit for MCP
+clients anyway.
 
 ## MCP server
 
@@ -225,20 +228,34 @@ Runs as its own service (`docker compose up` starts it on `:8643`, endpoint
 Two tiers, matching the API's own read/write split:
 
 - **Read-only** (`list_hosts`, `list_agents`, `get_agent`, `get_status`,
-  `get_logs`, `reconcile_check`, `config_diff`) — unrestricted. An agent
-  asking "what's broken" is exactly what Beacon is for.
-- **Mutating** (`deploy`, `apply_fix`, `push_config`, `decommission`) — each
-  takes a `confirm: bool = False` parameter. Called without it, the tool
-  describes what it *would* do and does nothing; only `confirm=true`
-  actually runs it. This is on top of whatever confirmation UI the MCP
-  client itself provides (tools are also annotated `destructiveHint=true`
-  for clients that read that) — a misread instruction here is a much worse
-  failure mode than a misclick, so it gets two independent gates, not one.
+  `get_logs`, `reconcile_check`, `config_diff`, `list_plugins`) —
+  unrestricted. An agent asking "what's broken" is exactly what Beacon is
+  for.
+- **Mutating** (`deploy`, `apply_fix`, `push_config`, `decommission`,
+  `restart`, `update_plugin`, `update_agent`) — each takes a
+  `confirm: bool = False` parameter. Called without it, the tool describes
+  what it *would* do and does nothing; only `confirm=true` actually runs
+  it. This is on top of whatever confirmation UI the MCP client itself
+  provides (tools are also annotated `destructiveHint=true` for clients
+  that read that) — a misread instruction here is a much worse failure
+  mode than a misclick, so it gets two independent gates, not one.
 
 Point any MCP client at `http://localhost:8643/mcp` (or `http://mcp:8643/mcp`
 from inside the compose network). `BEACON_URL` env var controls which
 Beacon instance it talks to (defaults to `http://beacon:8642`, the compose
 service name).
+
+**Auth**: set `BEACON_MCP_TOKEN` (see `.env.example`) and every request to
+the MCP server needs `Authorization: Bearer <token>` — a static shared
+secret, not OIDC, since MCP clients are typically configured with a fixed
+API key rather than walked through a browser login. Unset, MCP runs open,
+same convention as everything else here. The same token doubles as MCP's
+own credential when it calls *Beacon's* API on your behalf: once
+`ZITADEL_ISSUER`/`ZITADEL_CLIENT_ID` are set, Beacon requires a session for
+everything, and a service has no browser to complete a PKCE redirect with —
+`Authorization: Bearer <BEACON_MCP_TOKEN>` is accepted by Beacon's own
+auth middleware as an alternative to a session cookie, scoped to exactly
+this one credential.
 
 ## API reference
 
@@ -251,6 +268,10 @@ service name).
 | `POST` | `/api/agents/{id}/deploy` | Install/bring up (streamed) |
 | `GET`/`POST` | `/api/agents/{id}/reconcile` | Diagnose / apply one fix (`{"fix": "..."}`) |
 | `GET`/`POST` | `/api/agents/{id}/config-diff` | Compare / push desired config |
+| `GET` | `/api/agents/{id}/plugins` | List installed plugins (name, version, status, source) |
+| `POST` | `/api/agents/{id}/plugins/{name}/update` | Update one plugin (git pull) |
+| `POST` | `/api/agents/{id}/restart` | Restart the gateway |
+| `POST` | `/api/agents/{id}/update` | `hermes update` on the shared install (streamed) |
 | `POST` | `/api/agents/{id}/decommission` | Tear down (`{"purge": bool, "remove_user": bool}`, streamed) |
 
 ## Project layout

@@ -20,6 +20,12 @@ ZITADEL_ISSUER = os.environ.get("ZITADEL_ISSUER", "").rstrip("/")
 ZITADEL_CLIENT_ID = os.environ.get("ZITADEL_CLIENT_ID", "")
 AUTH_ENABLED = bool(ZITADEL_ISSUER and ZITADEL_CLIENT_ID)
 
+# The same static token the MCP server requires of its own callers doubles
+# as its credential for calling *this* API — a service has no browser to
+# complete a PKCE redirect with, so it can't hold a session cookie the
+# normal way. Bearer <this token> on any /api/* request stands in for one.
+MCP_TOKEN = os.environ.get("BEACON_MCP_TOKEN")
+
 SESSION_SECRET = os.environ.get("BEACON_SESSION_SECRET")
 if not SESSION_SECRET:
     if AUTH_ENABLED:
@@ -128,6 +134,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not AUTH_ENABLED or request.url.path.startswith("/auth/"):
             return await call_next(request)
         if request.session.get("user"):
+            return await call_next(request)
+        if MCP_TOKEN and request.headers.get("authorization") == f"Bearer {MCP_TOKEN}":
             return await call_next(request)
         if request.url.path.startswith("/api/"):
             return JSONResponse({"detail": "not authenticated"}, status_code=401)

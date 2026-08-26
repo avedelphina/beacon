@@ -5,6 +5,53 @@ Versioning follows [Semantic Versioning](https://semver.org/) once there's
 an API worth being stable about — pre-1.0, breaking changes can land in a
 minor bump.
 
+## [0.4.0] — 2026-08-27
+
+### Added
+
+- MCP server auth: `BEACON_MCP_TOKEN`, a static bearer token rather than
+  OIDC (Zitadel service-user `client_credentials` for this instance never
+  got resolved — see the v0.3.0 entry). Same token doubles as MCP's own
+  credential when it calls Beacon's API, since a service has no browser to
+  complete a PKCE redirect with — Beacon's `AuthMiddleware` now accepts
+  `Authorization: Bearer <BEACON_MCP_TOKEN>` as an alternative to a session.
+- Plugins: `list_plugins` (name, version, enabled/disabled, source — via
+  `hermes plugins list --json`) and `update_plugin` (git pull one plugin
+  by name), both in the API, GUI Inspect panel, and as MCP tools.
+- `restart` — plain `gateway restart`, the everyday operate action, distinct
+  from Reconcile's problem-triggered fixes.
+- `update_agent` — `hermes update --yes` on the shared code checkout,
+  streamed like Deploy.
+
+### Fixed / found during testing
+
+- **Real production impact**: updating `deltachat-platform` on a live agent
+  pulled a new upstream revision that tripped Hermes's own security scanner
+  (traversal/exfiltration heuristics fired on the plugin's own test
+  fixtures — strings like `"../../../etc/passwd"` used as test data for
+  path-traversal *prevention* tests). Hermes auto-disabled the plugin as a
+  result, silently taking the agent's only messaging channel offline.
+  Restored it (re-enable + restart) within about 90 seconds of noticing.
+  `update_plugin`'s result now carries a `disabled_by_scan` flag so this
+  shows up as a first-class warning instead of being buried in a wall of
+  scan-report text — the GUI alerts on it explicitly rather than requiring
+  the operator to read the output to notice their platform went dark.
+- `list_plugins`' `name` field (the plugin's manifest name) isn't always
+  what `plugins update` expects — it wants the installed directory name.
+  Real example: listed as `deltachat`, updated as `deltachat-platform`.
+  Documented on `update_plugin`; no clean way to resolve one from the other
+  short of guessing, so this is on the caller.
+- `restart`'s first live test timed out at the generic 60s default — a
+  graceful restart drains in-flight turns and waits for the new process to
+  report runtime-ready, which took longer in practice. Bumped to 120s.
+  (The CLI's own output names a much higher ceiling — "waiting up to 1815s
+  for in-flight turns + drain" — which 120s still doesn't cover; treating
+  that as an acceptable fast-path default rather than building full
+  progress streaming for a rare edge case.)
+- `docker-compose.yml` defined `BEACON_MCP_TOKEN` for the `mcp` service but
+  not `beacon` — the one that actually needs to check it. First integration
+  test failed with a 401 from Beacon's own API until this was caught.
+
 ## [0.3.0] — 2026-08-27
 
 ### Added
