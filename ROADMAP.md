@@ -48,7 +48,21 @@ earlier ones landed.
   session log, which doesn't know what Beacon actually did.
 - **Roles: viewer / operator / admin.** Every logged-in user currently has
   the same blast radius — full deploy/decommission/config-push power, no
-  read-only option.
+  read-only option. Note: this is a *human*-identity axis, distinct from
+  the tier registry (`backend/tiers.py`, added 0.5.0) — tier is
+  per-operation risk (restart vs. decommission), role is per-caller
+  privilege. They compose (an "operator" might be allowed T2-T3 but not
+  T4-T5) rather than one replacing the other. Also distinct from — and not
+  precluded by — the "no enterprise-grade RBAC" non-goal below: per-
+  operation tier gating isn't a permissions matrix, it's a risk
+  classification each capability already carries regardless of who's
+  calling.
+- **Agent-caller identity distinct from the human OIDC session and the
+  flat `BEACON_MCP_TOKEN`.** Needed for the tier model's T3 step (a second
+  reviewer) to mean anything — today every MCP-authenticated caller is
+  indistinguishable from every other, so Beacon has no way to tell a
+  proposing agent from a reviewing one. The target shape is scoped
+  per-agent capability credentials, not one shared token.
 - **Bulk actions** across the fleet table — reconcile everything, restart
   everything with drift — instead of one agent at a time.
 - **Per-agent history / timeline** of deploys, restarts, and config

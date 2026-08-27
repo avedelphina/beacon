@@ -6,6 +6,33 @@ an API worth being stable about — pre-1.0, breaking changes can land in a
 minor bump. See [README.md](README.md#limitations) for current limitations
 and [ROADMAP.md](ROADMAP.md) for what's planned.
 
+## [0.5.0] — 2026-08-27
+
+### Added
+
+- Tier registry (`backend/tiers.py`): every mutating capability mapped to a
+  T0-T5 autonomy tier — how much oversight it needs — with the rationale
+  for each assignment recorded alongside it. `GET /api/tiers` exposes the
+  registry; an MCP `list_tiers` read-only tool mirrors it.
+- `confirm=true` is now required by the API itself (not just the MCP
+  server) for every T2+ capability — `restart`, `apply_fix`, `push_config`,
+  `deploy`, `update_plugin`, `update_agent`, `decommission`. Without it, the
+  endpoint returns a 200 describing what it would do instead of running it.
+  Previously this was enforced only in `mcp/server.py`; a direct HTTP call
+  bypassed it entirely.
+- `decommission` escalates from T4 to T5 when `purge` or `remove_user` is
+  requested — those are irreversible; a bare stop+uninstall is not.
+
+### Changed
+
+- `mcp/server.py`'s mutating tools now pass `confirm=true` through to
+  Beacon's API once their own `confirm` check has passed, since the API
+  enforces the same gate independently now.
+- `frontend/app.js`'s risky-action buttons already ask via the browser's
+  native `confirm()` before calling the API — they now also send
+  `confirm: true` (or `?confirm=true`) so those calls still execute instead
+  of getting the new "would run" response back silently.
+
 ## [0.4.0] — 2026-08-27
 
 ### Added
