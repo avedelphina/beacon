@@ -119,7 +119,7 @@ stale in that direction.
 | **Troubleshoot** | Recent log tail — the app-level log file, falling back to `journalctl` when a unit has never started successfully. | `GET /api/agents/{id}/logs` |
 | **Reconcile** | Diagnoses drift patterns found in the wild — an orphaned unit (profile dir deleted, unit left behind), a unit stuck `failed`, installed-but-not-started, linger disabled. Dry run by default; each finding names a `fix` to apply individually. | `GET` (dry run) / `POST` (apply one fix) `/api/agents/{id}/reconcile` |
 | **Config** | Compares `desired.config`/`desired.env_keys` against the live `config.yaml` and `.env` **key names only** (secret values never leave the host). Push runs `hermes config set` per declared key, then restarts the gateway if it's active. | `GET`/`POST /api/agents/{id}/config-diff` |
-| **Plugins** | Lists installed plugins with version, enabled/disabled state, and source. Updating one (git pull) can trip Hermes's own security scan and auto-disable it — that's surfaced as a `disabled_by_scan` flag, not left buried in scan-report text, because it silently took a live messaging platform offline once already in testing. | `GET /api/agents/{id}/plugins`, `POST /api/agents/{id}/plugins/{name}/update` |
+| **Plugins** | Lists installed plugins with version, enabled/disabled state, and source. Updating one (git pull) can trip Hermes's own security scan and auto-disable it — that's surfaced as a `disabled_by_scan` flag rather than left buried in scan-report text, since an auto-disabled plugin can mean a messaging platform silently goes offline. | `GET /api/agents/{id}/plugins`, `POST /api/agents/{id}/plugins/{name}/update` |
 | **Restart** | Plain `gateway restart` — the everyday operate action, works regardless of current state. Distinct from Reconcile's problem-triggered fixes. | `POST /api/agents/{id}/restart` |
 | **Update** | `hermes update` on the shared code checkout — affects every profile on that install, not just one agent's record of it. Streamed. | `POST /api/agents/{id}/update` |
 | **Decommission** | Stops and uninstalls the gateway, optionally purges the profile's data (refused for the default profile — that directory is shared with every other profile on the install) and optionally deletes the OS account. Moves the YAML record to `fleet/decommissioned/` rather than deleting it. | `POST /api/agents/{id}/decommission` (streamed) |
@@ -151,9 +151,7 @@ unless `tbot/storage/` is wiped.
   `./tbot/storage`. First-ever run still needs a token — see
   [Quickstart → Docker](#docker) — every run after reuses stored state, no
   token needed, and both containers coming up fresh just resumes renewal
-  where it left off (confirmed: handing an established `./tbot/storage`
-  from a host-process run over to the container mid-session renewed clean,
-  generation N → N+1, no clone-detection lockout).
+  where it left off.
 - **Bare host process** (`./tbot/run.sh`) — useful for local (non-Docker)
   dev. Writes to the same `tbot/data`/`tbot/storage` layout.
 
@@ -213,10 +211,8 @@ session store, no database. The GUI shows who's logged in top-right with a
 logout link once `/auth/me` returns a user.
 
 The MCP server has its own auth — see [MCP server](#mcp-server) — a static
-`BEACON_MCP_TOKEN` rather than OIDC, since Zitadel service-user
-`client_credentials` for this instance never got resolved (see the v0.3.0
-changelog entry) and a static API key is the more natural fit for MCP
-clients anyway.
+`BEACON_MCP_TOKEN` rather than OIDC, since MCP clients are typically
+configured with a fixed API key rather than walked through a browser login.
 
 ## MCP server
 
@@ -273,6 +269,21 @@ this one credential.
 | `POST` | `/api/agents/{id}/restart` | Restart the gateway |
 | `POST` | `/api/agents/{id}/update` | `hermes update` on the shared install (streamed) |
 | `POST` | `/api/agents/{id}/decommission` | Tear down (`{"purge": bool, "remove_user": bool}`, streamed) |
+
+## Limitations
+
+- **Single writer.** `fleet/*.yaml` has no locking — fine for one operator,
+  not safe for two people editing the fleet at once.
+- **One driver.** Hermes is the only agent type implemented. The driver
+  interface is designed to support others; nothing has exercised that yet.
+- **No audit trail.** Every logged-in user has full deploy/config/
+  decommission power, and no record persists of who did what.
+- **Pull-based only.** Status and Reconcile run when requested — nothing
+  polls or alerts on its own.
+- **`ssh.config_file` paths are absolute and machine-specific** — see
+  [Teleport / tbot](#teleport--tbot).
+
+See [ROADMAP.md](ROADMAP.md) for what's planned to close these.
 
 ## Project layout
 
