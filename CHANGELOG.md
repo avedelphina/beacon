@@ -6,6 +6,16 @@ an API worth being stable about — pre-1.0, breaking changes can land in a
 minor bump. See [README.md](README.md#limitations) for current limitations
 and [ROADMAP.md](ROADMAP.md) for what's planned.
 
+## [0.6.1] — 2026-08-27
+
+### Fixed
+
+- CI's `test` job couldn't import `backend` on a clean runner — worked
+  locally only because `python -m pytest` adds cwd to `sys.path` on its
+  own, which the bare `pytest` console script CI runs does not. Fixed with
+  pytest's own `pythonpath = .` ini option. `0.6.0`'s tagged commit never
+  had a passing CI run; this one does.
+
 ## [0.6.0] — 2026-08-27
 
 ### Added
