@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel
@@ -8,23 +8,55 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import auth, store
 from .drivers import get_driver
 from .schemas import Agent, Host
+from .tiers import TIER_LABELS, CAPABILITY_TIERS, requires_confirm, tier_for
 
 
 class FixRequest(BaseModel):
     fix: str
+    confirm: bool = False
 
 
 class DecommissionRequest(BaseModel):
     purge: bool = False
     remove_user: bool = False
+    confirm: bool = False
 
-app = FastAPI(title="Beacon", version="0.4.0")
+app = FastAPI(title="Beacon", version="0.5.0")
+
+
+def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:
+    """Returns a "would run" dict if `capability` needs confirmation and
+    didn't get it; None if the caller should proceed. This is the same
+    plan-before-apply convention mcp/server.py has always applied to its own
+    callers — enforced here too, on the resource itself, so a direct API
+    call gets the same protection an MCP client always had rather than
+    executing immediately.
+    """
+    tier, rationale = tier_for(capability, **tier_params)
+    if not requires_confirm(tier) or confirm:
+        return None
+    return {
+        "would_run": True,
+        "tier": tier.name,
+        "tier_label": TIER_LABELS[tier],
+        "detail": f"Would {description} (tier {tier.name} — {rationale}). Call again with confirm=true to actually run it.",
+    }
 
 app.include_router(auth.router)
 app.add_middleware(auth.AuthMiddleware)
 # Outermost — added last, so it runs first and request.session exists by
 # the time AuthMiddleware reads it.
 app.add_middleware(SessionMiddleware, secret_key=auth.SESSION_SECRET, https_only=False)
+
+
+@app.get("/api/tiers")
+def list_tiers() -> dict:
+    """The tier registry: every gated capability, its tier, and the
+    rationale for that assignment. See backend/tiers.py."""
+    return {
+        cap: {"tier": tier.name, "tier_label": TIER_LABELS[tier], "rationale": rationale}
+        for cap, (tier, rationale) in CAPABILITY_TIERS.items()
+    }
 
 
 @app.exception_handler(store.NotFound)
@@ -119,7 +151,9 @@ def get_agent_plugins(id_: str) -> list[dict]:
 
 
 @app.post("/api/agents/{id_}/plugins/{plugin}/update")
-def update_agent_plugin(id_: str, plugin: str) -> dict:
+def update_agent_plugin(id_: str, plugin: str, confirm: bool = False) -> dict:
+    if (gate := _confirm_gate("update_plugin", confirm, f"update plugin {plugin!r} on {id_!r}")) is not None:
+        return gate
     agent = store.get_agent(id_)
     host = store.get_host(agent.host)
     driver = get_driver(agent.type)
@@ -127,7 +161,9 @@ def update_agent_plugin(id_: str, plugin: str) -> dict:
 
 
 @app.post("/api/agents/{id_}/restart")
-def restart_agent(id_: str) -> dict:
+def restart_agent(id_: str, confirm: bool = False) -> dict:
+    if (gate := _confirm_gate("restart", confirm, f"restart the gateway for {id_!r}")) is not None:
+        return gate
     agent = store.get_agent(id_)
     host = store.get_host(agent.host)
     driver = get_driver(agent.type)
@@ -135,7 +171,9 @@ def restart_agent(id_: str) -> dict:
 
 
 @app.post("/api/agents/{id_}/deploy")
-def deploy_agent(id_: str) -> StreamingResponse:
+def deploy_agent(id_: str, confirm: bool = False) -> StreamingResponse:
+    if (gate := _confirm_gate("deploy", confirm, f"deploy {id_!r}")) is not None:
+        return JSONResponse(gate)
     agent = store.get_agent(id_)
     host = store.get_host(agent.host)
     driver = get_driver(agent.type)
@@ -160,7 +198,9 @@ def deploy_agent(id_: str) -> StreamingResponse:
 
 
 @app.post("/api/agents/{id_}/update")
-def update_agent(id_: str) -> StreamingResponse:
+def update_agent(id_: str, confirm: bool = False) -> StreamingResponse:
+    if (gate := _confirm_gate("update_agent", confirm, f"run `hermes update` on the host for {id_!r} (affects every profile sharing that install)")) is not None:
+        return JSONResponse(gate)
     agent = store.get_agent(id_)
     host = store.get_host(agent.host)
     driver = get_driver(agent.type)
@@ -190,6 +230,8 @@ def reconcile_agent(id_: str) -> list[dict]:
 
 @app.post("/api/agents/{id_}/reconcile")
 def apply_fix(id_: str, body: FixRequest) -> dict:
+    if (gate := _confirm_gate("apply_fix", body.confirm, f"apply fix {body.fix!r} to {id_!r}")) is not None:
+        return gate
     agent = store.get_agent(id_)
     host = store.get_host(agent.host)
     driver = get_driver(agent.type)
@@ -205,7 +247,9 @@ def get_config_diff(id_: str) -> dict:
 
 
 @app.post("/api/agents/{id_}/config-diff")
-def push_config(id_: str) -> StreamingResponse:
+def push_config(id_: str, confirm: bool = False) -> StreamingResponse:
+    if (gate := _confirm_gate("push_config", confirm, f"push desired.config to {id_!r} and restart its gateway if active")) is not None:
+        return JSONResponse(gate)
     agent = store.get_agent(id_)
     host = store.get_host(agent.host)
     driver = get_driver(agent.type)
@@ -227,6 +271,13 @@ def push_config(id_: str) -> StreamingResponse:
 
 @app.post("/api/agents/{id_}/decommission")
 def decommission_agent(id_: str, body: DecommissionRequest) -> StreamingResponse:
+    gate_desc = f"decommission {id_!r}"
+    if body.purge:
+        gate_desc += " and purge its profile data"
+    if body.remove_user:
+        gate_desc += " and delete its OS user account"
+    if (gate := _confirm_gate("decommission", body.confirm, gate_desc, purge=body.purge, remove_user=body.remove_user)) is not None:
+        return JSONResponse(gate)
     agent = store.get_agent(id_)
     host = store.get_host(agent.host)
     driver = get_driver(agent.type)

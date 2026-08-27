@@ -124,6 +124,29 @@ stale in that direction.
 | **Update** | `hermes update` on the shared code checkout — affects every profile on that install, not just one agent's record of it. Streamed. | `POST /api/agents/{id}/update` |
 | **Decommission** | Stops and uninstalls the gateway, optionally purges the profile's data (refused for the default profile — that directory is shared with every other profile on the install) and optionally deletes the OS account. Moves the YAML record to `fleet/decommissioned/` rather than deleting it. | `POST /api/agents/{id}/decommission` (streamed) |
 
+## Autonomy tiers
+
+Every capability that changes something (not just reads it) is registered in
+[`backend/tiers.py`](backend/tiers.py) against a T0–T5 autonomy tier — how
+much oversight it needs, from "always allowed" to "human only." `GET
+/api/tiers` lists the full registry with the rationale for each assignment.
+
+**What's enforced today:** every capability at T2 or above requires an
+explicit `confirm=true` before it runs — call without it and the endpoint
+describes what it would do instead of doing it. This was previously only a
+courtesy the MCP server extended to its own callers; it's now a property of
+the API itself, so a direct HTTP call gets the same plan-before-apply step
+an MCP client always had. `decommission` additionally escalates from T4 to
+T5 when `purge` or `remove_user` is set — those are irreversible, the
+baseline decommission (stop + uninstall) is not.
+
+**What's named but not yet enforced:** T3 ("review") and T4/T5 ("human
+approval") are recorded per capability, but Beacon has no reviewer or
+approval-chain mechanism yet — there's no way today to check that a review
+or approval actually happened before `confirm=true` was sent. The tier is
+visible and queryable; the gate behind it is still just the T2 confirm step
+for everything, until that mechanism exists. See ROADMAP.md.
+
 ## Teleport / tbot
 
 Hosts can be reached two ways: a static SSH key (`ssh.key`), or a
@@ -261,14 +284,20 @@ this one credential.
 | `GET`/`PUT`/`DELETE` | `/api/agents/{id}` | Agent CRUD |
 | `GET` | `/api/agents/{id}/status` | Live status |
 | `GET` | `/api/agents/{id}/logs?lines=N` | Log tail |
-| `POST` | `/api/agents/{id}/deploy` | Install/bring up (streamed) |
-| `GET`/`POST` | `/api/agents/{id}/reconcile` | Diagnose / apply one fix (`{"fix": "..."}`) |
-| `GET`/`POST` | `/api/agents/{id}/config-diff` | Compare / push desired config |
+| `GET` | `/api/tiers` | Tier registry — every gated capability, its tier, and why |
+| `POST` | `/api/agents/{id}/deploy?confirm=true` | Install/bring up (streamed) — T3 |
+| `GET`/`POST` | `/api/agents/{id}/reconcile` | Diagnose / apply one fix (`{"fix": "...", "confirm": true}`) — apply is T2 |
+| `GET`/`POST` | `/api/agents/{id}/config-diff?confirm=true` | Compare / push desired config — push is T3 |
 | `GET` | `/api/agents/{id}/plugins` | List installed plugins (name, version, status, source) |
-| `POST` | `/api/agents/{id}/plugins/{name}/update` | Update one plugin (git pull) |
-| `POST` | `/api/agents/{id}/restart` | Restart the gateway |
-| `POST` | `/api/agents/{id}/update` | `hermes update` on the shared install (streamed) |
-| `POST` | `/api/agents/{id}/decommission` | Tear down (`{"purge": bool, "remove_user": bool}`, streamed) |
+| `POST` | `/api/agents/{id}/plugins/{name}/update?confirm=true` | Update one plugin (git pull) — T3 |
+| `POST` | `/api/agents/{id}/restart?confirm=true` | Restart the gateway — T2 |
+| `POST` | `/api/agents/{id}/update?confirm=true` | `hermes update` on the shared install (streamed) — T4 |
+| `POST` | `/api/agents/{id}/decommission` | Tear down (`{"purge": bool, "remove_user": bool, "confirm": true}`, streamed) — T4, T5 if purge/remove_user |
+
+Every row above marked with a tier requires `confirm=true` (query param, or
+a `confirm` field alongside an existing JSON body) — omit it and you get a
+200 describing the action instead of it running. See [Autonomy
+tiers](#autonomy-tiers).
 
 ## Limitations
 

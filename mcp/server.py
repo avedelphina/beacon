@@ -108,6 +108,15 @@ async def config_diff(agent_id: str) -> object:
     return await _get(f"/api/agents/{agent_id}/config-diff")
 
 
+@mcp.tool(annotations=READ_ONLY)
+async def list_tiers() -> object:
+    """The tier registry: every gated capability, its autonomy tier (T0-T5),
+    and the rationale for that assignment. Beacon enforces the confirm=true
+    step for T2+ capabilities today; T3+ (review) and T4/T5 (human approval)
+    are named here but not yet mechanically enforced beyond that."""
+    return await _get("/api/tiers")
+
+
 # ---------------------------------------------------------------------------
 # Mutating — confirm=True required, otherwise describes the action instead
 # of taking it.
@@ -123,7 +132,7 @@ async def deploy(agent_id: str, confirm: bool = False) -> str:
         agent = await _get(f"/api/agents/{agent_id}")
         mode = agent.get("desired", {}).get("install_mode", "simple") if isinstance(agent, dict) else "?"
         return f"Would deploy {agent_id!r} (install_mode={mode}). Call again with confirm=true to actually run it."
-    return await _post(f"/api/agents/{agent_id}/deploy")
+    return await _post(f"/api/agents/{agent_id}/deploy?confirm=true")
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
@@ -132,7 +141,7 @@ async def apply_fix(agent_id: str, fix: str, confirm: bool = False) -> object:
     "uninstall-orphan"). Requires confirm=true."""
     if not confirm:
         return f"Would apply fix {fix!r} to {agent_id!r}. Call again with confirm=true to actually run it."
-    return await _post(f"/api/agents/{agent_id}/reconcile", json={"fix": fix})
+    return await _post(f"/api/agents/{agent_id}/reconcile", json={"fix": fix, "confirm": True})
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
@@ -141,7 +150,7 @@ async def push_config(agent_id: str, confirm: bool = False) -> str:
     then restart the gateway if it's active. Requires confirm=true."""
     if not confirm:
         return f"Would push desired.config to {agent_id!r} and restart its gateway if active. Call again with confirm=true to actually run it."
-    return await _post(f"/api/agents/{agent_id}/config-diff")
+    return await _post(f"/api/agents/{agent_id}/config-diff?confirm=true")
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
@@ -158,7 +167,7 @@ async def decommission(agent_id: str, purge: bool = False, remove_user: bool = F
             extra.append("delete its OS user account")
         detail = f" and {', '.join(extra)}" if extra else ""
         return f"Would decommission {agent_id!r}{detail}. Call again with confirm=true to actually run it."
-    return await _post(f"/api/agents/{agent_id}/decommission", json={"purge": purge, "remove_user": remove_user})
+    return await _post(f"/api/agents/{agent_id}/decommission", json={"purge": purge, "remove_user": remove_user, "confirm": True})
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -172,7 +181,7 @@ async def restart(agent_id: str, confirm: bool = False) -> object:
     """Restart an agent's gateway service. Requires confirm=true."""
     if not confirm:
         return f"Would restart {agent_id!r}. Call again with confirm=true to actually run it."
-    return await _post(f"/api/agents/{agent_id}/restart")
+    return await _post(f"/api/agents/{agent_id}/restart?confirm=true")
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
@@ -181,7 +190,7 @@ async def update_plugin(agent_id: str, plugin: str, confirm: bool = False) -> ob
     Requires confirm=true."""
     if not confirm:
         return f"Would update plugin {plugin!r} on {agent_id!r}. Call again with confirm=true to actually run it."
-    return await _post(f"/api/agents/{agent_id}/plugins/{plugin}/update")
+    return await _post(f"/api/agents/{agent_id}/plugins/{plugin}/update?confirm=true")
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
@@ -190,7 +199,7 @@ async def update_agent(agent_id: str, confirm: bool = False) -> str:
     affects every profile on that install, not just this one. Requires confirm=true."""
     if not confirm:
         return f"Would run `hermes update` for {agent_id!r} (affects every profile sharing its install). Call again with confirm=true to actually run it."
-    return await _post(f"/api/agents/{agent_id}/update", timeout=300)
+    return await _post(f"/api/agents/{agent_id}/update?confirm=true", timeout=300)
 
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):

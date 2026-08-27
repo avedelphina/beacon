@@ -35,7 +35,7 @@ const api = {
     const r = await fetch(`/api/agents/${id}/reconcile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fix }),
+      body: JSON.stringify({ fix, confirm: true }),
     });
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     return r.json();
@@ -51,7 +51,7 @@ const api = {
     return r.json();
   },
   async restart(id) {
-    const r = await fetch(`/api/agents/${id}/restart`, { method: "POST" });
+    const r = await fetch(`/api/agents/${id}/restart?confirm=true`, { method: "POST" });
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     return r.json();
   },
@@ -61,7 +61,7 @@ const api = {
     return r.json();
   },
   async updatePlugin(id, plugin) {
-    const r = await fetch(`/api/agents/${id}/plugins/${plugin}/update`, { method: "POST" });
+    const r = await fetch(`/api/agents/${id}/plugins/${plugin}/update?confirm=true`, { method: "POST" });
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     return r.json();
   },
@@ -316,7 +316,7 @@ document.getElementById("inspect-config-push").addEventListener("click", async (
   out.textContent = "";
   btn.disabled = true;
   try {
-    const resp = await fetch(`/api/agents/${currentInspectId}/config-diff`, { method: "POST" });
+    const resp = await fetch(`/api/agents/${currentInspectId}/config-diff?confirm=true`, { method: "POST" });
     if (!resp.ok) {
       out.textContent = `[error] ${(await resp.json()).detail || resp.statusText}`;
       return;
@@ -392,7 +392,7 @@ document.getElementById("inspect-deploy").addEventListener("click", async (e) =>
   out.textContent = "";
   btn.disabled = true;
   try {
-    const resp = await fetch(`/api/agents/${currentInspectId}/deploy`, { method: "POST" });
+    const resp = await fetch(`/api/agents/${currentInspectId}/deploy?confirm=true`, { method: "POST" });
     if (!resp.ok) {
       out.textContent = `[error] ${(await resp.json()).detail || resp.statusText}`;
       return;
@@ -496,7 +496,7 @@ document.getElementById("inspect-update-agent").addEventListener("click", async 
   out.textContent = "";
   btn.disabled = true;
   try {
-    const resp = await fetch(`/api/agents/${currentInspectId}/update`, { method: "POST" });
+    const resp = await fetch(`/api/agents/${currentInspectId}/update?confirm=true`, { method: "POST" });
     if (!resp.ok) {
       out.textContent = `[error] ${(await resp.json()).detail || resp.statusText}`;
       return;
@@ -546,7 +546,7 @@ document.getElementById("inspect-decommission").addEventListener("click", async 
     const resp = await fetch(`/api/agents/${id}/decommission`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ purge, remove_user: removeUser }),
+      body: JSON.stringify({ purge, remove_user: removeUser, confirm: true }),
     });
     if (!resp.ok) {
       out.textContent = `[error] ${(await resp.json()).detail || resp.statusText}`;
