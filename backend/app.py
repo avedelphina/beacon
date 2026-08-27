@@ -21,7 +21,7 @@ class DecommissionRequest(BaseModel):
     remove_user: bool = False
     confirm: bool = False
 
-app = FastAPI(title="Beacon", version="0.5.0")
+app = FastAPI(title="Beacon", version="0.6.0")
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:

@@ -20,14 +20,19 @@ earlier ones landed.
 
 **Goal:** stop finding bugs by testing on real agents in production.
 
-- **Test suite for the driver layer.** Script generation, injection guards,
-  and the config-diff flatten/compare logic in `backend/drivers/hermes.py`
-  are pure functions with no coverage today.
-- **Integration tests against a fake SSH target**, so deploy/reconcile/
-  restart get exercised without a real host. A too-short timeout and a
-  missing `docker-compose.yml` env var both shipped and were only caught by
-  live testing — a fake-SSH harness in CI would have caught both.
-- **CI on every push** — tests plus a Docker build, before anything merges.
+**Done:** a test suite (`tests/`, ~130 tests) covering the driver layer's
+script generation and validation, the tier registry, and confirm-gating as
+callers actually hit it — a fake `ssh` module that records the command it
+was asked to run instead of touching a real host, so deploy/reconcile/
+restart/decommission all get exercised without network access. Also caught
+a real bug along the way: `SSHConfig`'s validator only checked "at least
+one of key/config_file", not "exactly one" — both set silently worked, with
+`config_file` winning and `key` becoming dead weight. CI
+(`.github/workflows/ci.yml`) runs the suite plus a build of all three
+Docker images on every push.
+
+Still open:
+
 - **Concurrency safety on `fleet/*.yaml`.** Currently a single-writer
   assumption with no locking. Fine solo; not fine the day a second person
   edits the fleet folder.
@@ -96,16 +101,10 @@ earlier ones landed.
 
 ## Start here
 
-**Horizon 0 — tests and CI — before any new capability.** Every bug caught
-so far was found by a human noticing a real agent behave wrong, not by an
-automated check. That ratio gets worse, not better, as more gets built on
-top without a safety net under it.
-
-1. Unit tests for `backend/drivers/hermes.py`'s script generation and
-   validation.
-2. A fake-SSH integration harness so deploy/reconcile/restart run in CI
-   without a real host.
-3. GitHub Actions running both on every push.
+Tests and CI landed — see Horizon 0. The remaining Horizon 0 items
+(concurrency safety, portable `ssh.config_file` paths, a real tbot image)
+are all small and independent; after those, Horizon 1's roles/audit-log
+work is what actually needs the safety net now in place under it.
 
 ## Deliberately not doing
 

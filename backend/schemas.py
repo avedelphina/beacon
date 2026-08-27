@@ -12,8 +12,11 @@ class SSHConfig(BaseModel):
 
     @model_validator(mode="after")
     def _one_auth_mode(self) -> "SSHConfig":
-        if not self.key and not self.config_file:
-            raise ValueError("ssh needs either a key or a config_file")
+        if bool(self.key) == bool(self.config_file):
+            # Both set: config_file silently wins in ssh.py, key is dead
+            # weight with no warning. Neither set: nothing to connect with.
+            # Both are wrong in a way worth failing loudly on, not guessing.
+            raise ValueError("ssh needs exactly one of key or config_file, not both or neither")
         return self
 
 

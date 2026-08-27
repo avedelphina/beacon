@@ -6,6 +6,26 @@ an API worth being stable about — pre-1.0, breaking changes can land in a
 minor bump. See [README.md](README.md#limitations) for current limitations
 and [ROADMAP.md](ROADMAP.md) for what's planned.
 
+## [0.6.0] — 2026-08-27
+
+### Added
+
+- Test suite (`tests/`, ~130 tests): the driver layer's script generation
+  and validation, the tier registry, `ssh.py`'s command construction,
+  auth's PKCE pair, and confirm-gating as a plain HTTP client actually
+  hits it. `tests/conftest.py` provides a throwaway `fleet/` per test and a
+  fake `ssh` module that records the command it was asked to run instead
+  of touching a real host or network.
+- CI (`.github/workflows/ci.yml`): the test suite plus a build of all
+  three Docker images, on every push.
+
+### Fixed
+
+- `SSHConfig`'s validator only required "at least one" of `key`/
+  `config_file`, not "exactly one" — both set silently worked, with
+  `config_file` winning and `key` becoming dead weight with no warning.
+  Now rejects both-set the same as neither-set.
+
 ## [0.5.0] — 2026-08-27
 
 ### Added
