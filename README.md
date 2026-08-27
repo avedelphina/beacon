@@ -314,12 +314,29 @@ tiers](#autonomy-tiers).
 
 See [ROADMAP.md](ROADMAP.md) for what's planned to close these.
 
+## Testing
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pytest -q
+```
+
+No real SSH, no real filesystem outside a tmp dir: `tests/conftest.py`
+redirects `fleet/` into a throwaway directory per test and swaps
+`backend/drivers/hermes.py`'s `ssh` module for a fake that records the
+command it was asked to run and hands back a canned result. That's enough
+to catch the class of bug this project has actually shipped — a timeout too
+short, a wrong command string, a validation gap — without needing a real
+host. Runs in CI (`.github/workflows/ci.yml`) on every push, alongside a
+build of all three Docker images.
+
 ## Project layout
 
 ```
 backend/
   app.py          FastAPI routes
   auth.py         Zitadel OIDC login (PKCE) + the auth-gating middleware
+  tiers.py        capability -> autonomy tier registry
   store.py        fleet/ YAML read/write
   ssh.py          the one place that shells out to `ssh`
   schemas.py      Host/Agent pydantic models
@@ -337,7 +354,11 @@ tbot/
 mcp/
   server.py       MCP server — a client of Beacon's own HTTP API
   Dockerfile
+tests/            pytest — see Testing below
+.github/workflows/ci.yml
 .env.example      Zitadel issuer/client ID/session secret template
+requirements-dev.txt
+pytest.ini
 Dockerfile        the beacon image
 docker-compose.yml
 ```

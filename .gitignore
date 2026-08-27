@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # tbot's own identity/certs — private key material, never committed
 tbot/data/
