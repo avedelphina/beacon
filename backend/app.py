@@ -5,7 +5,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, store
+from . import auth, store, templates
 from .drivers import get_driver
 from .schemas import Agent, Host
 from .tiers import TIER_LABELS, CAPABILITY_TIERS, requires_confirm, tier_for
@@ -16,12 +16,17 @@ class FixRequest(BaseModel):
     confirm: bool = False
 
 
+class TemplateApplyRequest(BaseModel):
+    agent_ids: list[str]
+    confirm: bool = False
+
+
 class DecommissionRequest(BaseModel):
     purge: bool = False
     remove_user: bool = False
     confirm: bool = False
 
-app = FastAPI(title="Beacon", version="0.6.1")
+app = FastAPI(title="Beacon", version="0.7.0")
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:
@@ -109,8 +114,11 @@ def list_agents() -> list[Agent]:
 
 
 @app.get("/api/agents/{id_}")
-def get_agent(id_: str) -> Agent:
-    return store.get_agent(id_)
+def get_agent(id_: str) -> dict:
+    # Raw record (own overrides only) plus the template-merged view. PUT
+    # sends back the raw `desired`; `effective_desired` is display-only.
+    agent = store.get_agent(id_)
+    return agent.model_dump() | {"effective_desired": templates.resolve(agent)}
 
 
 @app.put("/api/agents/{id_}")
@@ -124,6 +132,36 @@ def put_agent(id_: str, agent: Agent) -> Agent:
 def delete_agent(id_: str) -> dict:
     store.delete_agent(id_)
     return {"ok": True}
+
+
+@app.get("/api/templates")
+def list_templates() -> list[dict]:
+    agents = store.list_agents()
+    return [
+        {"name": name, "used_by": sorted(a.id for a in agents if name in a.templates)}
+        for name in templates.list_templates()
+    ]
+
+
+@app.get("/api/templates/{name}")
+def get_template(name: str) -> dict:
+    content = templates.load_template(name)  # NotFound -> 404, bad name/keys -> 400
+    agents = store.list_agents()
+    return {"name": name, "content": content, "used_by": sorted(a.id for a in agents if name in a.templates)}
+
+
+@app.post("/api/templates/{name}/apply")
+def apply_template(name: str, body: TemplateApplyRequest) -> dict:
+    templates.load_template(name)  # validate before gating/writing anything
+    desc = f"add template {name!r} to {len(body.agent_ids)} agent(s): {', '.join(body.agent_ids) or '(none)'}"
+    if (gate := _confirm_gate("apply_template", body.confirm, desc)) is not None:
+        return gate
+    agents = [store.get_agent(aid) for aid in body.agent_ids]  # any bad id 404s before a write
+    for agent in agents:
+        if name not in agent.templates:
+            agent.templates.append(name)
+            store.upsert_agent(agent)
+    return {"ok": True, "template": name, "agents": [a.id for a in agents]}
 
 
 @app.get("/api/agents/{id_}/status")
@@ -240,7 +278,7 @@ def apply_fix(id_: str, body: FixRequest) -> dict:
 
 @app.get("/api/agents/{id_}/config-diff")
 def get_config_diff(id_: str) -> dict:
-    agent = store.get_agent(id_)
+    agent = store.get_agent(id_, resolved=True)
     host = store.get_host(agent.host)
     driver = get_driver(agent.type)
     return driver.config_diff(agent, host)
@@ -250,7 +288,7 @@ def get_config_diff(id_: str) -> dict:
 def push_config(id_: str, confirm: bool = False) -> StreamingResponse:
     if (gate := _confirm_gate("push_config", confirm, f"push desired.config to {id_!r} and restart its gateway if active")) is not None:
         return JSONResponse(gate)
-    agent = store.get_agent(id_)
+    agent = store.get_agent(id_, resolved=True)
     host = store.get_host(agent.host)
     driver = get_driver(agent.type)
     gen = driver.push_config(agent, host)

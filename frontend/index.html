@@ -15,6 +15,7 @@
   <nav class="tabs">
     <button class="tab active" data-tab="hosts">Hosts</button>
     <button class="tab" data-tab="agents">Agents</button>
+    <button class="tab" data-tab="templates">Templates</button>
   </nav>
   <div class="whoami" id="whoami" hidden>
     <span id="whoami-name"></span>
@@ -52,6 +53,20 @@
     <p class="empty" id="agents-empty" hidden>No agents yet. Add one to get started.</p>
   </section>
 
+  <section id="templates-view" class="view">
+    <div class="view-head">
+      <h1>Templates</h1>
+    </div>
+    <p class="hint" style="margin:-0.6rem 0 1rem">Shared config fragments (<code>config</code> + <code>env_keys</code>) merged under an agent's <code>desired</code> — model stacks, fallbacks, auxiliary-task models declared once. Create and edit them as files under <code>fleet/templates/*.yaml</code>; apply them to agents here.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Used by</th><th></th></tr></thead>
+        <tbody id="templates-body"></tbody>
+      </table>
+    </div>
+    <p class="empty" id="templates-empty" hidden>No templates. Add a file under fleet/templates/ (see anthropic-stack.yaml.example).</p>
+  </section>
+
 </main>
 
 <div class="modal-backdrop" id="host-modal">
@@ -87,6 +102,9 @@
     <label>Host <select name="host" id="agent-host-select" required></select></label>
     <label>Owner <input name="owner" placeholder="tom"></label>
     <label>Notes <input name="notes"></label>
+    <label>Templates <span class="hint">(comma separated, names from fleet/templates/)</span>
+      <input name="templates" placeholder="anthropic-stack, eu-relay">
+    </label>
     <label>Desired config <span class="hint">(JSON)</span>
       <textarea name="desired" rows="14" spellcheck="false">{
   "install_mode": "simple",
@@ -97,7 +115,7 @@
   "env_keys": []
 }</textarea>
     </label>
-    <p class="hint" style="margin:-0.3rem 0 0">install_mode: simple | add-profile | new-user. "config" is the config.yaml keys Beacon manages (e.g. {"model":{"default":"..."}}) — Check drift / Push only look at what's declared here. "env_keys" lists expected .env key names only, values never leave the host.</p>
+    <p class="hint" style="margin:-0.3rem 0 0">install_mode: simple | add-profile | new-user. "config" is the config.yaml keys Beacon manages (e.g. {"model":{"default":"..."}}) — Check drift / Push only look at what's declared here. "env_keys" lists expected .env key names only, values never leave the host. Any templates listed above are merged under this — these fields win on conflict.</p>
     <div class="modal-actions">
       <button type="button" class="btn" data-close>Cancel</button>
       <button type="submit" class="btn primary">Save</button>
@@ -165,6 +183,28 @@
       <button type="button" class="btn" data-close>Close</button>
     </div>
   </div>
+</div>
+
+<div class="modal-backdrop" id="template-view-modal">
+  <div class="modal">
+    <h2 id="template-view-title">Template</h2>
+    <pre id="template-view-body" class="inspect-logs">—</pre>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="template-apply-modal">
+  <form class="modal" id="template-apply-form">
+    <h2 id="template-apply-title">Apply template</h2>
+    <p class="hint">Adds this template to each checked agent's <code>templates</code> list (fleet YAML only — nothing is pushed to a host). Run Check drift / Push config on an agent afterward to apply it there.</p>
+    <div id="template-apply-list" class="check-list"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary">Apply</button>
+    </div>
+  </form>
 </div>
 
 <script src="app.js"></script>

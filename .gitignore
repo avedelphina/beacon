@@ -12,6 +12,7 @@ tbot/tbot.log
 # aren't. See fleet/hosts.yaml.example for the schema.
 fleet/hosts.yaml
 fleet/agents/*.yaml
+fleet/templates/*.yaml
 fleet/decommissioned/
 
 # real Zitadel config + session secret — see .env.example
