@@ -215,6 +215,33 @@ tbody td:first-child { color: var(--ink); font-family: var(--font-mono); }
 .field-row { display: flex; gap: 0.8rem; }
 .field-row label { flex: 1; }
 
+.check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  background: var(--paper);
+  padding: 0.6rem 0.7rem;
+}
+.check-list label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+.check-list label .mut { color: var(--slate-2); }
+.check-list input {
+  width: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  accent-color: var(--signal);
+}
+
 .modal-actions { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 0.4rem; }
 
 /* ---------- status ---------- */

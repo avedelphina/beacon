@@ -65,6 +65,25 @@ const api = {
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     return r.json();
   },
+  async listTemplates() {
+    const r = await fetch("/api/templates");
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+  },
+  async getTemplate(name) {
+    const r = await fetch(`/api/templates/${name}`);
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+  },
+  async applyTemplate(name, agentIds) {
+    const r = await fetch(`/api/templates/${name}/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_ids: agentIds, confirm: true }),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+  },
 };
 
 function statusPill(state) {
@@ -569,6 +588,83 @@ document.getElementById("inspect-decommission").addEventListener("click", async 
   }
 });
 
+// ---- templates ----
+async function renderTemplates() {
+  const templates = await api.listTemplates();
+  const body = document.getElementById("templates-body");
+  body.innerHTML = "";
+  document.getElementById("templates-empty").hidden = templates.length > 0;
+  for (const t of templates) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${t.name}</td>
+      <td>${t.used_by.length ? t.used_by.join(", ") : '<span class="hint">—</span>'}</td>
+      <td class="row-actions">
+        <button class="link-btn" data-view="${t.name}">View</button>
+        <button class="link-btn" data-apply="${t.name}">Apply to…</button>
+      </td>`;
+    body.appendChild(tr);
+  }
+  body.querySelectorAll("[data-view]").forEach((b) =>
+    b.addEventListener("click", () => openTemplateView(b.dataset.view))
+  );
+  body.querySelectorAll("[data-apply]").forEach((b) =>
+    b.addEventListener("click", () => openTemplateApply(b.dataset.apply))
+  );
+}
+
+async function openTemplateView(name) {
+  document.getElementById("template-view-title").textContent = name;
+  const el = document.getElementById("template-view-body");
+  el.textContent = "loading…";
+  openModal("template-view-modal");
+  try {
+    el.textContent = JSON.stringify((await api.getTemplate(name)).content, null, 2);
+  } catch (err) {
+    el.textContent = `[error] ${err.message}`;
+  }
+}
+
+let applyTemplateName = null;
+
+async function openTemplateApply(name) {
+  applyTemplateName = name;
+  document.getElementById("template-apply-title").textContent = `Apply "${name}" to agents`;
+  const list = document.getElementById("template-apply-list");
+  list.textContent = "loading…";
+  openModal("template-apply-modal");
+  try {
+    const [agents, tpl] = await Promise.all([api.list("agents"), api.getTemplate(name)]);
+    const using = new Set(tpl.used_by);
+    list.innerHTML = agents.length
+      ? agents.map((a) => `
+        <label>
+          <input type="checkbox" value="${a.id}" ${using.has(a.id) ? "checked disabled" : ""}>
+          ${a.id}
+          <span class="mut">${a.host}${a.profile ? " / " + a.profile : ""}${using.has(a.id) ? " — already applied" : ""}</span>
+        </label>`).join("")
+      : '<span class="hint">no agents</span>';
+  } catch (err) {
+    list.textContent = `[error] ${err.message}`;
+  }
+}
+
+document.getElementById("template-apply-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const ids = [...document.querySelectorAll("#template-apply-list input:checked:not(:disabled)")].map((c) => c.value);
+  if (!ids.length) { alert("Pick at least one agent."); return; }
+  if (!confirm(`Add template "${applyTemplateName}" to ${ids.length} agent(s): ${ids.join(", ")}?`)) return;
+  try {
+    await api.applyTemplate(applyTemplateName, ids);
+    closeModal("template-apply-modal");
+    renderTemplates();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+document.querySelector('[data-tab="templates"]').addEventListener("click", renderTemplates);
+
 async function fillAgentForm(a) {
   await populateHostSelect();
   const f = document.getElementById("agent-form");
@@ -579,6 +675,7 @@ async function fillAgentForm(a) {
   f.host.value = a?.host ?? f.host.value;
   f.owner.value = a?.owner ?? "";
   f.notes.value = a?.notes ?? "";
+  f.templates.value = (a?.templates ?? []).join(", ");
   f.desired.value = JSON.stringify(
     a?.desired ?? { install_mode: "simple", os_user: "", service: "", log_path: "", config: {}, env_keys: [] },
     null, 2
@@ -620,12 +717,14 @@ document.getElementById("agent-form").addEventListener("submit", async (e) => {
     profile: f.profile.value || null,
     owner: f.owner.value || null,
     notes: f.notes.value || null,
+    templates: f.templates.value.split(",").map((t) => t.trim()).filter(Boolean),
     desired,
   };
   try {
     await api.put("agents", body.id, body);
     closeModal("agent-modal");
     renderAgents();
+    renderTemplates();
   } catch (err) {
     alert(err.message);
   }
@@ -633,6 +732,7 @@ document.getElementById("agent-form").addEventListener("submit", async (e) => {
 
 renderHosts();
 renderAgents();
+renderTemplates();
 populateHostSelect();
 
 fetch("/auth/me").then((r) => (r.ok ? r.json() : null)).then((user) => {

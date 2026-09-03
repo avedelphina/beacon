@@ -6,6 +6,32 @@ an API worth being stable about — pre-1.0, breaking changes can land in a
 minor bump. See [README.md](README.md#limitations) for current limitations
 and [ROADMAP.md](ROADMAP.md) for what's planned.
 
+## [0.7.0] — 2026-09-03
+
+### Added
+
+- **Config templates.** A `fleet/templates/<name>.yaml` fragment (`config`
+  and `env_keys` only) merged under many agents' `desired` at once — the
+  main/fallback/auxiliary-task model stack declared in one place instead of
+  copied into every agent file. An agent opts in with a `templates:` list;
+  `backend/templates.py` deep-merges the named fragments in order, then the
+  agent's own `desired` on top (agent wins), on every read. The merge is
+  never written back — the agent record keeps its own overrides only, and
+  `GET /api/agents/{id}` now returns `effective_desired` alongside the raw
+  `desired`. New routes: `GET /api/templates` (with reverse lookup of which
+  agents use each), `GET /api/templates/{name}`, and
+  `POST /api/templates/{name}/apply` (`apply_template`, tier T2) to add a
+  template to a batch of agents in one call. `config-diff` GET/POST now
+  compare and push the merged view. Exposed over MCP too (`list_templates`,
+  `get_template`, `apply_template`).
+- **GUI: Templates tab.** Lists templates with their content and which
+  agents use each; "Apply to…" opens a checkbox list of agents (ones
+  already using it shown checked/disabled) and applies in one call. The
+  agent form gained a `templates` field.
+
+  The agent form's save path sends `templates` explicitly, so editing an
+  agent through the GUI doesn't clear a template list set elsewhere.
+
 ## [0.6.1] — 2026-08-27
 
 ### Fixed

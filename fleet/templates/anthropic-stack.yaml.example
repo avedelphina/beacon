@@ -1,0 +1,28 @@
+# A config template — merged under an agent's own `desired` for every agent
+# that lists it in `templates:`. Copy to <name>.yaml, edit, then either add
+# `templates: [<name>]` to an agent file or POST /api/templates/<name>/apply.
+#
+# Only `config` and `env_keys` are allowed here (same shape as those keys
+# inside an agent's `desired`). install_mode / os_user / service / log_path
+# stay per-agent on purpose.
+#
+# Merge rules: dicts deep-merge, everything else (scalars, lists) is
+# replaced. An agent's own `desired` always wins over the template. Exact
+# key paths below depend on your Hermes build's config.yaml — check a live
+# box with `hermes config get` or `cat ~/.hermes/profiles/<p>/config.yaml`.
+
+config:
+  model:
+    primary: anthropic/claude-sonnet-4
+    fallbacks:
+      - openai/gpt-4o
+      - groq/llama-3.3-70b
+  tools:
+    model: anthropic/claude-haiku-4-5      # auxiliary: tool-call / routing
+  summarization:
+    model: openai/gpt-4o-mini              # auxiliary: context compaction
+
+env_keys:
+  - ANTHROPIC_API_KEY
+  - OPENAI_API_KEY
+  - GROQ_API_KEY

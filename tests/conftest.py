@@ -22,9 +22,15 @@ def fleet(tmp_path, monkeypatch):
     """Points backend.store at an empty, throwaway fleet/ directory."""
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
     monkeypatch.setattr(store, "HOSTS_FILE", tmp_path / "hosts.yaml")
     monkeypatch.setattr(store, "AGENTS_DIR", agents_dir)
     monkeypatch.setattr(store, "DECOMMISSIONED_DIR", tmp_path / "decommissioned")
+
+    from backend import templates
+
+    monkeypatch.setattr(templates, "TEMPLATES_DIR", templates_dir)
     return tmp_path
 
 

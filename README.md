@@ -93,6 +93,8 @@ profile: primary      # omit or "default" for Hermes's default profile
 owner: tom
 notes: "handles EU relay traffic"
 
+templates: [anthropic-stack]   # config templates merged under `desired` — see Templates
+
 desired:
   install_mode: simple       # simple | add-profile | new-user
   os_user: null              # required for install_mode: new-user
@@ -110,6 +112,43 @@ Nothing here holds live state (running/stopped, PID, current config).
 `status()` and `config_diff()` always poll the host fresh — YAML never goes
 stale in that direction.
 
+### `fleet/templates/<name>.yaml`
+
+A config fragment applied to many agents at once — "every EU relay runs this
+model stack" declared in one place instead of copied into every agent file.
+
+```yaml
+# fleet/templates/anthropic-stack.yaml
+config:
+  model:
+    primary: anthropic/claude-sonnet-4
+    fallbacks: [openai/gpt-4o, groq/llama-3.3-70b]
+  tools:
+    model: anthropic/claude-haiku-4-5      # auxiliary: tool-call / routing
+  summarization:
+    model: openai/gpt-4o-mini              # auxiliary: context compaction
+env_keys: [ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY]
+```
+
+A template carries only `config` and `env_keys` (the same shape as those two
+keys inside an agent's `desired`). Host-shaping fields — `install_mode`,
+`os_user`, `service`, `log_path` — stay per-agent on purpose: a shared
+`install_mode` is a good way to break several installs at once.
+
+An agent opts in by listing template names in `templates:`. On every read,
+`backend/templates.py` deep-merges those fragments **in listed order**, then
+the agent's own `desired` on top — the agent always wins. dicts deep-merge;
+scalars and lists are replaced wholesale (`fallbacks: [...]` in an agent
+fully replaces the template's, no element merge). The merge never touches
+the file: the agent record keeps its own overrides only, and
+`GET /api/agents/{id}` returns both the raw `desired` and the merged
+`effective_desired`.
+
+`POST /api/templates/{name}/apply` with `{"agent_ids": [...], "confirm": true}`
+adds a template name to several agent records in one call.  Exact config key
+paths depend on your Hermes build — check a live box with `hermes config get`
+before writing a template.
+
 ## Capabilities
 
 | Capability | What it does | Where |
@@ -118,7 +157,8 @@ stale in that direction.
 | **Track** | Live status: running/stopped/failed/crash-looping/not-installed, PID, uptime. Polled by the fleet table every 30s. | `GET /api/agents/{id}/status` |
 | **Troubleshoot** | Recent log tail — the app-level log file, falling back to `journalctl` when a unit has never started successfully. | `GET /api/agents/{id}/logs` |
 | **Reconcile** | Diagnoses drift patterns found in the wild — an orphaned unit (profile dir deleted, unit left behind), a unit stuck `failed`, installed-but-not-started, linger disabled. Dry run by default; each finding names a `fix` to apply individually. | `GET` (dry run) / `POST` (apply one fix) `/api/agents/{id}/reconcile` |
-| **Config** | Compares `desired.config`/`desired.env_keys` against the live `config.yaml` and `.env` **key names only** (secret values never leave the host). Push runs `hermes config set` per declared key, then restarts the gateway if it's active. | `GET`/`POST /api/agents/{id}/config-diff` |
+| **Config** | Compares `desired.config`/`desired.env_keys` against the live `config.yaml` and `.env` **key names only** (secret values never leave the host). Push runs `hermes config set` per declared key, then restarts the gateway if it's active. Both sides see the template-merged `desired`. | `GET`/`POST /api/agents/{id}/config-diff` |
+| **Templates** | A `fleet/templates/*.yaml` config fragment (`config` + `env_keys` only) merged under many agents' `desired` at once — model stacks, fallbacks, and auxiliary-task models declared once. Apply adds a template name to a batch of agent records. | `GET /api/templates`, `GET /api/templates/{name}`, `POST /api/templates/{name}/apply` |
 | **Plugins** | Lists installed plugins with version, enabled/disabled state, and source. Updating one (git pull) can trip Hermes's own security scan and auto-disable it — that's surfaced as a `disabled_by_scan` flag rather than left buried in scan-report text, since an auto-disabled plugin can mean a messaging platform silently goes offline. | `GET /api/agents/{id}/plugins`, `POST /api/agents/{id}/plugins/{name}/update` |
 | **Restart** | Plain `gateway restart` — the everyday operate action, works regardless of current state. Distinct from Reconcile's problem-triggered fixes. | `POST /api/agents/{id}/restart` |
 | **Update** | `hermes update` on the shared code checkout — affects every profile on that install, not just one agent's record of it. Streamed. | `POST /api/agents/{id}/update` |
@@ -247,11 +287,11 @@ Runs as its own service (`docker compose up` starts it on `:8643`, endpoint
 Two tiers, matching the API's own read/write split:
 
 - **Read-only** (`list_hosts`, `list_agents`, `get_agent`, `get_status`,
-  `get_logs`, `reconcile_check`, `config_diff`, `list_plugins`) —
-  unrestricted. An agent asking "what's broken" is exactly what Beacon is
-  for.
-- **Mutating** (`deploy`, `apply_fix`, `push_config`, `decommission`,
-  `restart`, `update_plugin`, `update_agent`) — each takes a
+  `get_logs`, `reconcile_check`, `config_diff`, `list_plugins`,
+  `list_templates`, `get_template`) — unrestricted. An agent asking "what's
+  broken" is exactly what Beacon is for.
+- **Mutating** (`deploy`, `apply_fix`, `push_config`, `apply_template`,
+  `decommission`, `restart`, `update_plugin`, `update_agent`) — each takes a
   `confirm: bool = False` parameter. Called without it, the tool describes
   what it *would* do and does nothing; only `confirm=true` actually runs
   it. This is on top of whatever confirmation UI the MCP client itself
@@ -281,7 +321,10 @@ this one credential.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET`/`PUT`/`DELETE` | `/api/hosts/{id}` | Host CRUD |
-| `GET`/`PUT`/`DELETE` | `/api/agents/{id}` | Agent CRUD |
+| `GET`/`PUT`/`DELETE` | `/api/agents/{id}` | Agent CRUD (`GET` also returns `effective_desired`, the template-merged view) |
+| `GET` | `/api/templates` | List templates, each with the agent ids using it |
+| `GET` | `/api/templates/{name}` | One template's content + its `used_by` agents |
+| `POST` | `/api/templates/{name}/apply` | Add a template to agents (`{"agent_ids": [...], "confirm": true}`) — T2 |
 | `GET` | `/api/agents/{id}/status` | Live status |
 | `GET` | `/api/agents/{id}/logs?lines=N` | Log tail |
 | `GET` | `/api/tiers` | Tier registry — every gated capability, its tier, and why |
@@ -340,11 +383,13 @@ backend/
   store.py        fleet/ YAML read/write
   ssh.py          the one place that shells out to `ssh`
   schemas.py      Host/Agent pydantic models
+  templates.py    config templates: load, validate, deep-merge under `desired`
   drivers/
     hermes.py     the only driver so far
 fleet/
   hosts.yaml.example
   agents/         one YAML file per agent (gitignored — real inventory)
+  templates/      config fragments merged under many agents (gitignored)
   decommissioned/ archived agent records (gitignored)
 frontend/
   index.html, app.js, styles.css   no build step

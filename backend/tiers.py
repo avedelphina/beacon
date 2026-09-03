@@ -68,6 +68,12 @@ CAPABILITY_TIERS: dict[str, tuple[Tier, str]] = {
         "Installs a new gateway (simple/add-profile/new-user). Meaningful footprint on the "
         "host, but a fresh install with nothing yet depending on it.",
     ),
+    "apply_template": (
+        Tier.T2,
+        "Adds a template name to agent records — fleet YAML only, touches no host. "
+        "Reversible by removing the name; the config it implies still passes through "
+        "push_config's own T3 gate before it reaches a host.",
+    ),
     "update_agent": (
         Tier.T4,
         "Escalated above deploy/update_plugin's T3: this touches the shared code checkout, "

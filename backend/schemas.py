@@ -32,6 +32,11 @@ class Agent(BaseModel):
     type: str
     host: str
     profile: str | None = None
+    # Names of fleet/templates/*.yaml fragments merged under `desired` (in
+    # order) to produce the effective config — see backend/templates.py.
+    # `desired` here always stays the agent's own overrides only; the merge
+    # happens on read, never written back to the file.
+    templates: list[str] = Field(default_factory=list)
     desired: dict = Field(default_factory=dict)
     owner: str | None = None
     notes: str | None = None

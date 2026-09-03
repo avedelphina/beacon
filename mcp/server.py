@@ -109,6 +109,20 @@ async def config_diff(agent_id: str) -> object:
 
 
 @mcp.tool(annotations=READ_ONLY)
+async def list_templates() -> object:
+    """Config templates (fleet/templates/*.yaml) — shared `config`/`env_keys`
+    fragments merged under many agents' `desired`. Each entry lists the agent
+    ids currently using it. Pass a name to get_template for its content."""
+    return await _get("/api/templates")
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def get_template(name: str) -> object:
+    """One config template's content plus the agent ids using it."""
+    return await _get(f"/api/templates/{name}")
+
+
+@mcp.tool(annotations=READ_ONLY)
 async def list_tiers() -> object:
     """The tier registry: every gated capability, its autonomy tier (T0-T5),
     and the rationale for that assignment. Beacon enforces the confirm=true
@@ -151,6 +165,16 @@ async def push_config(agent_id: str, confirm: bool = False) -> str:
     if not confirm:
         return f"Would push desired.config to {agent_id!r} and restart its gateway if active. Call again with confirm=true to actually run it."
     return await _post(f"/api/agents/{agent_id}/config-diff?confirm=true")
+
+
+@mcp.tool(annotations=DESTRUCTIVE)
+async def apply_template(name: str, agent_ids: list[str], confirm: bool = False) -> object:
+    """Add config template `name` to each agent in `agent_ids` (fleet YAML
+    only — touches no host; the config it implies still goes through
+    push_config's own gate). Requires confirm=true."""
+    if not confirm:
+        return f"Would add template {name!r} to {len(agent_ids)} agent(s): {', '.join(agent_ids) or '(none)'}. Call again with confirm=true to actually run it."
+    return await _post(f"/api/templates/{name}/apply", json={"agent_ids": agent_ids, "confirm": True})
 
 
 @mcp.tool(annotations=DESTRUCTIVE)

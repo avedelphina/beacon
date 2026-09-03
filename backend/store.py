@@ -82,11 +82,20 @@ def list_agents() -> list[Agent]:
     return agents
 
 
-def get_agent(id_: str) -> Agent:
+def get_agent(id_: str, resolved: bool = False) -> Agent:
+    """`resolved=True` returns the agent with `desired` replaced by the merge
+    of its templates and its own overrides (see backend/templates.py). The
+    file on disk is never touched — this copy is for reads and driver calls.
+    """
     path = _agent_path(id_)
     if not path.exists():
         raise NotFound(id_)
-    return Agent(**yaml.safe_load(path.read_text()))
+    agent = Agent(**yaml.safe_load(path.read_text()))
+    if resolved:
+        from . import templates  # lazy: templates imports store.NotFound
+
+        agent = agent.model_copy(update={"desired": templates.resolve(agent)})
+    return agent
 
 
 def upsert_agent(agent: Agent) -> Agent:

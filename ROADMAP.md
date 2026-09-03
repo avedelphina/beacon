@@ -69,7 +69,10 @@ Still open:
   proposing agent from a reviewing one. The target shape is scoped
   per-agent capability credentials, not one shared token.
 - **Bulk actions** across the fleet table — reconcile everything, restart
-  everything with drift — instead of one agent at a time.
+  everything with drift — instead of one agent at a time. First slice
+  landed: config templates (`fleet/templates/`, `POST
+  /api/templates/{name}/apply`) push a shared model/config stack to a batch
+  of agents. Still one-at-a-time: reconcile, restart, deploy.
 - **Per-agent history / timeline** of deploys, restarts, and config
   changes, beyond scrolling git log by hand.
 
