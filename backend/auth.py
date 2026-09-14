@@ -37,6 +37,15 @@ def is_allowed_email(email: object) -> bool:
 # normal way. Bearer <this token> on any /api/* request stands in for one.
 MCP_TOKEN = os.environ.get("BEACON_MCP_TOKEN")
 
+
+def is_mcp_authorization(authorization: object) -> bool:
+    return (
+        isinstance(authorization, str)
+        and MCP_TOKEN is not None
+        and secrets.compare_digest(authorization, f"Bearer {MCP_TOKEN}")
+    )
+
+
 SESSION_SECRET = os.environ.get("BEACON_SESSION_SECRET")
 if not SESSION_SECRET:
     if AUTH_ENABLED:
@@ -160,7 +169,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.url.path.startswith("/auth/"):
             return await call_next(request)
-        if MCP_TOKEN and request.headers.get("authorization") == f"Bearer {MCP_TOKEN}":
+        if is_mcp_authorization(request.headers.get("authorization")):
             # Keep the service credential distinct from a browser-session
             # operator so T4/T5 endpoints can require a real human session.
             request.state.auth_via_mcp = True
