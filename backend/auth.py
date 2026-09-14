@@ -19,6 +19,17 @@ from starlette.middleware.base import BaseHTTPMiddleware
 ZITADEL_ISSUER = os.environ.get("ZITADEL_ISSUER", "").rstrip("/")
 ZITADEL_CLIENT_ID = os.environ.get("ZITADEL_CLIENT_ID", "")
 AUTH_ENABLED = bool(ZITADEL_ISSUER and ZITADEL_CLIENT_ID)
+ALLOWED_EMAILS = frozenset(
+    email.strip().casefold()
+    for email in os.environ.get("BEACON_ALLOWED_EMAILS", "").split(",")
+    if email.strip()
+)
+if AUTH_ENABLED and not ALLOWED_EMAILS:
+    raise RuntimeError("BEACON_ALLOWED_EMAILS must contain at least one email when OIDC auth is enabled")
+
+
+def is_allowed_email(email: object) -> bool:
+    return isinstance(email, str) and email.casefold() in ALLOWED_EMAILS
 
 # The same static token the MCP server requires of its own callers doubles
 # as its credential for calling *this* API — a service has no browser to
@@ -112,6 +123,10 @@ def callback(request: Request, code: str = "", state: str = "", error: str = "")
         tokens["id_token"], signing_key.key, algorithms=["RS256"],
         audience=ZITADEL_CLIENT_ID, issuer=ZITADEL_ISSUER,
     )
+
+    email = claims.get("email")
+    if not is_allowed_email(email):
+        raise HTTPException(403, "this Beacon instance is not configured to admit that account")
 
     request.session["user"] = {
         "sub": claims["sub"],
