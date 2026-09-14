@@ -143,11 +143,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next):
-        if not AUTH_ENABLED or request.url.path.startswith("/auth/"):
-            return await call_next(request)
-        if request.session.get("user"):
+        if request.url.path.startswith("/auth/"):
             return await call_next(request)
         if MCP_TOKEN and request.headers.get("authorization") == f"Bearer {MCP_TOKEN}":
+            # Keep the service credential distinct from a browser-session
+            # operator so T4/T5 endpoints can require a real human session.
+            request.state.auth_via_mcp = True
+            return await call_next(request)
+        if not AUTH_ENABLED:
+            return await call_next(request)
+        if request.session.get("user"):
             return await call_next(request)
         if request.url.path.startswith("/api/"):
             return JSONResponse({"detail": "not authenticated"}, status_code=401)
