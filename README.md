@@ -246,7 +246,9 @@ authorization code + PKCE — `backend/auth.py`. Optional: set nothing and
 Beacon runs open, same as before this existed. Set `ZITADEL_ISSUER` and
 `ZITADEL_CLIENT_ID` and every route except `/auth/*` requires a logged-in
 session — a browser hitting `/` gets redirected to `/auth/login`, an
-unauthenticated API call gets a clean 401.
+unauthenticated API call gets a clean 401. Set `BEACON_ALLOWED_EMAILS` to a
+comma-separated exact email allowlist; it is required when OIDC is enabled and
+accounts outside it are rejected at callback time.
 
 **Zitadel setup:**
 
@@ -261,6 +263,7 @@ unauthenticated API call gets a clean 401.
    ZITADEL_ISSUER=https://id.example.com
    ZITADEL_CLIENT_ID=<the generated numeric ID>
    BEACON_SESSION_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+   BEACON_ALLOWED_EMAILS=tom@example.com
    ```
 
 The client ID isn't sensitive (PKCE public clients don't hold a secret) —
