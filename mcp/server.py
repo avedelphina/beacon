@@ -9,9 +9,9 @@ real out-of-band approval mechanism.
 """
 
 import os
-import secrets
 
 import httpx
+from auth import is_valid_bearer
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from starlette.middleware.base import BaseHTTPMiddleware

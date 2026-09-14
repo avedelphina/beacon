@@ -6,10 +6,10 @@ from pathlib import Path
 from backend.auth import _pkce_pair, is_allowed_email, is_mcp_authorization
 
 
-_mcp_spec = importlib.util.spec_from_file_location("beacon_mcp_server", Path(__file__).parents[1] / "mcp" / "server.py")
-_mcp_module = importlib.util.module_from_spec(_mcp_spec)
-_mcp_spec.loader.exec_module(_mcp_module)
-is_valid_bearer = _mcp_module.is_valid_bearer
+_auth_spec = importlib.util.spec_from_file_location("beacon_mcp_auth", Path(__file__).parents[1] / "mcp" / "auth.py")
+_auth_module = importlib.util.module_from_spec(_auth_spec)
+_auth_spec.loader.exec_module(_auth_module)
+is_valid_bearer = _auth_module.is_valid_bearer
 
 
 def test_pkce_challenge_is_s256_of_verifier():
