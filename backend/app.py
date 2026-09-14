@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -46,6 +46,18 @@ def _confirm_gate(capability: str, confirm: bool, description: str, **tier_param
         "tier_label": TIER_LABELS[tier],
         "detail": f"Would {description} (tier {tier.name} — {rationale}). Call again with confirm=true to actually run it.",
     }
+
+
+def _require_human_session(request: Request, capability: str, **tier_params) -> None:
+    """T4/T5 actions must not be authorized by MCP's service token.
+
+    The token is held by an LLM-facing MCP server, so `confirm=true` from that
+    caller is not a human approval. Browser sessions remain the operator path
+    until a real, out-of-band approval mechanism exists.
+    """
+    tier, _ = tier_for(capability, **tier_params)
+    if tier >= 4 and getattr(request.state, "auth_via_mcp", False):
+        raise HTTPException(403, f"{tier.name} action requires a human browser session; MCP callers cannot execute it")
 
 app.include_router(auth.router)
 app.add_middleware(auth.AuthMiddleware)
@@ -247,7 +259,8 @@ def deploy_agent(id_: str, confirm: bool = False) -> StreamingResponse:
 
 
 @app.post("/api/agents/{id_}/update")
-def update_agent(id_: str, confirm: bool = False) -> StreamingResponse:
+def update_agent(id_: str, request: Request, confirm: bool = False) -> StreamingResponse:
+    _require_human_session(request, "update_agent")
     if (gate := _confirm_gate("update_agent", confirm, f"run `hermes update` on the host for {id_!r} (affects every profile sharing that install)")) is not None:
         return JSONResponse(gate)
     agent = store.get_agent(id_)
@@ -319,7 +332,8 @@ def push_config(id_: str, confirm: bool = False) -> StreamingResponse:
 
 
 @app.post("/api/agents/{id_}/decommission")
-def decommission_agent(id_: str, body: DecommissionRequest) -> StreamingResponse:
+def decommission_agent(id_: str, body: DecommissionRequest, request: Request) -> StreamingResponse:
+    _require_human_session(request, "decommission", purge=body.purge, remove_user=body.remove_user)
     gate_desc = f"decommission {id_!r}"
     if body.purge:
         gate_desc += " and purge its profile data"

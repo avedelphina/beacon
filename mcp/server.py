@@ -3,10 +3,9 @@
 A thin client of Beacon's own HTTP API — same contract the web GUI uses,
 just a different caller. Read tools (status, logs, list, reconcile-check,
 config-diff) are unrestricted: an agent asking "what's broken" is exactly
-what Beacon is for. Tools that touch a host (deploy, apply_fix, push_config,
-decommission) require confirm=true; called without it, they describe what
-would happen instead of doing it — a forced plan-before-apply step, since a
-misread instruction here is a much worse failure mode than a misclick.
+what Beacon is for. T4/T5 actions that require human approval are deliberately
+not exposed through MCP; use the authenticated browser UI until Beacon has a
+real out-of-band approval mechanism.
 """
 
 import os
@@ -177,23 +176,6 @@ async def apply_template(name: str, agent_ids: list[str], confirm: bool = False)
     return await _post(f"/api/templates/{name}/apply", json={"agent_ids": agent_ids, "confirm": True})
 
 
-@mcp.tool(annotations=DESTRUCTIVE)
-async def decommission(agent_id: str, purge: bool = False, remove_user: bool = False, confirm: bool = False) -> str:
-    """Stop and uninstall an agent's gateway service, archiving its Beacon record.
-    purge also deletes its profile data (memory, sessions, skills) — refused for
-    the default profile. remove_user also deletes the OS account (new-user-mode
-    agents only). Requires confirm=true."""
-    if not confirm:
-        extra = []
-        if purge:
-            extra.append("purge its profile data")
-        if remove_user:
-            extra.append("delete its OS user account")
-        detail = f" and {', '.join(extra)}" if extra else ""
-        return f"Would decommission {agent_id!r}{detail}. Call again with confirm=true to actually run it."
-    return await _post(f"/api/agents/{agent_id}/decommission", json={"purge": purge, "remove_user": remove_user, "confirm": True})
-
-
 @mcp.tool(annotations=READ_ONLY)
 async def list_plugins(agent_id: str) -> object:
     """List an agent's installed plugins — name, version, enabled/disabled, source."""
@@ -215,15 +197,6 @@ async def update_plugin(agent_id: str, plugin: str, confirm: bool = False) -> ob
     if not confirm:
         return f"Would update plugin {plugin!r} on {agent_id!r}. Call again with confirm=true to actually run it."
     return await _post(f"/api/agents/{agent_id}/plugins/{plugin}/update?confirm=true")
-
-
-@mcp.tool(annotations=DESTRUCTIVE)
-async def update_agent(agent_id: str, confirm: bool = False) -> str:
-    """Update Hermes itself (`hermes update`) on the agent's shared code checkout —
-    affects every profile on that install, not just this one. Requires confirm=true."""
-    if not confirm:
-        return f"Would run `hermes update` for {agent_id!r} (affects every profile sharing its install). Call again with confirm=true to actually run it."
-    return await _post(f"/api/agents/{agent_id}/update?confirm=true", timeout=300)
 
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
