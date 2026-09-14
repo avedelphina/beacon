@@ -1,7 +1,7 @@
 import base64
 import hashlib
 
-from backend.auth import _pkce_pair
+from backend.auth import _pkce_pair, is_allowed_email
 
 
 def test_pkce_challenge_is_s256_of_verifier():
@@ -24,3 +24,23 @@ def test_pkce_verifier_meets_rfc7636_minimum_length():
     # RFC 7636 requires the verifier to be 43-128 characters.
     verifier, _ = _pkce_pair()
     assert 43 <= len(verifier) <= 128
+
+
+
+def test_allowed_email_is_case_insensitive_and_normalized(monkeypatch):
+    import backend.auth as auth
+
+    monkeypatch.setattr(auth, "ALLOWED_EMAILS", frozenset({"tom@example.com", "admin@example.com"}))
+
+    assert is_allowed_email(" TOM@EXAMPLE.COM ".strip())
+    assert is_allowed_email("admin@example.com")
+    assert not is_allowed_email("other@example.com")
+
+
+def test_allowed_email_rejects_missing_or_non_string_claims(monkeypatch):
+    import backend.auth as auth
+
+    monkeypatch.setattr(auth, "ALLOWED_EMAILS", frozenset({"tom@example.com"}))
+
+    assert not is_allowed_email(None)
+    assert not is_allowed_email(123)
