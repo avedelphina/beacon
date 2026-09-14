@@ -171,6 +171,7 @@ def test_logs_uses_default_path_and_journalctl_fallback(fake_ssh):
     assert text == "log line 1\nlog line 2"
     cmd = fake_ssh.last_command
     assert "$HOME/.hermes/profiles/holly/logs/gateway.log" in cmd
+    assert "[ -f $HOME/.hermes/profiles/holly/logs/gateway.log ]" in cmd
     assert "journalctl --user -u" in cmd
     assert "-n 50" in cmd
 
