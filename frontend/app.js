@@ -97,8 +97,10 @@ const api = {
 };
 
 function statusPill(state) {
-  const label = { "not-installed": "not installed", crashlooping: "crash-looping" }[state] || state;
-  return `<span class="status-pill ${state}"><span class="dot"></span>${label}</span>`;
+  const labels = { "not-installed": "not installed", crashlooping: "crash-looping" };
+  const safeState = ["loading", "active", "inactive", "failed", "unreachable", "not-installed", "crashlooping", "starting", "stopping"].includes(state) ? state : "unknown";
+  const label = labels[safeState] || safeState;
+  return `<span class="status-pill ${safeState}"><span class="dot"></span>${esc(label)}</span>`;
 }
 
 // ---- tabs ----
@@ -201,7 +203,12 @@ async function populateHostSelect() {
   const hosts = await api.list("hosts");
   const select = document.getElementById("agent-host-select");
   const current = select.value;
-  select.innerHTML = hosts.map((h) => `<option value="${h.id}">${h.id}</option>`).join("");
+  select.replaceChildren(...hosts.map((h) => {
+    const option = document.createElement("option");
+    option.value = h.id;
+    option.textContent = h.id;
+    return option;
+  }));
   if (hosts.some((h) => h.id === current)) select.value = current;
 }
 
@@ -330,7 +337,10 @@ async function runConfigCheck() {
   try {
     renderConfigFindings(await api.configDiff(currentInspectId));
   } catch (err) {
-    el.innerHTML = `<div class="finding critical"><span class="sev"></span><span class="summary">${err.message}</span></div>`;
+    const error = document.createElement("div");
+    error.className = "finding critical";
+    error.textContent = err.message;
+    el.replaceChildren(error);
   }
 }
 
@@ -391,7 +401,10 @@ async function runCheck() {
   try {
     renderFindings(await api.reconcile(currentInspectId));
   } catch (err) {
-    el.innerHTML = `<div class="finding critical"><span class="sev"></span><span class="summary">${err.message}</span></div>`;
+    const error = document.createElement("div");
+    error.className = "finding critical";
+    error.textContent = err.message;
+    el.replaceChildren(error);
   }
 }
 
@@ -492,7 +505,10 @@ async function runListPlugins() {
   try {
     renderPlugins(await api.listPlugins(currentInspectId));
   } catch (err) {
-    el.innerHTML = `<div class="finding critical"><span class="sev"></span><span class="summary">${err.message}</span></div>`;
+    const error = document.createElement("div");
+    error.className = "finding critical";
+    error.textContent = err.message;
+    el.replaceChildren(error);
   }
 }
 
