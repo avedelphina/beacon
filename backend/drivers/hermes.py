@@ -113,7 +113,11 @@ def status(agent: Agent, host: Host) -> dict:
 
 
 def logs(agent: Agent, host: Host, lines: int = 200) -> str:
-    log_path = agent.desired.get("log_path") or f"{profile_home(agent)}/logs/gateway.log"
+    _validate_agent(agent)
+    configured_log_path = agent.desired.get("log_path")
+    # Keep the generated $HOME default unquoted so the remote shell expands it;
+    # quote only operator-supplied paths to prevent command injection.
+    log_path = shlex.quote(configured_log_path) if configured_log_path else f"{profile_home(agent)}/logs/gateway.log"
     unit = shlex.quote(service_name(agent))
     # Fall back to the journal when the app-level log file doesn't exist yet —
     # a unit that has never started successfully (bad profile, missing venv)

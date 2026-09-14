@@ -1,4 +1,5 @@
 import json
+import shlex
 
 import pytest
 
@@ -170,6 +171,7 @@ def test_logs_uses_default_path_and_journalctl_fallback(fake_ssh):
     assert text == "log line 1\nlog line 2"
     cmd = fake_ssh.last_command
     assert "$HOME/.hermes/profiles/holly/logs/gateway.log" in cmd
+    assert "[ -f $HOME/.hermes/profiles/holly/logs/gateway.log ]" in cmd
     assert "journalctl --user -u" in cmd
     assert "-n 50" in cmd
 
@@ -178,6 +180,18 @@ def test_logs_respects_log_path_override(fake_ssh):
     fake_ssh.result = SSHResult(ok=True, stdout="", stderr="", returncode=0)
     hermes.logs(make_agent(desired={"log_path": "/custom/path.log"}), make_host())
     assert "/custom/path.log" in fake_ssh.last_command
+
+
+def test_logs_quotes_log_path_against_command_injection(fake_ssh):
+    # log_path is agent-record data, not something Beacon controls — it must
+    # never be able to break out of the `[ -f ... ]`/`tail` command it's
+    # interpolated into. Regression test for the RCE this used to allow.
+    fake_ssh.result = SSHResult(ok=True, stdout="", stderr="", returncode=0)
+    payload = "/x; id #"
+    hermes.logs(make_agent(desired={"log_path": payload}), make_host())
+    cmd = fake_ssh.last_command
+    assert shlex.quote(payload) in cmd
+    assert f"[ -f {payload} ]" not in cmd  # would mean it landed unquoted
 
 
 def test_logs_unreachable(fake_ssh):
