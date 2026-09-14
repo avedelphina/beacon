@@ -18,6 +18,19 @@ def client(fleet, fake_ssh):
 
 
 @pytest.fixture
+def mcp_client(fleet, fake_ssh, monkeypatch):
+    # Match the production bearer-token path without requiring a live OIDC
+    # provider. This must remain distinct from an authenticated browser user.
+    from backend import auth
+
+    # This restriction must also hold in open/local mode: a configured MCP
+    # token is still an LLM-facing service credential, never human approval.
+    monkeypatch.setattr(auth, "AUTH_ENABLED", False)
+    monkeypatch.setattr(auth, "MCP_TOKEN", "test-mcp-token")
+    return TestClient(app, headers={"Authorization": "Bearer test-mcp-token"})
+
+
+@pytest.fixture
 def host_and_agent(client):
     client.put("/api/hosts/edge-01", json={
         "id": "edge-01", "address": "10.0.0.1",
@@ -220,3 +233,44 @@ def test_reconcile_check_never_gated(client, host_and_agent, fake_ssh):
     r = client.get("/api/agents/a1/reconcile")
     assert r.status_code == 200
     assert r.json()[0]["id"] == "unreachable"
+
+
+# ---------------------------------------------------------------------------
+# MCP bearer credentials are service credentials, not human approval.
+# ---------------------------------------------------------------------------
+
+
+def test_mcp_bearer_can_still_run_t2_restart(mcp_client, fake_ssh):
+    # Ensure the restriction is not accidentally applied to ordinary T2 work.
+    mcp_client.put("/api/hosts/edge-01", json={
+        "id": "edge-01", "address": "10.0.0.1",
+        "ssh": {"user": "deploy", "key": "~/.ssh/id_ed25519", "port": 22}, "tags": [],
+    })
+    mcp_client.put("/api/agents/a1", json={"id": "a1", "type": "hermes", "host": "edge-01", "desired": {}})
+    fake_ssh.result = SSHResult(ok=True, stdout="restarted", stderr="", returncode=0)
+
+    r = mcp_client.post("/api/agents/a1/restart?confirm=true")
+
+    assert r.status_code == 200
+    assert len(fake_ssh.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("path", "payload", "tier"),
+    [
+        ("/api/agents/a1/update?confirm=true", None, "T4"),
+        ("/api/agents/a1/decommission", {"purge": True, "confirm": True}, "T5"),
+    ],
+)
+def test_mcp_bearer_cannot_execute_human_only_actions(mcp_client, fake_ssh, path, payload, tier):
+    mcp_client.put("/api/hosts/edge-01", json={
+        "id": "edge-01", "address": "10.0.0.1",
+        "ssh": {"user": "deploy", "key": "~/.ssh/id_ed25519", "port": 22}, "tags": [],
+    })
+    mcp_client.put("/api/agents/a1", json={"id": "a1", "type": "hermes", "host": "edge-01", "desired": {}})
+
+    r = mcp_client.post(path, json=payload)
+
+    assert r.status_code == 403
+    assert tier in r.json()["detail"]
+    assert fake_ssh.calls == []
