@@ -113,7 +113,7 @@ def status(agent: Agent, host: Host) -> dict:
 
 
 def logs(agent: Agent, host: Host, lines: int = 200) -> str:
-    log_path = agent.desired.get("log_path") or f"{profile_home(agent)}/logs/gateway.log"
+    log_path = shlex.quote(agent.desired.get("log_path") or f"{profile_home(agent)}/logs/gateway.log")
     unit = shlex.quote(service_name(agent))
     # Fall back to the journal when the app-level log file doesn't exist yet —
     # a unit that has never started successfully (bad profile, missing venv)

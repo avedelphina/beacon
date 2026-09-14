@@ -27,7 +27,11 @@ services:
   beacon:
     build: .
     ports:
-      - "8642:8642"
+      # Loopback-only by default — with no .env, AUTH_ENABLED is false and
+      # every /api/* route is unauthenticated (see backend/auth.py). Set
+      # BEACON_BIND_HOST to expose it beyond this machine, and set up
+      # ZITADEL_ISSUER/ZITADEL_CLIENT_ID first if you do.
+      - "${BEACON_BIND_HOST:-127.0.0.1}:8642:8642"
     volumes:
       - ./fleet:/app/fleet
       - ./tbot/data:/tbot-data:ro
@@ -46,7 +50,8 @@ services:
       - BEACON_URL=http://beacon:8642
       - BEACON_MCP_TOKEN=${BEACON_MCP_TOKEN:-}
     ports:
-      - "8643:8643"
+      # Same loopback-by-default reasoning as the beacon service above.
+      - "${BEACON_BIND_HOST:-127.0.0.1}:8643:8643"
     depends_on:
       - beacon
     restart: unless-stopped
