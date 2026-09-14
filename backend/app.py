@@ -54,6 +54,17 @@ app.add_middleware(auth.AuthMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=auth.SESSION_SECRET, https_only=False)
 
 
+@app.middleware("http")
+async def _csp(request, call_next):
+    # Defense in depth alongside frontend/app.js's own escaping (esc()) —
+    # the frontend renders data that ultimately comes from remote agent
+    # hosts (plugin manifests, config.yaml values), so a second layer here
+    # limits what an XSS payload that slips through can actually do.
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    return response
+
+
 @app.get("/api/tiers")
 def list_tiers() -> dict:
     """The tier registry: every gated capability, its tier, and the

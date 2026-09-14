@@ -32,6 +32,18 @@ if not SESSION_SECRET:
         raise RuntimeError("BEACON_SESSION_SECRET must be set when ZITADEL_ISSUER/ZITADEL_CLIENT_ID are configured")
     SESSION_SECRET = secrets.token_urlsafe(32)  # dev-only, ephemeral — fine since nothing enforces it
 
+if not AUTH_ENABLED:
+    # Loud on purpose: every /api/* route (deploy, decommission, ...) is
+    # unauthenticated in this mode. Fine for local dev on loopback; a real
+    # problem the moment this process is reachable from anywhere else —
+    # docker-compose.yml binds 127.0.0.1 by default for exactly this reason.
+    print(
+        "[beacon] WARNING: ZITADEL_ISSUER/ZITADEL_CLIENT_ID not set — running with NO AUTH. "
+        "Every /api/* route is open to anyone who can reach this process. "
+        "Do not expose this beyond localhost without configuring auth (see .env.example).",
+        flush=True,
+    )
+
 router = APIRouter()
 
 _jwks_client: "jwt.PyJWKClient | None" = None
