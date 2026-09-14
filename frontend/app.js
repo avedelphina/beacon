@@ -1,3 +1,13 @@
+// Host/agent data (and, via plugins/config-diff, data that ultimately comes
+// from a remote agent host) gets rendered with innerHTML template literals
+// throughout this file — escape anything that isn't a literal we wrote
+// ourselves before it goes into one of those templates.
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
 const api = {
   async list(kind) {
     const r = await fetch(`/api/${kind}`);
@@ -117,15 +127,15 @@ async function renderHosts() {
   for (const h of hosts) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${h.id}</td>
-      <td>${h.address}</td>
-      <td>${h.ssh.user}</td>
-      <td>${h.ssh.key}</td>
-      <td>${h.ssh.port}</td>
-      <td>${h.tags.join(", ")}</td>
+      <td>${esc(h.id)}</td>
+      <td>${esc(h.address)}</td>
+      <td>${esc(h.ssh.user)}</td>
+      <td>${esc(h.ssh.key ?? h.ssh.config_file)}</td>
+      <td>${esc(h.ssh.port)}</td>
+      <td>${esc(h.tags.join(", "))}</td>
       <td class="row-actions">
-        <button class="link-btn" data-edit="${h.id}">Edit</button>
-        <button class="link-btn danger" data-del="${h.id}">Delete</button>
+        <button class="link-btn" data-edit="${esc(h.id)}">Edit</button>
+        <button class="link-btn danger" data-del="${esc(h.id)}">Delete</button>
       </td>`;
     body.appendChild(tr);
   }
@@ -203,16 +213,16 @@ async function renderAgents() {
   for (const a of agents) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td id="status-${a.id}">${statusPill("loading")}</td>
-      <td>${a.id}</td>
-      <td>${a.type}</td>
-      <td>${a.host}</td>
-      <td>${a.profile ?? ""}</td>
-      <td>${a.owner ?? ""}</td>
+      <td id="status-${esc(a.id)}">${statusPill("loading")}</td>
+      <td>${esc(a.id)}</td>
+      <td>${esc(a.type)}</td>
+      <td>${esc(a.host)}</td>
+      <td>${esc(a.profile ?? "")}</td>
+      <td>${esc(a.owner ?? "")}</td>
       <td class="row-actions">
-        <button class="link-btn" data-inspect="${a.id}">Inspect</button>
-        <button class="link-btn" data-edit="${a.id}">Edit</button>
-        <button class="link-btn danger" data-del="${a.id}">Delete</button>
+        <button class="link-btn" data-inspect="${esc(a.id)}">Inspect</button>
+        <button class="link-btn" data-edit="${esc(a.id)}">Edit</button>
+        <button class="link-btn danger" data-del="${esc(a.id)}">Delete</button>
       </td>`;
     body.appendChild(tr);
   }
@@ -292,20 +302,20 @@ function renderConfigFindings(result) {
   const el = document.getElementById("inspect-config-results");
   el.innerHTML = "";
   if (!result.reachable) {
-    el.innerHTML = `<div class="finding critical"><span class="sev"></span><span class="summary">${result.detail}</span></div>`;
+    el.innerHTML = `<div class="finding critical"><span class="sev"></span><span class="summary">${esc(result.detail)}</span></div>`;
     return;
   }
   for (const c of result.config) {
-    const detail = c.status === "match" ? "" : ` — live: ${JSON.stringify(c.live)}, desired: ${JSON.stringify(c.desired)}`;
+    const detail = c.status === "match" ? "" : ` — live: ${esc(JSON.stringify(c.live))}, desired: ${esc(JSON.stringify(c.desired))}`;
     const row = document.createElement("div");
     row.className = `finding ${CONFIG_SEVERITY[c.status] || "info"}`;
-    row.innerHTML = `<span class="sev"></span><span class="summary"><code>${c.path}</code> ${c.status}${detail}</span>`;
+    row.innerHTML = `<span class="sev"></span><span class="summary"><code>${esc(c.path)}</code> ${esc(c.status)}${detail}</span>`;
     el.appendChild(row);
   }
   for (const e of result.env) {
     const row = document.createElement("div");
     row.className = `finding ${CONFIG_SEVERITY[e.status] || "info"}`;
-    row.innerHTML = `<span class="sev"></span><span class="summary"><code>${e.key}</code> ${e.status} in .env</span>`;
+    row.innerHTML = `<span class="sev"></span><span class="summary"><code>${esc(e.key)}</code> ${esc(e.status)} in .env</span>`;
     el.appendChild(row);
   }
   if (!result.config.length && !result.env.length) {
@@ -364,8 +374,8 @@ function renderFindings(findings) {
     row.className = `finding ${f.severity}`;
     row.innerHTML = `
       <span class="sev"></span>
-      <span class="summary">${f.summary}</span>
-      ${f.fix ? `<button type="button" class="link-btn" data-fix="${f.fix}">Fix: ${f.fix}</button>` : ""}
+      <span class="summary">${esc(f.summary)}</span>
+      ${f.fix ? `<button type="button" class="link-btn" data-fix="${esc(f.fix)}">Fix: ${esc(f.fix)}</button>` : ""}
     `;
     el.appendChild(row);
   }
@@ -465,8 +475,8 @@ function renderPlugins(plugins) {
     const canUpdate = p.source === "git";
     row.innerHTML = `
       <span class="sev"></span>
-      <span class="summary"><code>${p.name}</code> v${p.version} — ${p.status} (${p.source})</span>
-      ${canUpdate ? `<button type="button" class="link-btn" data-update-plugin="${p.name}">Update</button>` : ""}
+      <span class="summary"><code>${esc(p.name)}</code> v${esc(p.version)} — ${esc(p.status)} (${esc(p.source)})</span>
+      ${canUpdate ? `<button type="button" class="link-btn" data-update-plugin="${esc(p.name)}">Update</button>` : ""}
     `;
     el.appendChild(row);
   }
@@ -597,11 +607,11 @@ async function renderTemplates() {
   for (const t of templates) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${t.name}</td>
-      <td>${t.used_by.length ? t.used_by.join(", ") : '<span class="hint">—</span>'}</td>
+      <td>${esc(t.name)}</td>
+      <td>${t.used_by.length ? esc(t.used_by.join(", ")) : '<span class="hint">—</span>'}</td>
       <td class="row-actions">
-        <button class="link-btn" data-view="${t.name}">View</button>
-        <button class="link-btn" data-apply="${t.name}">Apply to…</button>
+        <button class="link-btn" data-view="${esc(t.name)}">View</button>
+        <button class="link-btn" data-apply="${esc(t.name)}">Apply to…</button>
       </td>`;
     body.appendChild(tr);
   }
@@ -639,9 +649,9 @@ async function openTemplateApply(name) {
     list.innerHTML = agents.length
       ? agents.map((a) => `
         <label>
-          <input type="checkbox" value="${a.id}" ${using.has(a.id) ? "checked disabled" : ""}>
-          ${a.id}
-          <span class="mut">${a.host}${a.profile ? " / " + a.profile : ""}${using.has(a.id) ? " — already applied" : ""}</span>
+          <input type="checkbox" value="${esc(a.id)}" ${using.has(a.id) ? "checked disabled" : ""}>
+          ${esc(a.id)}
+          <span class="mut">${esc(a.host)}${a.profile ? " / " + esc(a.profile) : ""}${using.has(a.id) ? " — already applied" : ""}</span>
         </label>`).join("")
       : '<span class="hint">no agents</span>';
   } catch (err) {

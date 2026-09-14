@@ -8,17 +8,21 @@ from .schemas import Host
 
 def _base_cmd(host: Host) -> list[str]:
     common = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
+    # `--` marks the end of options for the `ssh` binary itself — belt and
+    # braces alongside SSHConfig/Host's own validation (schemas.py) against
+    # a user/address value ssh would otherwise parse as `-oProxyCommand=...`.
     if host.ssh.config_file:
         # The config file's own Host block owns auth (e.g. a Teleport
         # ProxyCommand) and host-key verification — don't force our own
         # StrictHostKeyChecking on top of a trust model we don't control.
-        return ["ssh", "-F", host.ssh.config_file, *common, f"{host.ssh.user}@{host.address}"]
+        return ["ssh", "-F", host.ssh.config_file, *common, "--", f"{host.ssh.user}@{host.address}"]
     return [
         "ssh",
         "-i", host.ssh.key,
         "-p", str(host.ssh.port),
         *common,
         "-o", "StrictHostKeyChecking=accept-new",
+        "--",
         f"{host.ssh.user}@{host.address}",
     ]
 
