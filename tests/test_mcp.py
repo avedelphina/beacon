@@ -17,10 +17,14 @@ def mcp_server(monkeypatch):
     spec = importlib.util.spec_from_file_location("beacon_mcp_server", mcp_dir / "server.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
+    original_path = sys.path[:]
+    repo_root = str(mcp_dir.parent)
+    sys.path[:] = [entry for entry in sys.path if entry not in ("", repo_root)]
     try:
         spec.loader.exec_module(module)
         yield module
     finally:
+        sys.path[:] = original_path
         sys.modules.pop(spec.name, None)
 
 
