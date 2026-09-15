@@ -248,7 +248,10 @@ Beacon runs open, same as before this existed. Set `ZITADEL_ISSUER` and
 session — a browser hitting `/` gets redirected to `/auth/login`, an
 unauthenticated API call gets a clean 401. Set `BEACON_ALLOWED_EMAILS` to a
 comma-separated exact email allowlist; it is required when OIDC is enabled and
-accounts outside it are rejected at callback time.
+accounts outside it are rejected at callback time. Authenticated browser mutations require a
+same-origin `Origin`/`Referer` header; MCP bearer calls are exempt because they do not use
+browser cookies. Sessions are Secure by default, expire after 8 hours, and `POST /auth/logout`
+clears them. Set `BEACON_SESSION_HTTPS_ONLY=false` only for local HTTP development.
 
 **Zitadel setup:**
 

@@ -3,7 +3,9 @@ import hashlib
 import importlib.util
 from pathlib import Path
 
-from backend.auth import _pkce_pair, is_allowed_email, is_mcp_authorization
+from fastapi import Request
+
+from backend.auth import _pkce_pair, is_allowed_email, is_mcp_authorization, same_origin_request
 
 
 _auth_spec = importlib.util.spec_from_file_location("beacon_mcp_auth", Path(__file__).parents[1] / "mcp" / "auth.py")
@@ -52,6 +54,21 @@ def test_allowed_email_rejects_missing_or_non_string_claims(monkeypatch):
 
     assert not is_allowed_email(None)
     assert not is_allowed_email(123)
+
+
+def test_same_origin_request_accepts_matching_origin_and_rejects_cross_origin():
+    def request(headers):
+        return Request({
+            "type": "http",
+            "method": "POST",
+            "path": "/api/agents/a1/restart",
+            "headers": [(key.lower().encode(), value.encode()) for key, value in headers.items()],
+            "server": ("beacon.example", 8642),
+        })
+
+    assert same_origin_request(request({"host": "beacon.example", "origin": "https://beacon.example"}))
+    assert not same_origin_request(request({"host": "beacon.example", "origin": "https://evil.example"}))
+    assert not same_origin_request(request({"host": "beacon.example"}))
 
 
 def test_mcp_authorization_requires_exact_bearer_token(monkeypatch):

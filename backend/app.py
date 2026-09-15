@@ -60,10 +60,11 @@ def _require_human_session(request: Request, capability: str, **tier_params) -> 
         raise HTTPException(403, f"{tier.name} action requires a human browser session; MCP callers cannot execute it")
 
 app.include_router(auth.router)
+app.add_middleware(auth.CSRFMiddleware)
 app.add_middleware(auth.AuthMiddleware)
-# Outermost — added last, so it runs first and request.session exists by
-# the time AuthMiddleware reads it.
-app.add_middleware(SessionMiddleware, secret_key=auth.SESSION_SECRET, https_only=False)
+# Outermost — added last, so it runs first, request.session exists by
+# the time AuthMiddleware reads it, and CSRF runs after auth state is set.
+app.add_middleware(SessionMiddleware, secret_key=auth.SESSION_SECRET, max_age=8 * 60 * 60, https_only=auth.SESSION_HTTPS_ONLY)
 
 
 @app.middleware("http")
