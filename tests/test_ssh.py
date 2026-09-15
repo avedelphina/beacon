@@ -2,11 +2,15 @@ from backend.ssh import _base_cmd
 from tests.conftest import make_host
 
 
-def test_base_cmd_uses_key_and_pins_strict_host_key_checking():
+def test_base_cmd_uses_key_and_requires_pinned_host_keys(monkeypatch):
+    monkeypatch.setenv("BEACON_KNOWN_HOSTS", "/run/secrets/fleet_known_hosts")
     cmd = _base_cmd(make_host(key="~/.ssh/id_ed25519", port=2222))
     assert "-i" in cmd and "~/.ssh/id_ed25519" in cmd
     assert "-p" in cmd and "2222" in cmd
-    assert "StrictHostKeyChecking=accept-new" in " ".join(cmd)
+    joined = " ".join(cmd)
+    assert "StrictHostKeyChecking=yes" in joined
+    assert "UserKnownHostsFile=/run/secrets/fleet_known_hosts" in joined
+    assert "accept-new" not in joined
     assert "-F" not in cmd
 
 
