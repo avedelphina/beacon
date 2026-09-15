@@ -1,7 +1,15 @@
 import base64
 import hashlib
+import importlib.util
+from pathlib import Path
 
-from backend.auth import _pkce_pair, is_allowed_email
+from backend.auth import _pkce_pair, is_allowed_email, is_mcp_authorization
+
+
+_auth_spec = importlib.util.spec_from_file_location("beacon_mcp_auth", Path(__file__).parents[1] / "mcp" / "auth.py")
+_auth_module = importlib.util.module_from_spec(_auth_spec)
+_auth_spec.loader.exec_module(_auth_module)
+is_valid_bearer = _auth_module.is_valid_bearer
 
 
 def test_pkce_challenge_is_s256_of_verifier():
@@ -44,3 +52,18 @@ def test_allowed_email_rejects_missing_or_non_string_claims(monkeypatch):
 
     assert not is_allowed_email(None)
     assert not is_allowed_email(123)
+
+
+def test_mcp_authorization_requires_exact_bearer_token(monkeypatch):
+    import backend.auth as auth
+
+    monkeypatch.setattr(auth, "MCP_TOKEN", "test-mcp-token")
+
+    assert is_mcp_authorization("Bearer test-mcp-token")
+    assert not is_mcp_authorization("Bearer test-mcp-toke")
+    assert not is_mcp_authorization("Bearer test-mcp-token-extra")
+    assert not is_mcp_authorization(None)
+    assert not is_mcp_authorization(123)
+    assert is_valid_bearer("Bearer test-mcp-token", "test-mcp-token")
+    assert not is_valid_bearer("Bearer test-mcp-toke", "test-mcp-token")
+    assert not is_valid_bearer(None, "test-mcp-token")
