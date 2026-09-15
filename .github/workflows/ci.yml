@@ -13,6 +13,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install --require-hashes -r requirements-dev.lock
+      - run: pip install --require-hashes -r mcp/requirements.lock
       - run: pytest -q
 
   docker-build:
