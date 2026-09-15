@@ -451,8 +451,11 @@ def test_push_config_script_content(fake_ssh):
 def test_deploy_simple_mode_script(fake_ssh):
     list(hermes.deploy(make_agent(), make_host()))
     script = fake_ssh.last_command
-    assert "curl -fsSL" in script
-    assert "--skip-setup" in script
+    assert "raw.githubusercontent.com/NousResearch/hermes-agent/a55c972e09177e4db3934915e329993858b247d6/scripts/install.sh" in script
+    assert hermes.INSTALL_SHA256 in script
+    assert "sha256sum --check --status" in script
+    assert "curl -fsSL" not in script
+    assert "curl" in script and "bash \"$installer\" --skip-setup" in script
     assert "hermes gateway install" in script
     assert "hermes gateway start" in script
 

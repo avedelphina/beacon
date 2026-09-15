@@ -8,7 +8,8 @@ import yaml
 from .. import ssh
 from ..schemas import Agent, Host
 
-INSTALL_URL = "https://hermes-agent.nousresearch.com/install.sh"
+INSTALL_URL = "https://raw.githubusercontent.com/NousResearch/hermes-agent/a55c972e09177e4db3934915e329993858b247d6/scripts/install.sh"
+INSTALL_SHA256 = "38547c22f4dd2224ba68a13bc3479309abb17e295b2a2ef79c2d1b8293bd822e"
 
 PROFILE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 OS_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]*$")
@@ -174,7 +175,13 @@ if command -v hermes >/dev/null 2>&1; then
   echo "[beacon] hermes already installed ($(hermes --version 2>&1 | head -1))"
 else
   echo "[beacon] installing hermes"
-  curl -fsSL {INSTALL_URL} | bash -s -- --skip-setup
+  installer=$(mktemp)
+  trap 'rm -f "$installer"' EXIT
+  curl --fail --silent --show-error --location --retry 3 --output "$installer" {INSTALL_URL}
+  printf '%s  %s\n' {INSTALL_SHA256} "$installer" | sha256sum --check --status
+  bash "$installer" --skip-setup
+  rm -f "$installer"
+  trap - EXIT
   {PATH_PREFIX}
 fi
 {profile_step}
