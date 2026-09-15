@@ -11,6 +11,7 @@ real out-of-band approval mechanism.
 import os
 
 import httpx
+from auth import is_valid_bearer
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -21,6 +22,15 @@ BEACON_URL = os.environ.get("BEACON_URL", "http://beacon:8642")
 # configured with a fixed API key, not walked through a browser login.
 # Unset, this runs open (same opt-in-via-env convention as backend/auth.py).
 BEACON_MCP_TOKEN = os.environ.get("BEACON_MCP_TOKEN")
+
+
+def is_valid_bearer(authorization: object, token: str | None) -> bool:
+    return (
+        isinstance(authorization, str)
+        and token is not None
+        and secrets.compare_digest(authorization, f"Bearer {token}")
+    )
+
 
 mcp = MCPServer("beacon", instructions=__doc__)
 
@@ -203,7 +213,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         if not BEACON_MCP_TOKEN:
             return await call_next(request)
-        if request.headers.get("authorization") != f"Bearer {BEACON_MCP_TOKEN}":
+        if not is_valid_bearer(request.headers.get("authorization"), BEACON_MCP_TOKEN):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         return await call_next(request)
 
