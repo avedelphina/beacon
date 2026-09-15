@@ -8,7 +8,7 @@ import base64
 import hashlib
 import os
 import secrets
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 import jwt
@@ -51,6 +51,9 @@ if not SESSION_SECRET:
     if AUTH_ENABLED:
         raise RuntimeError("BEACON_SESSION_SECRET must be set when ZITADEL_ISSUER/ZITADEL_CLIENT_ID are configured")
     SESSION_SECRET = secrets.token_urlsafe(32)  # dev-only, ephemeral — fine since nothing enforces it
+
+# Explicitly opt into plain HTTP only for local development.
+SESSION_HTTPS_ONLY = os.environ.get("BEACON_SESSION_HTTPS_ONLY", "true").casefold() not in {"0", "false", "no"}
 
 if not AUTH_ENABLED:
     # Loud on purpose: every /api/* route (deploy, decommission, ...) is
@@ -124,7 +127,10 @@ def callback(request: Request, code: str = "", state: str = "", error: str = "")
         timeout=15,
     )
     if not token_resp.is_success:
-        raise HTTPException(400, f"token exchange failed: {token_resp.text}")
+        # Keep IdP response details out of the browser; they may contain
+        # implementation details or sensitive diagnostics.
+        print(f"[beacon] OIDC token exchange failed: {token_resp.text}", flush=True)
+        raise HTTPException(400, "token exchange failed")
     tokens = token_resp.json()
 
     signing_key = _jwks().get_signing_key_from_jwt(tokens["id_token"])
@@ -145,10 +151,10 @@ def callback(request: Request, code: str = "", state: str = "", error: str = "")
     return RedirectResponse("/")
 
 
-@router.get("/auth/logout")
+@router.post("/auth/logout")
 def logout(request: Request):
     request.session.clear()
-    return RedirectResponse("/")
+    return RedirectResponse("/", status_code=303)
 
 
 @router.get("/auth/me")
@@ -157,6 +163,32 @@ def me(request: Request) -> dict:
     if not user:
         raise HTTPException(401, "not logged in")
     return user
+
+
+def same_origin_request(request: Request) -> bool:
+    """Require an Origin or Referer matching the request host for browser mutations."""
+    origin = request.headers.get("origin")
+    if origin:
+        parsed = urlparse(origin)
+        return parsed.scheme in {"http", "https"} and parsed.netloc == request.headers.get("host")
+    referer = request.headers.get("referer")
+    if referer:
+        return urlparse(referer).netloc == request.headers.get("host")
+    return False
+
+
+class CSRFMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if (
+            AUTH_ENABLED
+            and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+            and (request.url.path.startswith("/api/") or request.url.path == "/auth/logout")
+            and request.session.get("user")
+            and not getattr(request.state, "auth_via_mcp", False)
+            and not same_origin_request(request)
+        ):
+            return JSONResponse({"detail": "missing or invalid same-origin request marker"}, status_code=403)
+        return await call_next(request)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
