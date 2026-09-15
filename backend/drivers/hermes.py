@@ -233,11 +233,12 @@ echo "[beacon] purging profile data at {home}"
 rm -rf "{home}"
 """
     return f"""\
+set -e
 {RUNTIME_ENV}
 {PATH_PREFIX}
 
 echo "[beacon] uninstalling gateway service"
-{cmd_prefix} gateway uninstall 2>&1 || echo "[beacon] gateway uninstall returned non-zero (may not have been installed)"
+{cmd_prefix} gateway uninstall 2>&1
 {purge_step}
 echo "[beacon] done"
 """
@@ -261,6 +262,7 @@ def decommission(agent: Agent, host: Host, purge: bool = False, remove_user: boo
     if remove_user:
         user = shlex.quote(agent.desired["os_user"])
         script = f"""\
+set -e
 sudo -u {user} -i bash -s <<'BEACON_INNER'
 {inner}
 BEACON_INNER
@@ -268,7 +270,7 @@ BEACON_INNER
 echo "[beacon] removing user {agent.desired['os_user']}"
 sudo -n loginctl terminate-user {user} 2>/dev/null || true
 sleep 1
-sudo -n userdel -r {user} 2>&1 || echo "[beacon] userdel failed — user may still have running processes, check manually"
+sudo -n userdel -r {user} 2>&1
 """
     else:
         script = _wrap_for_user(agent, host, inner)
@@ -378,7 +380,7 @@ def push_config(agent: Agent, host: Host) -> Iterator[str]:
 
     cmd_prefix = _cmd_prefix(agent)
     unit = shlex.quote(service_name(agent))
-    lines = [RUNTIME_ENV, PATH_PREFIX, ""]
+    lines = ["set -e", RUNTIME_ENV, PATH_PREFIX, ""]
     for path, value in _flatten("", desired_config):
         if value is None:
             continue
@@ -567,6 +569,7 @@ def update_agent(agent: Agent, host: Host) -> Iterator[str]:
     """
     _validate_agent(agent)
     script = f"""\
+set -e
 {RUNTIME_ENV}
 {PATH_PREFIX}
 echo "[beacon] updating hermes"

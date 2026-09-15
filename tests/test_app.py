@@ -175,6 +175,23 @@ def test_decommission_with_confirm_runs_and_archives(client, host_and_agent, fak
     assert client.get("/api/agents/a1").status_code == 404  # archived out of the live fleet
 
 
+def test_decommission_with_failed_remote_step_leaves_record_in_place(client, fake_ssh):
+    client.put("/api/hosts/edge-01", json={
+        "id": "edge-01", "address": "10.0.0.1",
+        "ssh": {"user": "deploy", "key": "~/.ssh/id_ed25519", "port": 22}, "tags": [],
+    })
+    client.put("/api/agents/a1", json={
+        "id": "a1", "type": "hermes", "host": "edge-01", "desired": {"os_user": "hermes-svc"},
+    })
+    fake_ssh.stream_lines = ["userdel: user still has running processes", "__BEACON_EXIT__1"]
+
+    r = client.post("/api/agents/a1/decommission", json={"confirm": True, "remove_user": True})
+
+    assert r.status_code == 200
+    assert "nothing archived" in r.text
+    assert client.get("/api/agents/a1").status_code == 200
+
+
 def test_apply_fix_without_confirm_does_not_touch_ssh(client, host_and_agent, fake_ssh):
     r = client.post("/api/agents/a1/reconcile", json={"fix": "start"})
     assert r.status_code == 200

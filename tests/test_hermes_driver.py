@@ -1,5 +1,7 @@
 import json
+import os
 import shlex
+import subprocess
 
 import pytest
 
@@ -443,6 +445,44 @@ def test_push_config_script_content(fake_ssh):
     assert "gateway restart" in script
 
 
+def test_push_config_script_stops_before_restart_when_a_config_set_fails(fake_ssh, tmp_path):
+    agent = make_agent(desired={"config": {"agent": {"first": 1, "second": 2}}})
+    list(hermes.push_config(agent, make_host()))
+    script = fake_ssh.last_command
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "commands.log"
+    (bin_dir / "hermes").write_text(
+        "#!/bin/sh\n"
+        "echo \"$*\" >> \"$BEACON_TEST_LOG\"\n"
+        "if [ \"$3\" = \"agent.second\" ]; then exit 42; fi\n"
+    )
+    (bin_dir / "systemctl").write_text("#!/bin/sh\necho active\n")
+    os.chmod(bin_dir / "hermes", 0o755)
+    os.chmod(bin_dir / "systemctl", 0o755)
+
+    result = subprocess.run(
+        ["bash", "-s"], input=script, text=True, capture_output=True,
+        env={**os.environ, "HOME": str(tmp_path), "PATH": f"{bin_dir}:{os.environ['PATH']}", "BEACON_TEST_LOG": str(log)},
+    )
+
+    assert result.returncode == 42
+    assert "gateway restart" not in log.read_text()
+    assert "[beacon] done" not in result.stdout
+
+    # Regression proof: without fail-fast shell mode, the failed config set is
+    # ignored and the script restarts the gateway anyway.
+    old_behavior = script.replace("set -e\n", "", 1)
+    log.unlink()
+    old_result = subprocess.run(
+        ["bash", "-s"], input=old_behavior, text=True, capture_output=True,
+        env={**os.environ, "HOME": str(tmp_path), "PATH": f"{bin_dir}:{os.environ['PATH']}", "BEACON_TEST_LOG": str(log)},
+    )
+    assert old_result.returncode == 0
+    assert "gateway restart" in log.read_text()
+
+
 # ---------------------------------------------------------------------------
 # deploy() / decommission() / update_agent() — script construction
 # ---------------------------------------------------------------------------
@@ -484,8 +524,35 @@ def test_deploy_invalid_mode_raises_before_any_ssh(fake_ssh):
 def test_decommission_baseline_script(fake_ssh):
     list(hermes.decommission(make_agent(), make_host()))
     script = fake_ssh.last_command
+    assert script.startswith("set -e\n")
     assert "gateway uninstall" in script
     assert "rm -rf" not in script
+
+
+def test_decommission_script_stops_on_gateway_uninstall_failure(fake_ssh, tmp_path):
+    list(hermes.decommission(make_agent(), make_host()))
+    script = fake_ssh.last_command
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "hermes").write_text("#!/bin/sh\n[ \"$2\" = \"uninstall\" ] && exit 23\n")
+    os.chmod(bin_dir / "hermes", 0o755)
+
+    result = subprocess.run(
+        ["bash", "-s"], input=script, text=True, capture_output=True,
+        env={**os.environ, "HOME": str(tmp_path), "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+    )
+
+    assert result.returncode == 23
+    assert "[beacon] done" not in result.stdout
+
+    old_behavior = script.replace("set -e\n", "", 1)
+    old_result = subprocess.run(
+        ["bash", "-s"], input=old_behavior, text=True, capture_output=True,
+        env={**os.environ, "HOME": str(tmp_path), "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+    )
+    assert old_result.returncode == 0
+    assert "[beacon] done" in old_result.stdout
 
 
 def test_decommission_purge_requires_named_profile(fake_ssh):
@@ -506,13 +573,46 @@ def test_decommission_remove_user_requires_os_user(fake_ssh):
     assert fake_ssh.calls == []
 
 
-def test_decommission_remove_user_script(fake_ssh):
+def test_decommission_remove_user_script_fails_closed(fake_ssh, tmp_path):
     agent = make_agent(desired={"os_user": "hermes-svc"})
     list(hermes.decommission(agent, make_host(), remove_user=True))
     script = fake_ssh.last_command
+    assert script.startswith("set -e\n")
     assert "userdel -r hermes-svc" in script
+    assert "userdel failed" not in script
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "sudo").write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"-u\" ]; then cat >/dev/null; exit 0; fi\n"
+        "if [ \"$2\" = \"userdel\" ]; then exit 24; fi\n"
+    )
+    os.chmod(bin_dir / "sudo", 0o755)
+
+    result = subprocess.run(
+        ["bash", "-s"], input=script, text=True, capture_output=True,
+        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+    )
+
+    assert result.returncode == 24
 
 
-def test_update_agent_script(fake_ssh):
+def test_update_agent_script_fails_closed(fake_ssh, tmp_path):
     list(hermes.update_agent(make_agent(), make_host()))
-    assert "hermes update --yes" in fake_ssh.last_command
+    script = fake_ssh.last_command
+    assert script.startswith("set -e\n")
+    assert "hermes update --yes" in script
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "hermes").write_text("#!/bin/sh\nexit 25\n")
+    os.chmod(bin_dir / "hermes", 0o755)
+
+    result = subprocess.run(
+        ["bash", "-s"], input=script, text=True, capture_output=True,
+        env={**os.environ, "HOME": str(tmp_path), "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+    )
+
+    assert result.returncode == 25
+    assert "[beacon] done" not in result.stdout
