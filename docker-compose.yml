@@ -34,12 +34,14 @@ services:
       - "${BEACON_BIND_HOST:-127.0.0.1}:8642:8642"
     volumes:
       - ./fleet:/app/fleet
+      - ./ssh:/etc/beacon:ro
       - ./tbot/data:/tbot-data:ro
     environment:
       - ZITADEL_ISSUER=${ZITADEL_ISSUER:-}
       - ZITADEL_CLIENT_ID=${ZITADEL_CLIENT_ID:-}
       - BEACON_SESSION_SECRET=${BEACON_SESSION_SECRET:-}
       - BEACON_SESSION_HTTPS_ONLY=${BEACON_SESSION_HTTPS_ONLY:-true}
+      - BEACON_KNOWN_HOSTS=${BEACON_KNOWN_HOSTS:-/etc/beacon/known_hosts}
       - BEACON_MCP_TOKEN=${BEACON_MCP_TOKEN:-}
     depends_on:
       - tbot

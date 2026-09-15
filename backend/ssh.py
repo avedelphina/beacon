@@ -1,3 +1,4 @@
+import os
 import subprocess
 import time
 from collections.abc import Iterator
@@ -16,12 +17,14 @@ def _base_cmd(host: Host) -> list[str]:
         # ProxyCommand) and host-key verification — don't force our own
         # StrictHostKeyChecking on top of a trust model we don't control.
         return ["ssh", "-F", host.ssh.config_file, *common, "--", f"{host.ssh.user}@{host.address}"]
+    known_hosts = os.environ.get("BEACON_KNOWN_HOSTS", os.path.expanduser("~/.ssh/known_hosts"))
     return [
         "ssh",
         "-i", host.ssh.key,
         "-p", str(host.ssh.port),
         *common,
-        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", f"UserKnownHostsFile={known_hosts}",
         "--",
         f"{host.ssh.user}@{host.address}",
     ]
