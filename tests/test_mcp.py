@@ -9,7 +9,11 @@ import pytest
 @pytest.fixture
 def mcp_server(monkeypatch):
     mcp_dir = Path(__file__).parents[1] / "mcp"
-    monkeypatch.syspath_prepend(str(mcp_dir))
+    auth_spec = importlib.util.spec_from_file_location("auth", mcp_dir / "auth.py")
+    auth_module = importlib.util.module_from_spec(auth_spec)
+    monkeypatch.setitem(sys.modules, "auth", auth_module)
+    auth_spec.loader.exec_module(auth_module)
+
     spec = importlib.util.spec_from_file_location("beacon_mcp_server", mcp_dir / "server.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
