@@ -81,7 +81,9 @@ hosts:
 required. `config_file` points at an `ssh_config` (e.g. one a Teleport tbot
 identity generates); when set, Beacon connects with `ssh -F <file>` and lets
 that file's own `Host` block own auth and host-key verification instead of
-`-i`/`-p`.
+`-i`/`-p`. Static-key hosts require a reviewed known-hosts file configured by
+`BEACON_KNOWN_HOSTS`; Beacon uses strict checking and never trusts a new key
+automatically.
 
 ### `fleet/agents/<id>.yaml`
 
