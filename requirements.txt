@@ -1,6 +1,6 @@
-fastapi
-uvicorn[standard]
-pyyaml
-httpx
-pyjwt[crypto]
-itsdangerous
+fastapi==0.133.1
+uvicorn[standard]==0.41.0
+pyyaml==6.0.3
+httpx==0.28.1
+pyjwt[crypto]==2.13.0
+itsdangerous==2.2.0
