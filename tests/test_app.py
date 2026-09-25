@@ -6,28 +6,8 @@ network.
 """
 
 import pytest
-from fastapi.testclient import TestClient
 
-from backend.app import app
 from backend.ssh import SSHResult
-
-
-@pytest.fixture
-def client(fleet, fake_ssh):
-    return TestClient(app)
-
-
-@pytest.fixture
-def mcp_client(fleet, fake_ssh, monkeypatch):
-    # Match the production bearer-token path without requiring a live OIDC
-    # provider. This must remain distinct from an authenticated browser user.
-    from backend import auth
-
-    # This restriction must also hold in open/local mode: a configured MCP
-    # token is still an LLM-facing service credential, never human approval.
-    monkeypatch.setattr(auth, "AUTH_ENABLED", False)
-    monkeypatch.setattr(auth, "MCP_TOKEN", "test-mcp-token")
-    return TestClient(app, headers={"Authorization": "Bearer test-mcp-token"})
 
 
 @pytest.fixture

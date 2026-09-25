@@ -16,6 +16,7 @@
     <button class="tab active" data-tab="hosts">Hosts</button>
     <button class="tab" data-tab="agents">Agents</button>
     <button class="tab" data-tab="templates">Templates</button>
+    <button class="tab" data-tab="cron-jobs">Cron jobs</button>
   </nav>
   <div class="whoami" id="whoami" hidden>
     <span id="whoami-name"></span>
@@ -65,6 +66,21 @@
       </table>
     </div>
     <p class="empty" id="templates-empty" hidden>No templates. Add a file under fleet/templates/ (see anthropic-stack.yaml.example).</p>
+  </section>
+
+  <section id="cron-jobs-view" class="view">
+    <div class="view-head">
+      <h1>Cron jobs</h1>
+      <button class="btn primary" id="add-cron-job">+ Add cron job</button>
+    </div>
+    <p class="hint" style="margin:-0.6rem 0 1rem">Scheduled Beacon-native actions stored in <code>fleet/cron_jobs/*.yaml</code>. Execution is triggered externally: <code>python -m backend.scheduler tick</code>.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Enabled</th><th>ID</th><th>Schedule</th><th>Action</th><th>Targets</th><th>Last run</th><th></th><th></th></tr></thead>
+        <tbody id="cron-jobs-body"></tbody>
+      </table>
+    </div>
+    <p class="empty" id="cron-jobs-empty" hidden>No cron jobs yet. Add one to schedule fleet actions.</p>
   </section>
 
 </main>
@@ -205,6 +221,50 @@
       <button type="submit" class="btn primary">Apply</button>
     </div>
   </form>
+</div>
+
+<div class="modal-backdrop" id="cron-job-modal">
+  <form class="modal" id="cron-job-form">
+    <h2 id="cron-job-modal-title">Add cron job</h2>
+    <label>ID <span class="hint">(lowercase, letters/numbers/dashes)</span>
+      <input name="id" required pattern="[a-z0-9][a-z0-9-]*">
+    </label>
+    <label>Schedule <span class="hint">(5-field cron, UTC unless timezone set)</span>
+      <input name="schedule" required placeholder="0 2 * * *" pattern="\S+ \S+ \S+ \S+ \S+">
+    </label>
+    <div class="field-row">
+      <label>Timezone <input name="timezone" value="UTC"></label>
+      <label>Enabled <select name="enabled"><option value="true" selected>yes</option><option value="false">no</option></select></label>
+    </div>
+    <label>Action <select name="action" required>
+      <option value="restart">restart</option>
+      <option value="status">status</option>
+      <option value="push_config">push_config</option>
+    </select></label>
+    <label>Target agents <span class="hint">(comma separated agent ids)</span>
+      <input name="target_agent_ids" required placeholder="edge-01-primary, edge-02-primary">
+    </label>
+    <label>Timeout <span class="hint">(seconds, optional)</span>
+      <input name="timeout" type="number" min="1" placeholder="60">
+    </label>
+    <label>Owner <input name="owner" placeholder="ops"></label>
+    <label>Notes <input name="notes" placeholder="nightly restart during maintenance window"></label>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary">Save</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal-backdrop" id="cron-job-view-modal">
+  <div class="modal">
+    <h2 id="cron-job-view-title">Cron job</h2>
+    <div class="inspect-status" id="cron-job-view-meta"></div>
+    <pre id="cron-job-view-output" class="inspect-logs">loading…</pre>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Close</button>
+    </div>
+  </div>
 </div>
 
 <script src="app.js"></script>

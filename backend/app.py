@@ -5,9 +5,10 @@ from pathlib import Path
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, store, templates
+from . import auth, cron_store, store, templates
+from .cron_store import InvalidId as CronInvalidId, NotFound as CronNotFound
 from .drivers import get_driver
-from .schemas import Agent, Host
+from .schemas import Agent, CronJob, Host
 from .tiers import TIER_LABELS, CAPABILITY_TIERS, requires_confirm, tier_for
 
 
@@ -97,6 +98,20 @@ def not_found(_request, exc: store.NotFound):
 
 @app.exception_handler(store.InvalidId)
 def invalid_id(_request, exc: store.InvalidId):
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.exception_handler(CronNotFound)
+def cron_not_found(_request, exc: CronNotFound):
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@app.exception_handler(CronInvalidId)
+def cron_invalid_id(_request, exc: CronInvalidId):
     from fastapi.responses import JSONResponse
 
     return JSONResponse(status_code=400, content={"detail": str(exc)})
@@ -383,6 +398,57 @@ def decommission_agent(id_: str, body: DecommissionRequest, request: Request) ->
             yield "[beacon] teardown didn't complete cleanly — record left in place, nothing archived\n"
 
     return StreamingResponse(body_stream(), media_type="text/plain")
+
+
+@app.get("/api/cron-jobs")
+def list_cron_jobs() -> list[CronJob]:
+    return cron_store.list_cron_jobs()
+
+
+@app.get("/api/cron-jobs/{id_}")
+def get_cron_job(id_: str) -> CronJob:
+    return cron_store.get_cron_job(id_)
+
+
+@app.post("/api/cron-jobs/{id_}/run")
+def run_cron_job(id_: str) -> dict:
+    """Manually execute a single cron job now, regardless of schedule.
+
+    This is the GUI's "Run now" button. It bypasses the schedule but keeps
+    the same driver dispatch and last-run persistence as the scheduler.
+    """
+    from .scheduler import run_job
+    import datetime
+
+    job = cron_store.get_cron_job(id_)
+    return run_job(job, datetime.datetime.now(tz=datetime.timezone.utc))
+
+
+@app.post("/api/cron-jobs/{id_}/dry-run")
+def dry_run_cron_job(id_: str) -> dict:
+    """Report whether this cron job is due right now without executing it."""
+    from .scheduler import _is_due
+    import datetime
+
+    job = cron_store.get_cron_job(id_)
+    now = datetime.datetime.now(tz=datetime.timezone.utc)
+    return {"job_id": job.id, "due": _is_due(job.schedule, now) if job.enabled else False, "schedule": job.schedule, "ran_at": None}
+
+
+@app.put("/api/cron-jobs/{id_}")
+def put_cron_job(id_: str, job: CronJob) -> CronJob:
+    if job.id != id_:
+        raise HTTPException(400, "body id must match URL id")
+    # Ensure every target agent exists before persisting the job.
+    for aid in job.target_agent_ids:
+        store.get_agent(aid)
+    return cron_store.upsert_cron_job(job)
+
+
+@app.delete("/api/cron-jobs/{id_}")
+def delete_cron_job(id_: str) -> dict:
+    cron_store.delete_cron_job(id_)
+    return {"ok": True}
 
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"

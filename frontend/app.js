@@ -94,6 +94,39 @@ const api = {
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     return r.json();
   },
+  async listCronJobs() {
+    const r = await fetch("/api/cron-jobs");
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+  },
+  async getCronJob(id) {
+    const r = await fetch(`/api/cron-jobs/${id}`);
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+  },
+  async putCronJob(id, body) {
+    const r = await fetch(`/api/cron-jobs/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+  },
+  async deleteCronJob(id) {
+    const r = await fetch(`/api/cron-jobs/${id}`, { method: "DELETE" });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+  },
+  async runCronJob(id) {
+    const r = await fetch(`/api/cron-jobs/${id}/run`, { method: "POST" });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+  },
+  async dryRunCronJob(id) {
+    const r = await fetch(`/api/cron-jobs/${id}/dry-run`, { method: "POST" });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+  },
 };
 
 function statusPill(state) {
@@ -696,6 +729,166 @@ document.getElementById("template-apply-form").addEventListener("submit", async 
 
 document.querySelector('[data-tab="templates"]').addEventListener("click", renderTemplates);
 
+// ---- cron jobs ----
+async function renderCronJobs() {
+  const jobs = await api.listCronJobs();
+  const body = document.getElementById("cron-jobs-body");
+  body.innerHTML = "";
+  document.getElementById("cron-jobs-empty").hidden = jobs.length > 0;
+  for (const j of jobs) {
+    const tr = document.createElement("tr");
+    const lastRun = j.last_run_at
+      ? `${j.last_run_status || "unknown"} — ${new Date(j.last_run_at).toLocaleString()}`
+      : '<span class="hint">—</span>';
+    tr.innerHTML = `
+      <td><input type="checkbox" ${j.enabled ? "checked" : ""} disabled></td>
+      <td>${esc(j.id)}</td>
+      <td><code>${esc(j.schedule)}</code> ${esc(j.timezone ?? "UTC")}</td>
+      <td>${esc(j.command?.action ?? "")}</td>
+      <td>${esc((j.target_agent_ids ?? []).join(", "))}</td>
+      <td>${lastRun}</td>
+      <td class="row-actions">
+        <button class="link-btn" data-run="${esc(j.id)}">Run now</button>
+        <button class="link-btn" data-dry="${esc(j.id)}">Dry run</button>
+      </td>
+      <td class="row-actions">
+        <button class="link-btn" data-view="${esc(j.id)}">View</button>
+        <button class="link-btn" data-edit="${esc(j.id)}">Edit</button>
+        <button class="link-btn danger" data-del="${esc(j.id)}">Delete</button>
+      </td>`;
+    body.appendChild(tr);
+  }
+  body.querySelectorAll("[data-run]").forEach((b) =>
+    b.addEventListener("click", () => runCronJobNow(b.dataset.run, b))
+  );
+  body.querySelectorAll("[data-dry]").forEach((b) =>
+    b.addEventListener("click", () => dryRunCronJob(b.dataset.dry, b))
+  );
+  body.querySelectorAll("[data-view]").forEach((b) =>
+    b.addEventListener("click", () => openCronJobView(b.dataset.view))
+  );
+  body.querySelectorAll("[data-edit]").forEach((b) =>
+    b.addEventListener("click", () => editCronJob(b.dataset.edit))
+  );
+  body.querySelectorAll("[data-del]").forEach((b) =>
+    b.addEventListener("click", () => deleteCronJob(b.dataset.del))
+  );
+}
+
+async function fillCronJobForm(j) {
+  const f = document.getElementById("cron-job-form");
+  f.id.value = j?.id ?? "";
+  f.id.readOnly = !!j;
+  f.schedule.value = j?.schedule ?? "";
+  f.timezone.value = j?.timezone ?? "UTC";
+  f.enabled.value = String(j?.enabled ?? true);
+  f.action.value = j?.command?.action ?? "restart";
+  f.target_agent_ids.value = (j?.target_agent_ids ?? []).join(", ");
+  f.timeout.value = j?.timeout ?? "";
+  f.owner.value = j?.owner ?? "";
+  f.notes.value = j?.notes ?? "";
+  document.getElementById("cron-job-modal-title").textContent = j ? `Edit ${j.id}` : "Add cron job";
+}
+
+document.getElementById("add-cron-job").addEventListener("click", () => {
+  fillCronJobForm(null);
+  openModal("cron-job-modal");
+});
+
+async function editCronJob(id) {
+  const jobs = await api.listCronJobs();
+  await fillCronJobForm(jobs.find((j) => j.id === id));
+  openModal("cron-job-modal");
+}
+
+async function deleteCronJob(id) {
+  if (!confirm(`Delete cron job ${id}?`)) return;
+  await api.deleteCronJob(id);
+  renderCronJobs();
+}
+
+async function openCronJobView(id) {
+  document.getElementById("cron-job-view-title").textContent = id;
+  const meta = document.getElementById("cron-job-view-meta");
+  const out = document.getElementById("cron-job-view-output");
+  out.textContent = "loading…";
+  openModal("cron-job-view-modal");
+  try {
+    const j = await api.getCronJob(id);
+    meta.textContent = [
+      `enabled: ${j.enabled}`,
+      `schedule: ${j.schedule} (${j.timezone ?? "UTC"})`,
+      `action: ${j.command?.action ?? ""}`,
+      `targets: ${(j.target_agent_ids ?? []).join(", ")}`,
+      `last_run_status: ${j.last_run_status ?? "—"}`,
+      j.last_run_at ? `last_run_at: ${new Date(j.last_run_at).toISOString()}` : null,
+      j.owner ? `owner: ${j.owner}` : null,
+      j.notes ? `notes: ${j.notes}` : null,
+    ].filter(Boolean).join("\n");
+    out.textContent = j.last_run_output || "No run output yet.";
+  } catch (err) {
+    meta.textContent = "";
+    out.textContent = `[error] ${err.message}`;
+  }
+}
+
+document.getElementById("cron-job-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const body = {
+    id: f.id.value,
+    enabled: f.enabled.value === "true",
+    schedule: f.schedule.value,
+    timezone: f.timezone.value || "UTC",
+    command: { action: f.action.value },
+    target_agent_ids: f.target_agent_ids.value.split(",").map((t) => t.trim()).filter(Boolean),
+    owner: f.owner.value || null,
+    notes: f.notes.value || null,
+  };
+  const timeout = f.timeout.value.trim();
+  if (timeout) body.timeout = Number(timeout);
+  try {
+    await api.putCronJob(body.id, body);
+    closeModal("cron-job-modal");
+    renderCronJobs();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+async function runCronJobNow(id, btn) {
+  if (!confirm(`Run cron job "${id}" now? This executes against its target agents immediately.`)) return;
+  btn.disabled = true;
+  btn.textContent = "running…";
+  try {
+    const result = await api.runCronJob(id);
+    openCronJobView(id);
+    if (result.status !== "ok") alert(`Job finished with status: ${result.status}`);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Run now";
+    renderCronJobs();
+  }
+}
+
+async function dryRunCronJob(id, btn) {
+  btn.disabled = true;
+  btn.textContent = "checking…";
+  try {
+    const result = await api.dryRunCronJob(id);
+    alert(`"${id}" is ${result.due ? "due" : "not due"} right now (${result.schedule}).`);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Dry run";
+  }
+}
+
+document.querySelector('[data-tab="cron-jobs"]').addEventListener("click", renderCronJobs);
+
 async function fillAgentForm(a) {
   await populateHostSelect();
   const f = document.getElementById("agent-form");
@@ -764,6 +957,7 @@ document.getElementById("agent-form").addEventListener("submit", async (e) => {
 renderHosts();
 renderAgents();
 renderTemplates();
+renderCronJobs();
 populateHostSelect();
 
 fetch("/auth/me").then((r) => (r.ok ? r.json() : null)).then((user) => {
