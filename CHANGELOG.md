@@ -8,6 +8,8 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-09-25
+
 ### Added
 
 - **Fleet cron jobs.** Schedule Beacon-native actions (`restart`, `status`,
@@ -19,6 +21,10 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
   background scheduler process inside Beacon. Validates 5-field cron
   expressions and refuses arbitrary shell commands in v1; persists last-run
   status/output per job.
+- **Manual run / dry-run.** `POST /api/cron-jobs/{id}/run` executes a job
+  immediately regardless of schedule; `POST /api/cron-jobs/{id}/dry-run`
+  reports whether it is due without touching a host. Exposed in the GUI tab
+  as **Run now** and **Dry run** buttons per job.
 
 ## [0.8.0] — 2026-09-25
 
