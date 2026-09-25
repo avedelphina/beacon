@@ -6,6 +6,20 @@ an API worth being stable about — pre-1.0, breaking changes can land in a
 minor bump. See [README.md](README.md#limitations) for current limitations
 and [ROADMAP.md](ROADMAP.md) for what's planned.
 
+## [Unreleased]
+
+### Added
+
+- **Fleet cron jobs.** Schedule Beacon-native actions (`restart`, `status`,
+  `push_config`) against one or more agents from YAML records in
+  `fleet/cron_jobs/*.yaml`. New API routes: `GET/PUT/DELETE
+  /api/cron-jobs/{id}` and `GET /api/cron-jobs`. A lightweight scheduler in
+  `backend/scheduler.py` is driven by an external minute-level trigger (system
+  cron/launchd/k8s CronJob) calling `python -m backend.scheduler tick` — no
+  background scheduler process inside Beacon. Validates 5-field cron
+  expressions and refuses arbitrary shell commands in v1; persists last-run
+  status/output per job.
+
 ## [0.8.0] — 2026-09-25
 
 ### Added

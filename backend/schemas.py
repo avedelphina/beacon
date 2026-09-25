@@ -69,3 +69,75 @@ class Agent(BaseModel):
     desired: dict = Field(default_factory=dict)
     owner: str | None = None
     notes: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Cron jobs
+# ---------------------------------------------------------------------------
+
+_CRON_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+# Standard 5-field cron: minute hour day-of-month month day-of-week.
+# We deliberately do not support extended syntax (@yearly, L, W, #) in v1.
+_CRON_FIELD_RE = re.compile(r"^\*|\*/\d+|\d+(-\d+)?(,/\d+)?$")
+
+
+def _validate_cron_expression(value: str) -> str:
+    value = value.strip()
+    fields = value.split()
+    if len(fields) != 5:
+        raise ValueError(f"cron schedule must have exactly 5 fields, got {len(fields)}: {value!r}")
+    names = ["minute", "hour", "day-of-month", "month", "day-of-week"]
+    for name, field in zip(names, fields):
+        if not _CRON_FIELD_RE.match(field):
+            raise ValueError(f"invalid {name} field {field!r} in cron expression {value!r}")
+    return value
+
+
+class CronJob(BaseModel):
+    id: str
+    enabled: bool = True
+    schedule: str
+    timezone: str = "UTC"
+    # Fixed set of Beacon-native actions. Shell execution is intentionally
+    # excluded from v1 — it would be a large, hard-to-audit attack surface
+    # and would bypass the tier/confirm gates already wired into app.py.
+    command: dict = Field(default_factory=dict)
+    target_agent_ids: list[str] = Field(default_factory=list)
+    timeout: int | None = Field(default=None, ge=1)
+    owner: str | None = None
+    notes: str | None = None
+    # Runtime state, persisted so the UI can show last-run status.
+    last_run_at: str | None = None
+    last_run_status: str | None = None
+    last_run_output: str | None = None
+
+    @field_validator("id")
+    @classmethod
+    def _safe_id(cls, v: str) -> str:
+        if not _CRON_ID_RE.match(v):
+            raise ValueError(f"cron job id {v!r} must match {_CRON_ID_RE.pattern}")
+        return v
+
+    @field_validator("schedule")
+    @classmethod
+    def _safe_schedule(cls, v: str) -> str:
+        return _validate_cron_expression(v)
+
+    @field_validator("command")
+    @classmethod
+    def _safe_command(cls, v: dict) -> dict:
+        if not isinstance(v, dict):
+            raise ValueError("command must be a dict")
+        action = v.get("action")
+        if action not in ("restart", "push_config", "status"):
+            raise ValueError(
+                f"unsupported cron action {action!r}; v1 supports: restart, push_config, status"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _has_targets(self) -> "CronJob":
+        if not self.target_agent_ids:
+            raise ValueError("target_agent_ids must not be empty")
+        return self

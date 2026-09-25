@@ -118,7 +118,34 @@ stale in that direction.
 
 A config fragment applied to many agents at once — "every EU relay runs this
 model stack" declared in one place instead of copied into every agent file.
-The key paths below are the **real Hermes schema** (verified against
+
+### `fleet/cron_jobs/<id>.yaml`
+
+A scheduled, recurring Beacon action against one or more agents. The scheduler
+is external: a system cron/launchd/k8s CronJob calls
+`python -m backend.scheduler tick` every minute; Beacon itself has no
+background scheduler process.
+
+```yaml
+id: nightly-restart
+enabled: true
+schedule: "0 2 * * *"      # standard 5-field cron, UTC unless you override `timezone`
+timezone: UTC
+command:
+  action: restart           # restart | push_config | status
+target_agent_ids:
+  - edge-01-primary
+  - edge-02-primary
+owner: ops
+notes: "Restart gateways during the maintenance window"
+```
+
+`push_config` pushes `desired.config` to each target agent and restarts its
+gateway if active. `status` just collects and stores the result. Arbitrary
+shell commands are intentionally not supported in v1 — only the fixed,
+auditable Beacon actions above. See [Cron jobs](#cron-jobs) for operating it.
+
+## The key paths below are the **real Hermes schema** (verified against
 hermes-agent v2026.9.7+):
 
 ```yaml
@@ -384,11 +411,18 @@ this one credential.
 | `POST` | `/api/agents/{id}/restart?confirm=true` | Restart the gateway — T2 |
 | `POST` | `/api/agents/{id}/update?confirm=true` | `hermes update` on the shared install (streamed) — T4 |
 | `POST` | `/api/agents/{id}/decommission` | Tear down (`{"purge": bool, "remove_user": bool, "confirm": true}`, streamed) — T4, T5 if purge/remove_user |
+| `GET`/`PUT`/`DELETE` | `/api/cron-jobs/{id}` | Cron job CRUD |
+| `GET` | `/api/cron-jobs` | List cron jobs |
 
 Every row above marked with a tier requires `confirm=true` (query param, or
 a `confirm` field alongside an existing JSON body) — omit it and you get a
 200 describing the action instead of it running. See [Autonomy
 tiers](#autonomy-tiers).
+
+Cron jobs are an exception: they do not use the `confirm=true` gate because
+they are pre-authorized fleet records, persisted ahead of time and reviewed
+like any other YAML. They are limited to a fixed set of v1 actions
+(`restart`, `status`, `push_config`) to keep the blast radius bounded.
 
 ## Limitations
 
@@ -404,6 +438,98 @@ tiers](#autonomy-tiers).
   [Teleport / tbot](#teleport--tbot).
 
 See [ROADMAP.md](ROADMAP.md) for what's planned to close these.
+
+## Cron jobs
+
+Schedule Beacon-native actions against agents using `fleet/cron_jobs/*.yaml`.
+There is no background scheduler inside Beacon; the web API only manages the
+records. Execution is triggered externally once per minute:
+
+```bash
+.venv/bin/python -m backend.scheduler tick
+```
+
+List jobs and whether each is due right now:
+
+```bash
+.venv/bin/python -m backend.scheduler list
+```
+
+Dry-run a tick to see what would execute without touching any host:
+
+```bash
+.venv/bin/python -m backend.scheduler tick --dry-run
+```
+
+Use the API (or edit YAML directly) to create a job:
+
+```bash
+curl -X PUT http://localhost:8642/api/cron-jobs/nightly-restart \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "id": "nightly-restart",
+    "enabled": true,
+    "schedule": "0 2 * * *",
+    "command": {"action": "restart"},
+    "target_agent_ids": ["edge-01-primary"]
+  }'
+```
+
+A job's last-run status and output are persisted back to its YAML file, so
+`GET /api/cron-jobs/{id}` and the scheduler list show history.
+
+### Deployment hook examples
+
+macOS launchd (run once per minute, UTC):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>net.cqre.beacon.cron</string>
+    <key>StartInterval</key>
+    <integer>60</integer>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/path/to/beacon/.venv/bin/python</string>
+      <string>-m</string>
+      <string>backend.scheduler</string>
+      <string>tick</string>
+      <string>--utc</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/path/to/beacon</string>
+  </dict>
+</plist>
+```
+
+Linux systemd timer (`beacon-cron.service` + `beacon-cron.timer`):
+
+```ini
+# /etc/systemd/system/beacon-cron.service
+[Unit]
+Description=Beacon fleet cron tick
+
+[Service]
+Type=oneshot
+WorkingDirectory=/path/to/beacon
+ExecStart=/path/to/beacon/.venv/bin/python -m backend.scheduler tick --utc
+```
+
+```ini
+# /etc/systemd/system/beacon-cron.timer
+[Unit]
+Description=Run Beacon fleet cron every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+```
 
 ## Testing
 
@@ -438,6 +564,7 @@ fleet/
   hosts.yaml.example
   agents/         one YAML file per agent (gitignored — real inventory)
   templates/      config fragments merged under many agents (gitignored)
+  cron_jobs/      scheduled Beacon actions (gitignored)
   decommissioned/ archived agent records (gitignored)
 frontend/
   index.html, app.js, styles.css   no build step

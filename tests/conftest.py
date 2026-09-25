@@ -11,22 +11,31 @@ command Beacon builds, not a real round trip.
 """
 
 import pytest
+from fastapi.testclient import TestClient
 
 from backend import store
+from backend.app import app
 from backend.schemas import Agent, Host, SSHConfig
 from backend.ssh import SSHResult
 
 
 @pytest.fixture
 def fleet(tmp_path, monkeypatch):
-    """Points backend.store at an empty, throwaway fleet/ directory."""
+    """Points backend.store and cron_store at an empty, throwaway fleet/
+    directory.
+    """
+    from backend import cron_store
+
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
+    cron_dir = tmp_path / "cron_jobs"
+    cron_dir.mkdir()
     monkeypatch.setattr(store, "HOSTS_FILE", tmp_path / "hosts.yaml")
     monkeypatch.setattr(store, "AGENTS_DIR", agents_dir)
     monkeypatch.setattr(store, "DECOMMISSIONED_DIR", tmp_path / "decommissioned")
+    monkeypatch.setattr(cron_store, "CRON_DIR", cron_dir)
 
     from backend import templates
 
@@ -73,3 +82,21 @@ def fake_ssh(monkeypatch):
     fake = FakeSSH()
     monkeypatch.setattr(hermes_driver, "ssh", fake)
     return fake
+
+
+@pytest.fixture
+def client(fleet, fake_ssh):
+    return TestClient(app)
+
+
+@pytest.fixture
+def mcp_client(fleet, fake_ssh, monkeypatch):
+    # Match the production bearer-token path without requiring a live OIDC
+    # provider. This must remain distinct from an authenticated browser user.
+    from backend import auth
+
+    # This restriction must also hold in open/local mode: a configured MCP
+    # token is still an LLM-facing service credential, never human approval.
+    monkeypatch.setattr(auth, "AUTH_ENABLED", False)
+    monkeypatch.setattr(auth, "MCP_TOKEN", "test-mcp-token")
+    return TestClient(app, headers={"Authorization": "Bearer test-mcp-token"})
