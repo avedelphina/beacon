@@ -118,19 +118,35 @@ stale in that direction.
 
 A config fragment applied to many agents at once — "every EU relay runs this
 model stack" declared in one place instead of copied into every agent file.
+The key paths below are the **real Hermes schema** (verified against
+hermes-agent v2026.9.7+):
 
 ```yaml
 # fleet/templates/anthropic-stack.yaml
 config:
   model:
-    primary: anthropic/claude-sonnet-4
-    fallbacks: [openai/gpt-4o, groq/llama-3.3-70b]
-  tools:
-    model: anthropic/claude-haiku-4-5      # auxiliary: tool-call / routing
-  summarization:
-    model: openai/gpt-4o-mini              # auxiliary: context compaction
-env_keys: [ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY]
+    default: claude-sonnet-4-5     # bare model id, routed via model.provider
+    provider: anthropic
+    aliases:                       # free-form role -> provider/model routes
+      fast: openrouter/google/gemini-2.5-flash
+  fallback_providers:              # ordered chain, pushed as one JSON list
+    - provider: openrouter
+      model: anthropic/claude-sonnet-4
+      base_url: https://openrouter.ai/api/v1
+      key_env: OPENROUTER_API_KEY
+      api_mode: chat_completions
+  auxiliary:
+    compression:                   # context compaction / summarization
+      provider: openrouter
+      model: google/gemini-2.5-flash
+env_keys: [ANTHROPIC_API_KEY, OPENROUTER_API_KEY]
 ```
+
+A second shipped example, `fleet/templates/orchestration.yaml.example`,
+covers the `delegation` section — how an agent orchestrates subagents
+(`orchestrator_enabled`, `max_concurrent_children`, `max_spawn_depth`,
+`subagent_auto_approve`, plus optional per-subagent model pinning and a
+separate `delegation.fallback_providers` chain).
 
 A template carries only `config` and `env_keys` (the same shape as those two
 keys inside an agent's `desired`). Host-shaping fields — `install_mode`,
@@ -140,16 +156,40 @@ keys inside an agent's `desired`). Host-shaping fields — `install_mode`,
 An agent opts in by listing template names in `templates:`. On every read,
 `backend/templates.py` deep-merges those fragments **in listed order**, then
 the agent's own `desired` on top — the agent always wins. dicts deep-merge;
-scalars and lists are replaced wholesale (`fallbacks: [...]` in an agent
-fully replaces the template's, no element merge). The merge never touches
-the file: the agent record keeps its own overrides only, and
+scalars and lists are replaced wholesale (`fallback_providers: [...]` in an
+agent fully replaces the template's, no element merge). The merge never
+touches the file: the agent record keeps its own overrides only, and
 `GET /api/agents/{id}` returns both the raw `desired` and the merged
 `effective_desired`.
 
 `POST /api/templates/{name}/apply` with `{"agent_ids": [...], "confirm": true}`
-adds a template name to several agent records in one call.  Exact config key
-paths depend on your Hermes build — check a live box with `hermes config get`
-before writing a template.
+adds a template name to several agent records in one call.
+
+#### Config schema guardrail
+
+`hermes config set` only hard-refuses one narrow typo shape (a known key
+under the wrong prefix); a plain wrong subkey like `model.primary` is
+**written anyway** with a post-write notice and exit code 0 — so a push
+would report success while the key does nothing. Beacon therefore validates
+every `desired.config`/template path itself before a push, against a
+checked-in snapshot of Hermes's `DEFAULT_CONFIG`
+(`backend/drivers/hermes_config_schema.yaml`):
+
+- **unknown subkey of a known section** (`model.primary`,
+  `delegation.max_childs`) — `push_config` refuses with a 400 naming every
+  bad path and a did-you-mean suggestion; `config_diff` flags the finding as
+  `schema: "error"` (rendered critical in the UI)
+- **unknown top-level key** — legal in Hermes (custom keys bridge to the
+  environment for skills), so it pushes, but with a streamed warning and a
+  `schema: "warn"` flag in the diff
+- free-form sections (`model.aliases.<role>`, `mcp_servers.<name>.*`,
+  `platforms.<name>.*`, …) accept anything, matching the CLI
+
+Regenerate the snapshot when the fleet's Hermes version moves:
+
+```bash
+python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
+```
 
 ## Capabilities
 
@@ -159,7 +199,7 @@ before writing a template.
 | **Track** | Live status: running/stopped/failed/crash-looping/not-installed, PID, uptime. Polled by the fleet table every 30s. | `GET /api/agents/{id}/status` |
 | **Troubleshoot** | Recent log tail — the app-level log file, falling back to `journalctl` when a unit has never started successfully. | `GET /api/agents/{id}/logs` |
 | **Reconcile** | Diagnoses drift patterns found in the wild — an orphaned unit (profile dir deleted, unit left behind), a unit stuck `failed`, installed-but-not-started, linger disabled. Dry run by default; each finding names a `fix` to apply individually. | `GET` (dry run) / `POST` (apply one fix) `/api/agents/{id}/reconcile` |
-| **Config** | Compares `desired.config`/`desired.env_keys` against the live `config.yaml` and `.env` **key names only** (secret values never leave the host). Push runs `hermes config set` per declared key, then restarts the gateway if it's active. Both sides see the template-merged `desired`. | `GET`/`POST /api/agents/{id}/config-diff` |
+| **Config** | Compares `desired.config`/`desired.env_keys` against the live `config.yaml` and `.env` **key names only** (secret values never leave the host). Push validates every declared path against the known Hermes config schema first — an unknown subkey of a known section is refused (the CLI would write it silently), unknown top-level keys push with a warning — then runs `hermes config set` per declared key and restarts the gateway if it's active. Both sides see the template-merged `desired`. | `GET`/`POST /api/agents/{id}/config-diff` |
 | **Templates** | A `fleet/templates/*.yaml` config fragment (`config` + `env_keys` only) merged under many agents' `desired` at once — model stacks, fallbacks, and auxiliary-task models declared once. Apply adds a template name to a batch of agent records. | `GET /api/templates`, `GET /api/templates/{name}`, `POST /api/templates/{name}/apply` |
 | **Plugins** | Lists installed plugins with version, enabled/disabled state, and source. Updating one (git pull) can trip Hermes's own security scan and auto-disable it — that's surfaced as a `disabled_by_scan` flag rather than left buried in scan-report text, since an auto-disabled plugin can mean a messaging platform silently goes offline. | `GET /api/agents/{id}/plugins`, `POST /api/agents/{id}/plugins/{name}/update` |
 | **Restart** | Plain `gateway restart` — the everyday operate action, works regardless of current state. Distinct from Reconcile's problem-triggered fixes. | `POST /api/agents/{id}/restart` |

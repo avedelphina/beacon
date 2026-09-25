@@ -446,7 +446,7 @@ def test_push_config_script_content(fake_ssh):
 
 
 def test_push_config_script_stops_before_restart_when_a_config_set_fails(fake_ssh, tmp_path):
-    agent = make_agent(desired={"config": {"agent": {"first": 1, "second": 2}}})
+    agent = make_agent(desired={"config": {"agent": {"max_turns": 1, "gateway_timeout": 2}}})
     list(hermes.push_config(agent, make_host()))
     script = fake_ssh.last_command
 
@@ -456,7 +456,7 @@ def test_push_config_script_stops_before_restart_when_a_config_set_fails(fake_ss
     (bin_dir / "hermes").write_text(
         "#!/bin/sh\n"
         "echo \"$*\" >> \"$BEACON_TEST_LOG\"\n"
-        "if [ \"$3\" = \"agent.second\" ]; then exit 42; fi\n"
+        "if [ \"$3\" = \"agent.gateway_timeout\" ]; then exit 42; fi\n"
     )
     (bin_dir / "systemctl").write_text("#!/bin/sh\necho active\n")
     os.chmod(bin_dir / "hermes", 0o755)

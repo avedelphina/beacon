@@ -175,12 +175,12 @@ def test_config_diff_uses_resolved_desired(client, fleet, fake_ssh):
     from backend.ssh import SSHResult
 
     store.upsert_host(make_host(id="h1"))
-    write_template(fleet, "stack", {"config": {"model": {"primary": "wanted"}}})
+    write_template(fleet, "stack", {"config": {"model": {"default": "wanted"}}})
     store.upsert_agent(make_agent(id="a1", host="h1", templates=["stack"]))
 
     fake_ssh.result = SSHResult(
         ok=True, returncode=0,
-        stdout="model:\n  primary: actual\n__BEACON_ENV_KEYS__\n", stderr="",
+        stdout="model:\n  default: actual\n__BEACON_ENV_KEYS__\n", stderr="",
     )
     findings = client.get("/api/agents/a1/config-diff").json()["config"]
-    assert findings == [{"path": "model.primary", "status": "drift", "desired": "wanted", "live": "actual"}]
+    assert findings == [{"path": "model.default", "status": "drift", "desired": "wanted", "live": "actual", "schema": "ok"}]

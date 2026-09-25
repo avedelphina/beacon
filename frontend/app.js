@@ -314,9 +314,14 @@ function renderConfigFindings(result) {
   }
   for (const c of result.config) {
     const detail = c.status === "match" ? "" : ` — live: ${esc(JSON.stringify(c.live))}, desired: ${esc(JSON.stringify(c.desired))}`;
+    // Schema guardrail: an "error" finding names a path push will refuse —
+    // escalate it past plain drift so it can't be mistaken for a pushable
+    // change; a "warn" (unknown top-level key) at least surfaces the detail.
+    const schemaSev = c.schema === "error" ? "critical" : c.schema === "warn" ? "warn" : null;
+    const schemaNote = c.schema_detail ? ` — ⚠ ${esc(c.schema_detail)}` : "";
     const row = document.createElement("div");
-    row.className = `finding ${CONFIG_SEVERITY[c.status] || "info"}`;
-    row.innerHTML = `<span class="sev"></span><span class="summary"><code>${esc(c.path)}</code> ${esc(c.status)}${detail}</span>`;
+    row.className = `finding ${schemaSev || CONFIG_SEVERITY[c.status] || "info"}`;
+    row.innerHTML = `<span class="sev"></span><span class="summary"><code>${esc(c.path)}</code> ${esc(c.status)}${detail}${schemaNote}</span>`;
     el.appendChild(row);
   }
   for (const e of result.env) {

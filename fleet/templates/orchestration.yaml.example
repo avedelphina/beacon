@@ -1,0 +1,30 @@
+# Orchestration template — the `delegation` section that governs how an
+# agent spawns and runs subagents (delegate_task). Same rules as any
+# template: only `config`/`env_keys`, deep-merge under the agent's own
+# `desired`, and every path is checked against the known Hermes schema
+# before a push (backend/drivers/hermes_config_schema.yaml — delegation
+# keys verified against hermes-agent v2026.9.7+).
+
+config:
+  delegation:
+    orchestrator_enabled: true        # this agent may act as an orchestrator
+    max_concurrent_children: 10       # parallel subagent cap
+    max_spawn_depth: 1                # children may not spawn grandchildren
+    subagent_auto_approve: false      # keep false — subagent write ops still hit the operator
+
+    # Pin subagents to a different (cheaper/stronger) route than the
+    # orchestrator itself. Empty strings mean "inherit the main model".
+    # provider: openrouter
+    # model: deepseek/deepseek-chat
+    # base_url: https://openrouter.ai/api/v1
+
+    # Separate fallback chain for subagents — same object shape as the
+    # top-level fallback_providers list (see anthropic-stack.yaml.example):
+    # fallback_providers:
+    #   - provider: openrouter
+    #     model: qwen/qwen3-coder
+    #     base_url: https://openrouter.ai/api/v1
+    #     key_env: OPENROUTER_API_KEY
+    #     api_mode: chat_completions
+
+env_keys: []

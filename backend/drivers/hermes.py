@@ -1,7 +1,10 @@
+import difflib
 import json
 import re
 import shlex
 from collections.abc import Iterator
+from functools import lru_cache
+from pathlib import Path
 
 import yaml
 
@@ -304,6 +307,94 @@ def _get_path(tree: dict, path: str):
     return node
 
 
+# --- config-key schema guardrail -------------------------------------------
+#
+# `hermes config set` only hard-refuses the narrow wrong-prefix case
+# (gateway.discord.foo where discord.foo is known); a plain typo like
+# `model.primary` is WRITTEN with a post-write notice and exit code 0, so
+# Beacon's fail-closed push would report success while the key does nothing.
+# Beacon therefore validates desired.config paths itself, one notch stricter
+# than the CLI, against a checked-in snapshot of hermes's DEFAULT_CONFIG
+# (backend/drivers/hermes_config_schema.yaml — regenerate with
+# scripts/dump_hermes_config_schema.py):
+#
+#   ok    — path follows the known schema (or a free-form section: an empty
+#           dict in DEFAULT_CONFIG means user-chosen keys, e.g.
+#           model.aliases.<role>)
+#   warn  — unknown TOP-LEVEL key; legal in hermes (custom keys bridge to the
+#           environment for skills) but worth seeing before a fleet-wide push
+#   error — unknown subkey of a POPULATED known section: almost certainly a
+#           typo, and `config set` would accept it silently. push_config
+#           refuses; config_diff flags the finding.
+
+SCHEMA_PATH = Path(__file__).with_name("hermes_config_schema.yaml")
+
+
+@lru_cache(maxsize=1)
+def _config_schema() -> dict:
+    return yaml.safe_load(SCHEMA_PATH.read_text())
+
+
+def validate_config_key(path: str, schema: dict | None = None) -> tuple[str, str | None]:
+    """Validate one dotted desired.config path against the schema snapshot.
+
+    Returns (level, detail): level is "ok" (detail None), "warn", or "error".
+    Mirrors hermes_cli.config._validate_config_key's acceptance rules; the
+    difference is that an unknown subkey of a populated section is an ERROR
+    here, where the CLI would only print a notice.
+    """
+    schema = schema if schema is not None else _config_schema()
+    tree, open_roots = schema["tree"], set(schema["open_roots"])
+    extra_roots, containers = set(schema["extra_roots"]), set(schema["platform_containers"])
+
+    segments = path.split(".")
+    if not path or any(not seg for seg in segments):
+        return "error", f"invalid config path {path!r} (empty segment)"
+
+    top = segments[0]
+    # Leading-underscore keys are intentionally non-schema (tooling), and
+    # `platforms` containers take a user-chosen platform name as their child.
+    if top.startswith("_") or top in containers:
+        return "ok", None
+    if top in open_roots or top in extra_roots:
+        return "ok", None
+    if top not in tree:
+        suggestion = next(iter(difflib.get_close_matches(top, sorted(tree), n=1, cutoff=0.6)), None)
+        detail = f"unknown top-level config key {top!r} — hermes allows custom top-level keys, but this isn't part of the known schema"
+        if suggestion:
+            detail += f" (did you mean {suggestion!r}?)"
+        return "warn", detail
+
+    node = tree[top]
+    consumed = [top]
+    for seg in segments[1:]:
+        # null node = leaf or free-form (empty-dict) mapping: anything below
+        # is accepted, same as the CLI. A `platforms` segment anywhere opens
+        # the rest of the path.
+        if not isinstance(node, dict) or seg in containers:
+            return "ok", None
+        if seg not in node:
+            sibling = next(iter(difflib.get_close_matches(seg, sorted(node), n=1, cutoff=0.6)), None)
+            detail = f"{path!r} is not a known config path — {'.'.join(consumed)} only has known subkeys"
+            if sibling:
+                detail += f" (did you mean {'.'.join(consumed + [sibling])!r}?)"
+            return "error", detail
+        consumed.append(seg)
+        node = node[seg]
+    return "ok", None
+
+
+def validate_config(config: dict) -> list[dict]:
+    """Validate every flattened path in a desired.config-shaped dict.
+    Returns only the non-ok findings: [{path, level, detail}]."""
+    findings = []
+    for path, _value in _flatten("", config) if config else []:
+        level, detail = validate_config_key(path)
+        if level != "ok":
+            findings.append({"path": path, "level": level, "detail": detail})
+    return findings
+
+
 def _read_live_config(agent: Agent, host: Host) -> tuple[dict, list[str]]:
     home = profile_home(agent)
     script = (
@@ -346,9 +437,12 @@ def config_diff(agent: Agent, host: Host) -> dict:
             status = "match"
         else:
             status = "drift"
+        schema_level, schema_detail = validate_config_key(path)
         config_findings.append({
             "path": path, "status": status,
             "desired": desired_value, "live": None if live_value is _MISSING else live_value,
+            "schema": schema_level,  # "ok" | "warn" (unknown top-level) | "error" (unknown subkey — push will refuse)
+            **({"schema_detail": schema_detail} if schema_detail else {}),
         })
 
     env_findings = [
@@ -372,15 +466,36 @@ def push_config(agent: Agent, host: Host) -> Iterator[str]:
     then restart the gateway if it's currently active so the change actually
     takes effect. None values are skipped — there's no clear unset semantics
     here, so "no opinion" just means don't touch that key.
+
+    Schema guardrail: before anything reaches the host, every declared path
+    is validated against the known-config snapshot. An unknown subkey of a
+    populated section (`model.primary`, `delegation.max_childs`) is refused
+    outright — `config set` would WRITE it with a mere notice and exit 0,
+    leaving the agent silently misconfigured while a fail-closed push
+    reported success. Unknown top-level keys pass with a streamed warning,
+    matching the CLI's custom-key support.
     """
     _validate_agent(agent)
     desired_config = agent.desired.get("config") or {}
     if not desired_config:
         raise ValueError("desired.config is empty — nothing to push")
 
+    schema_findings = validate_config({p: v for p, v in _flatten("", desired_config) if v is not None})
+    errors = [f for f in schema_findings if f["level"] == "error"]
+    if errors:
+        lines = [f"  {f['path']}: {f['detail']}" for f in errors]
+        raise ValueError(
+            "desired.config declares unknown config paths — refusing to push "
+            "(fix the path, or move genuinely custom keys to the top level):\n" + "\n".join(lines)
+        )
+
     cmd_prefix = _cmd_prefix(agent)
     unit = shlex.quote(service_name(agent))
     lines = ["set -e", RUNTIME_ENV, PATH_PREFIX, ""]
+    for finding in schema_findings:  # warnings only — errors raised above
+        # shlex.quote the whole message: detail text is built from operator
+        # YAML keys and must not expand inside the remote shell.
+        lines.append(f"echo {shlex.quote('[beacon] warning: ' + finding['detail'])}")
     for path, value in _flatten("", desired_config):
         if value is None:
             continue
