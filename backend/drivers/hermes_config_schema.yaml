@@ -1,0 +1,1152 @@
+# Known Hermes config-key schema — what Beacon validates desired.config and
+# template config paths against before diffing/pushing. REGENERATED, not
+# hand-edited: scripts/dump_hermes_config_schema.py [hermes-agent checkout].
+#
+# Semantics (mirroring `hermes config set`'s own rules, one notch stricter —
+# see backend/drivers/hermes.py validate_config_key):
+#   - a path under `tree` must follow the populated-dict structure exactly;
+#     an unknown subkey of a POPULATED section is a likely typo -> error
+#   - null = leaf or free-form mapping: anything at/below it is accepted
+#   - open_roots / extra_roots / platform_containers: accepted, no deep check
+#   - unknown TOP-LEVEL keys are legal in Hermes (custom keys bridge to the
+#     environment for skills) -> warning, not an error
+#   - overlaid_sections were degenerate (scalar/empty) in DEFAULT_CONFIG but
+#     have a fixed runtime-read key set; their tree comes from the OVERLAYS
+#     table in the generator script, not from DEFAULT_CONFIG
+source:
+  checkout: hermes-agent
+  commit: 53403f150f7818971e17cdefa32b35524988b50f
+  describe: v2026.9.7-5166-g53403f150f
+  generated: '2026-09-25'
+overlaid_sections:
+- model
+open_roots:
+- bluebubbles
+- channel_prompts
+- checkpoints
+- command_allowlist
+- credential_pool_strategies
+- custom_providers
+- dingtalk
+- discord
+- email
+- feishu
+- goals
+- hooks
+- loops
+- matrix
+- mattermost
+- mcp_servers
+- model_catalog
+- personalities
+- plugins
+- providers
+- qqbot
+- quick_commands
+- secrets
+- server_actions
+- sessions
+- signal
+- slack
+- sms
+- telegram
+- wecom
+- weixin
+- whatsapp
+- yuanbao
+extra_roots:
+- allow_all_users
+- always_log_local
+- custom_providers
+- fallback_model
+- filter_silence_narration
+- group_sessions_per_user
+- image_gen
+- known_builtin_toolsets
+- known_plugin_toolsets
+- mcp_servers
+- multiplex_profiles
+- platform_toolsets
+- platforms
+- plugins
+- profile_routes
+- require_mention
+- reset_triggers
+- signal
+- smart_model_routing
+- stt_echo_transcripts
+- thread_sessions_per_user
+- timeouts
+- tool_gateway_declined_tools
+- unauthorized_dm_behavior
+- video_gen
+platform_containers:
+- platforms
+tree:
+  _config_version: null
+  agent:
+    agent_cache:
+      idle_ttl_secs: null
+      max_evictions_per_pass: null
+      max_size: null
+      memory_high_mb: null
+      protect_recent: null
+    api_max_retries: null
+    bot_mode_protocol: null
+    budget_warning_ratio: null
+    build_wait_timeout: null
+    clarify_timeout: null
+    coding_context: null
+    coding_instructions: null
+    cron_drain_timeout: null
+    disabled_toolsets: null
+    empty_response_guard:
+      cost_threshold_usd: null
+      enabled: null
+    environment_hint: null
+    environment_probe: null
+    execution_guidance: null
+    fast_auto_seconds: null
+    gateway_auto_continue_freshness: null
+    gateway_notify_interval: null
+    gateway_startup_restore_drain_timeout: null
+    gateway_startup_warmup_timeout: null
+    gateway_timeout: null
+    gateway_timeout_warning: null
+    gateway_turn_lease_timeout: null
+    image_input_mode: null
+    intent_ack_continuation: null
+    local_stream_stale_timeout: null
+    max_turns: null
+    max_verify_nudges: null
+    parallel_tool_call_guidance: null
+    reasoning_echo: null
+    reasoning_overrides: null
+    reconnect_attention_after: null
+    restart_after_turn_timeout: null
+    restart_drain_timeout: null
+    run_budget_seconds: null
+    sanitizer_heal_escalation_threshold: null
+    service_tier: null
+    session_stall_timeout: null
+    stall_guards: null
+    task_completion_guidance: null
+    tool_use_enforcement: null
+    turn_liveness:
+      poll_s: null
+      timeout_s: null
+    verify_guidance: null
+    verify_on_stop: null
+  approvals:
+    cron_mode: null
+    denial_breaker_threshold: null
+    deny: null
+    destructive_slash_confirm: null
+    mcp_reload_confirm: null
+    mode: null
+    single_query_mode: null
+    smart_policy: null
+    timeout: null
+    unattended_mode: null
+  auth:
+    adopt_external_logins: null
+  auxiliary:
+    approval:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+    background_review:
+      api_key: null
+      base_url: null
+      enabled: null
+      extra_body: null
+      model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+    compression:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+    curator:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+    free_only: null
+    goal_judge:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+    kanban_decomposer:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+    mcp:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+    memory_query_rewrite:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      timeout: null
+    moa_aggregator:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      timeout: null
+    moa_reference:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      timeout: null
+    monitor:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+    openrouter_model: null
+    profile_describer:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+    review:
+      api_key: null
+      api_mode: null
+      base_url: null
+      model: null
+      provider: null
+    skills_hub:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+    stream_only_base_urls: null
+    title_generation:
+      api_key: null
+      base_url: null
+      enabled: null
+      extra_body: null
+      language: null
+      model: null
+      model_upgrade_enabled: null
+      prefer_fast_model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+    transient_retries: null
+    triage_specifier:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+    tts_audio_tags:
+      api_key: null
+      base_url: null
+      extra_body: null
+      model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+    vision:
+      api_key: null
+      base_url: null
+      download_timeout: null
+      extra_body: null
+      model: null
+      provider: null
+      reasoning_effort: null
+      timeout: null
+  bedrock:
+    discovery:
+      enabled: null
+      provider_filter: null
+      refresh_interval: null
+    guardrail:
+      guardrail_identifier: null
+      guardrail_version: null
+      stream_processing_mode: null
+      trace: null
+    region: null
+  bot_mode:
+    envelope_ttl_seconds: null
+    turn_wait_seconds: null
+  browser:
+    allow_private_urls: null
+    allow_unsafe_evaluate: null
+    auto_local_for_private_urls: null
+    backend: null
+    camofox:
+      adopt_existing_tab: null
+      loopback_host_alias: null
+      managed_persistence: null
+      rewrite_loopback_urls: null
+      session_key: null
+      user_id: null
+    cdp_url: null
+    command_timeout: null
+    dialog_policy: null
+    dialog_timeout_s: null
+    engine: null
+    extension_control:
+      developer_mode: null
+      enabled: null
+    headed: null
+    inactivity_timeout: null
+    real_profile_autoclose: null
+    real_profile_pin: null
+    record_sessions: null
+    restrict_evaluate: null
+    snapshot_threshold: null
+    use_real_profile: null
+  checkpoints:
+    auto_prune: null
+    enabled: null
+    max_file_size_mb: null
+    max_snapshots: null
+    max_total_size_mb: null
+    min_interval_hours: null
+    retention_days: null
+  code_execution:
+    kernel_idle_timeout: null
+    max_session_kernels: null
+    mode: null
+  command_allowlist: null
+  compression:
+    abort_on_summary_failure: null
+    checkpoint_required: null
+    codex_app_server_auto: null
+    codex_gpt55_autoraise: null
+    codex_gpt55_autoraise_notice: null
+    codex_responses_compact_threshold: null
+    codex_responses_native: null
+    context_timeout_seconds: null
+    context_total_ceiling_seconds: null
+    enabled: null
+    hygiene_failure_cooldown_seconds: null
+    hygiene_hard_message_limit: null
+    hygiene_max_turn_hold_seconds: null
+    hygiene_timeout_seconds: null
+    hygiene_total_ceiling_seconds: null
+    idle_compact_after_seconds: null
+    in_place: null
+    max_attempts: null
+    micro_compact: null
+    micro_compact_defrag_threshold_tokens: null
+    micro_compact_every_n_turns: null
+    min_tail_user_messages: null
+    model_thresholds: null
+    proactive_prune_min_reclaim_tokens: null
+    proactive_prune_min_result_chars: null
+    proactive_prune_tokens: null
+    progress_notices: null
+    protect_first_n: null
+    protect_last_n: null
+    tail_mode: null
+    target_ratio: null
+    threshold: null
+    threshold_tokens: null
+  computer_use:
+    allow_unsigned_driver: null
+    capability_manifest: null
+    capture_after_mode: null
+    cua_telemetry: null
+    max_image_dimension: null
+    native_wayland: null
+    no_overlay: null
+    permission_mode: null
+  context:
+    engine: null
+    memory_trim:
+      cooldown_seconds: null
+      enabled: null
+      info_log_min_delta_mb: null
+      log_every_n: null
+  context_file_max_chars: null
+  context_file_read_timeout: null
+  credential_pool_strategies: null
+  cron:
+    allow_agent_scheduling: null
+    catch_up_missed: null
+    chronos:
+      callback_url: null
+      expected_audience: null
+      nas_jwks_url: null
+      portal_url: null
+    delivery:
+      notify: null
+    failure_repeat_alert_hours: null
+    max_parallel_jobs: null
+    media_send_timeout_seconds: null
+    mirror_delivery: null
+    model: null
+    model_provider: null
+    output_retention: null
+    preflight: null
+    provider: null
+    require_restart_safe_scope: null
+    script_timeout_seconds: null
+    session_db_timeout_seconds: null
+    wrap_response: null
+  curator:
+    archive_after_days: null
+    archive_ttl_days: null
+    backup:
+      enabled: null
+      keep: null
+    consolidate: null
+    enabled: null
+    interval_hours: null
+    min_idle_hours: null
+    prune_builtins: null
+    stale_after_days: null
+  dashboard:
+    basic_auth:
+      password: null
+      password_hash: null
+      secret: null
+      session_ttl_seconds: null
+      username: null
+    compute_host_heartbeat_secs: null
+    compute_host_respawn_max: null
+    drain_auth:
+      min_secret_chars: null
+      scope: null
+    oauth:
+      client_id: null
+      portal_url: null
+    public_url: null
+    show_token_analytics: null
+    startup_orphan_sweep: null
+    theme: null
+    trusted_proxies: null
+    turn_isolation: null
+    ws_orphan_activity_stale_s: null
+    ws_orphan_reap_grace_s: null
+    ws_ping_interval: null
+    ws_ping_timeout: null
+  database:
+    journal_mode: null
+    journal_size_limit: null
+    wal_autocheckpoint: null
+  delegation:
+    api_key: null
+    api_mode: null
+    base_url: null
+    child_timeout_seconds: null
+    compression_threshold_tokens: null
+    fallback_providers: null
+    independent_completions: null
+    inherit_mcp_toolsets: null
+    max_concurrent_children: null
+    max_iterations: null
+    max_spawn_depth: null
+    max_summary_chars: null
+    model: null
+    orchestrator_enabled: null
+    provider: null
+    reasoning_effort: null
+    request_overrides: null
+    subagent_auto_approve: null
+    surface_child_process_notifications: null
+  desktop:
+    auto_continue:
+      enabled: null
+      freshness_minutes: null
+      max_attempts: null
+    disable_gpu: null
+    electron_flags: null
+    font_family: null
+    macos_signing_identity: null
+    manage_launcher_entry: null
+    ozone_platform_hint: null
+    password_store: null
+    repo_scan_enabled: null
+    repo_scan_exclude_paths: null
+    repo_scan_roots: null
+  discord:
+    allow_any_attachment: null
+    allowed_channels: null
+    approval_mentions: null
+    auto_thread: null
+    bots_require_inline_mention: null
+    channel_prompts: null
+    dm_role_auth_guild: null
+    free_response_channels: null
+    history_backfill: null
+    history_backfill_limit: null
+    max_attachment_bytes: null
+    missed_message_backfill:
+      channels: null
+      enabled: null
+      limit: null
+      max_attempts: null
+      max_dispatches: null
+      window_seconds: null
+    reactions: null
+    require_mention: null
+    server_actions: null
+    thread_require_mention: null
+    voice_channel_inactivity_timeout_seconds: null
+    voice_fx:
+      ack_enabled: null
+      ack_phrases: null
+      ambient_enabled: null
+      ambient_gain: null
+      ambient_path: null
+      duck_gain: null
+      enabled: null
+      speech_gain: null
+    voice_playback_timeout_seconds: null
+    websocket_event_max_silence_seconds: null
+    websocket_heartbeat_ack_max_age_seconds: null
+    websocket_liveness_failure_threshold: null
+    websocket_liveness_interval_seconds: null
+    websocket_max_latency_seconds: null
+  display:
+    background_process_notifications: null
+    battery: null
+    bell_on_complete: null
+    bell_on_prompt: null
+    busy_input_mode: null
+    busy_steer_ack_enabled: null
+    cli_multiline_shortcuts: null
+    cli_rebuild_scrollback_on_redraw: null
+    cli_refresh_interval: null
+    compact: null
+    copy_shortcut: null
+    credits_notices: null
+    ephemeral_system_ttl: null
+    file_mutation_verifier: null
+    final_response_markdown: null
+    focus_saved_tool_progress: null
+    focus_view: null
+    friendly_tool_labels: null
+    inline_diffs: null
+    interface: null
+    interim_assistant_messages: null
+    language: null
+    memory_notifications: null
+    persist_prompts: null
+    persistent_output: null
+    persistent_output_max_lines: null
+    personality: null
+    pet:
+      enabled: null
+      render_mode: null
+      scale: null
+      slug: null
+      unicode_cols: null
+    platforms:
+      discord:
+        streaming: null
+      slack:
+        streaming: null
+      telegram:
+        streaming: null
+      wecom:
+        streaming: null
+    reasoning_full: null
+    reasoning_style: null
+    resume_display: null
+    resume_exchanges: null
+    resume_last_session: null
+    resume_max_assistant_chars: null
+    resume_max_assistant_lines: null
+    resume_max_user_chars: null
+    resume_skip_tool_only: null
+    runtime_footer:
+      enabled: null
+      fields: null
+    show_commentary: null
+    show_cost: null
+    show_reasoning: null
+    skin: null
+    spinner_token_flow: null
+    status_bar:
+      fields: null
+    status_phrases: null
+    streaming: null
+    suppress_warning_notifications: null
+    timestamp_format: null
+    timestamps: null
+    tool_preview_length: null
+    tool_progress_command: null
+    tool_progress_grouping: null
+    tui_agents_nudge: null
+    tui_auto_resume_recent: null
+    tui_status_indicator: null
+    turn_completion_explainer: null
+    turn_summary: null
+    user_message_preview:
+      first_lines: null
+      last_lines: null
+    vim_mode: null
+  doctor:
+    live_probe_timeout: null
+  fallback_providers: null
+  file_read_max_chars: null
+  gateway:
+    allow_all_users: null
+    api_server:
+      max_concurrent_runs: null
+    auto_multiplex_migration: null
+    bot_loop_guard:
+      cooldown_seconds: null
+      enabled: null
+      max_events: null
+      window_seconds: null
+    delivery_ledger: null
+    loop_watchdog: null
+    loop_watchdog_max_strikes: null
+    loop_watchdog_probe_interval_s: null
+    loop_watchdog_probe_timeout_s: null
+    max_inbound_media_bytes: null
+    media_delivery_allow_dirs: null
+    message_timestamps:
+      enabled: null
+    multiplex_profiles: null
+    platform_connect_timeout: null
+    profile_routes: null
+    respawn_storm:
+      max_starts: null
+      window_seconds: null
+    restart_loop_guard:
+      max_gap_seconds: null
+      max_restarts: null
+      window_seconds: null
+    scale_to_zero:
+      idle_timeout_minutes: null
+    signal_interrupt_grace_timeout: null
+    startup_watchdog: null
+    startup_watchdog_timeout_seconds: null
+    strict: null
+    trust_env: null
+    trust_recent_files: null
+    trust_recent_files_seconds: null
+    write_sessions_json: null
+  goals:
+    max_turns: null
+  honcho: null
+  hooks: null
+  hooks_auto_accept: null
+  human_delay:
+    max_ms: null
+    min_ms: null
+    mode: null
+  kanban:
+    auto_decompose: null
+    auto_decompose_per_tick: null
+    auto_subscribe_on_create: null
+    default_assignee: null
+    dispatch_in_gateway: null
+    dispatch_interval_seconds: null
+    dispatch_profiles: null
+    dispatch_stale_timeout_seconds: null
+    done_sub_retention_days: null
+    failure_limit: null
+    max_in_progress: null
+    max_in_progress_per_profile: null
+    notify_in_gateway: null
+    orchestrator_profile: null
+    reconcile_orphans: null
+    review_dispatch: null
+    worker_log_backup_count: null
+    worker_log_rotate_bytes: null
+  local_runtime:
+    backend: null
+    detect_ports: null
+    enabled: null
+    models_max: null
+    port: null
+    tag: null
+  logging:
+    backup_count: null
+    level: null
+    max_size_mb: null
+  loops:
+    max_ticks: null
+    min_interval_seconds: null
+    self_paced_ceiling_seconds: null
+    self_paced_floor_seconds: null
+  lsp:
+    enabled: null
+    idle_timeout: null
+    install_strategy: null
+    package_manager: null
+    servers: null
+    wait_mode: null
+    wait_timeout: null
+  matrix:
+    allowed_rooms: null
+    free_response_rooms: null
+    require_mention: null
+  mattermost:
+    allowed_channels: null
+    channel_prompts: null
+    free_response_channels: null
+    require_mention: null
+  max_concurrent_sessions: null
+  max_live_sessions: null
+  mcp:
+    auto_reload_on_config_change: null
+  mcp_discovery_timeout: null
+  mcp_single_query_discovery_timeout: null
+  memory:
+    memory_char_limit: null
+    memory_enabled: null
+    nudge_interval: null
+    provider: null
+    user_char_limit: null
+    user_profile_enabled: null
+    write_approval: null
+  moa:
+    active_preset: null
+    default_preset: null
+    presets:
+      default:
+        aggregator:
+          model: null
+          provider: null
+        enabled: null
+        reference_models: null
+    privacy_filter: null
+    save_traces: null
+    trace_dir: null
+  model:
+    default: null
+    model: null
+    name: null
+    provider: null
+    base_url: null
+    api_base: null
+    api_mode: null
+    aliases: null
+    context_length: null
+    key_env: null
+    api_key_env: null
+    auth_mode: null
+    entra: null
+  model_catalog:
+    enabled: null
+    providers: null
+    ttl_minutes: null
+    url: null
+  model_overrides: null
+  models_dev:
+    url: null
+  monitoring:
+    export:
+      otlp:
+        enabled: null
+        endpoint: null
+        headers_env: null
+    gateway_health_export:
+      diagnostic_events_enabled: null
+      enabled: null
+      export_interval_seconds: null
+      logs_export_interval_seconds: null
+      metrics_enabled: null
+      resource_attributes:
+        deployment.environment.name: null
+        service.name: null
+      warning_error_events_enabled: null
+    install_id: null
+  network:
+    force_ipv4: null
+  nous:
+    anthropic_wire: null
+    guest: null
+    keepalive_interval_seconds: null
+  onboarding:
+    profile_build: null
+    seen: null
+  openrouter:
+    min_coding_score: null
+    response_cache: null
+    response_cache_ttl: null
+  paste_collapse_char_threshold: null
+  paste_collapse_threshold: null
+  paste_collapse_threshold_fallback: null
+  personalities: null
+  platform_hints: null
+  plugins:
+    allow_deprecated_imports: null
+    hook_callback_timeout: null
+  prefill_messages_file: null
+  privacy:
+    redact_pii: null
+  prompt_caching:
+    cache_ttl: null
+  providers: null
+  proxy:
+    allow_env_fallback: null
+    auto_install: null
+    credential_source: null
+    enabled: null
+    enforce_on_docker: null
+    extra_allowed_hosts: null
+    tunnel_port: null
+    upstream_deny_cidrs: null
+  quick_commands: null
+  runtime:
+    nofile_soft_limit: null
+  secrets:
+    bitwarden:
+      access_token_env: null
+      auto_install: null
+      cache_ttl_seconds: null
+      enabled: null
+      encrypted_cache:
+        enabled: null
+        max_stale_seconds: null
+      override_existing: null
+      project_id: null
+      server_url: null
+    onepassword:
+      account: null
+      binary_path: null
+      cache_ttl_seconds: null
+      enabled: null
+      env: null
+      override_existing: null
+      service_account_token_env: null
+  security:
+    acked_advisories: null
+    allow_data_training_tiers_noninteractive: null
+    allow_lazy_installs: null
+    allow_private_urls: null
+    approval:
+      transport: null
+      transport_fallback: null
+    fake_ip_ranges: null
+    protected_instruction_extra_patterns: null
+    protected_instruction_files: null
+    redact_secrets: null
+    tirith_enabled: null
+    tirith_fail_open: null
+    tirith_path: null
+    tirith_timeout: null
+    website_blocklist:
+      domains: null
+      enabled: null
+      shared_files: null
+  session:
+    terminal_continue: null
+  sessions:
+    auto_archive: null
+    auto_archive_days: null
+    auto_prune: null
+    cjk_fts: null
+    fts_optimize_notice: null
+    max_export_messages: null
+    max_resume_messages: null
+    min_interval_hours: null
+    min_vacuum_interval_days: null
+    retention_days: null
+    search_slow_ms: null
+    vacuum_after_prune: null
+  skills:
+    auto_load: null
+    create_dir: null
+    external_dirs: null
+    guard_agent_created: null
+    inline_shell: null
+    inline_shell_timeout: null
+    ledger: null
+    project_discovery: null
+    template_vars: null
+    tier1_advisory: null
+    trusted_project_dirs: null
+    write_approval: null
+  slack:
+    allowed_channels: null
+    channel_prompts: null
+    free_response_channels: null
+    ignore_other_user_mentions: null
+    require_mention: null
+    require_mention_channels: null
+    thread_require_mention: null
+  streaming:
+    buffer_threshold: null
+    cursor: null
+    edit_interval: null
+    enabled: null
+    fresh_final_after_seconds: null
+    transport: null
+  stt:
+    cloud_trim_keep_ms: null
+    cloud_trim_silence: null
+    cloud_trim_threshold_db: null
+    deepinfra:
+      model: null
+    echo_transcripts: null
+    elevenlabs:
+      diarize: null
+      language_code: null
+      model_id: null
+      tag_audio_events: null
+    enabled: null
+    groq:
+      language: null
+      model: null
+    language: null
+    local:
+      initial_prompt: null
+      language: null
+      logprob_threshold: null
+      model: null
+      no_speech_prob_threshold: null
+      unload_after_idle_seconds: null
+      vad: null
+      vad_min_silence_ms: null
+    mistral:
+      language: null
+      model: null
+    openai:
+      language: null
+      model: null
+    xai:
+      language: null
+  telegram:
+    allowed_chats: null
+    channel_prompts: null
+    extra:
+      allow_cjk_rich_messages: null
+      rich_drafts: null
+      rich_messages: null
+    reactions: null
+  telemetry:
+    shared_metrics:
+      enabled: null
+      endpoint: null
+      send: null
+  terminal:
+    auto_source_bashrc: null
+    backend: null
+    container_cpu: null
+    container_disk: null
+    container_memory: null
+    container_persistent: null
+    cwd: null
+    daemon_term_grace_seconds: null
+    daytona_image: null
+    degraded_mode: null
+    docker_env: null
+    docker_extra_args: null
+    docker_forward_env: null
+    docker_image: null
+    docker_mount_cwd_to_workspace: null
+    docker_network: null
+    docker_run_as_host_user: null
+    docker_shared_container_key: null
+    docker_shm_size: null
+    docker_snap_compat: null
+    docker_volumes: null
+    env_passthrough: null
+    font_family: null
+    home_mode: null
+    modal_image: null
+    modal_mode: null
+    oneshot_completion_wait_seconds: null
+    persistent_shell: null
+    shell_init_files: null
+    singularity_image: null
+    sync_back_max_bytes: null
+    temp_dir: null
+    timeout: null
+    vercel_runtime: null
+  timezone: null
+  tool_loop_guardrails:
+    hard_stop_after:
+      exact_failure: null
+      idempotent_no_progress: null
+      same_tool_failure: null
+    hard_stop_enabled: null
+    loop_caps:
+      max_subagents: null
+      max_web_searches: null
+    non_interactive_hard_stop_enabled: null
+    warn_after:
+      exact_failure: null
+      idempotent_no_progress: null
+      same_tool_failure: null
+    warnings_enabled: null
+  tool_output:
+    max_bytes: null
+    max_line_length: null
+    max_lines: null
+  tools:
+    connectors:
+      enabled: null
+    tool_search:
+      enabled: null
+      listing: null
+      listing_max_tokens: null
+      max_search_limit: null
+      search_default_limit: null
+      threshold_pct: null
+  toolsets: null
+  tts:
+    deepinfra:
+      model: null
+      voice: null
+    edge:
+      voice: null
+    elevenlabs:
+      model_id: null
+      voice_id: null
+    gemini:
+      audio_tags: null
+      model: null
+      persona_prompt_file: null
+      voice: null
+    kittentts:
+      model: null
+      voice: null
+    minimax:
+      model: null
+      voice_id: null
+    mistral:
+      model: null
+      voice_id: null
+    neutts:
+      device: null
+      model: null
+      ref_audio: null
+      ref_text: null
+    openai:
+      model: null
+      voice: null
+    piper:
+      voice: null
+    provider: null
+    xai:
+      auto_speech_tags: null
+      bit_rate: null
+      language: null
+      optimize_streaming_latency: null
+      sample_rate: null
+      speed: null
+      voice_id: null
+  updates:
+    auto_switch_parked_branch: null
+    backup_keep: null
+    check: null
+    non_interactive_local_changes: null
+    parked_branch_strategy: null
+    pre_update_backup: null
+    refresh_cua_driver: null
+  vault:
+    bitwarden:
+      binary_path: null
+      enabled: null
+    onepassword:
+      account: null
+      binary_path: null
+      enabled: null
+      service_account_token_env: null
+  vertex:
+    project_id: null
+    region: null
+  vision:
+    embed_target_bytes: null
+    max_calls_per_image: null
+  voice:
+    auto_tts: null
+    barge_in: null
+    barge_in_grace_seconds: null
+    barge_in_threshold_multiplier: null
+    beep_enabled: null
+    beep_volume: null
+    client_direct: null
+    gpt_live:
+      instructions: null
+      model: null
+      voice: null
+    max_recording_seconds: null
+    record_key: null
+    silence_duration: null
+    silence_threshold: null
+    stop_phrases: null
+    submit_mode: null
+    thinking_sound: null
+    voice_chat_mode: null
+  wake_word:
+    capture: null
+    confirmation_frames: null
+    enabled: null
+    input_device: null
+    openwakeword:
+      inference_framework: null
+      model: null
+    phrase: null
+    porcupine:
+      keyword: null
+    profile_routing: null
+    provider: null
+    sensitivity: null
+    sherpa:
+      model_dir: null
+    start_new_session: null
+    surface: null
+  web:
+    backend: null
+    cache_enabled: null
+    cache_exempt_hosts: null
+    cache_ttl_minutes: null
+    extract_backend: null
+    extract_char_limit: null
+    keyless_fallback: null
+    keyless_rescue: null
+    provider_tier: null
+    search_backend: null
+  whatsapp: null
+  x_search:
+    model: null
+    reasoning_effort: null
+    retries: null
+    timeout_seconds: null

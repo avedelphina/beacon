@@ -6,6 +6,40 @@ an API worth being stable about — pre-1.0, breaking changes can land in a
 minor bump. See [README.md](README.md#limitations) for current limitations
 and [ROADMAP.md](ROADMAP.md) for what's planned.
 
+## [0.8.0] — 2026-09-25
+
+### Added
+
+- **Config schema guardrail.** `hermes config set` only hard-refuses the
+  narrow wrong-prefix case — a plain typo like `model.primary` is *written
+  anyway* with a post-write notice and exit code 0, so a fail-closed push
+  would report success while the key did nothing. Beacon now validates every
+  `desired.config`/template path itself before pushing, against a checked-in
+  snapshot of Hermes's `DEFAULT_CONFIG` plus its open-section key sets
+  (`backend/drivers/hermes_config_schema.yaml`, regenerated from a
+  hermes-agent checkout with `scripts/dump_hermes_config_schema.py`, with a
+  small hand-maintained overlay for sections DEFAULT_CONFIG seeds
+  degenerately, e.g. `model`). Unknown subkeys of known sections are
+  refused with a 400 naming every bad path and a did-you-mean suggestion;
+  unknown top-level keys (legal in Hermes — custom keys bridge to the
+  environment) push with a streamed warning. `config_diff` annotates every
+  finding with `schema: ok|warn|error`, and the GUI renders schema errors as
+  critical rather than plain drift.
+- **Orchestration template example** (`fleet/templates/orchestration.yaml.example`):
+  the `delegation` section — `orchestrator_enabled`, concurrency/depth caps,
+  `subagent_auto_approve`, optional per-subagent model pinning and a separate
+  `delegation.fallback_providers` chain.
+
+### Fixed
+
+- The shipped template example taught a fictional config schema
+  (`model.primary`, `model.fallbacks`, `tools.model`, `summarization.model`)
+  that no Hermes build reads — every push of it would have been silently
+  inert. `fleet/templates/anthropic-stack.yaml.example` and the README now
+  use the real schema: `model.default`/`provider`/`aliases`, the top-level
+  `fallback_providers` object list (pushed as one structured JSON value),
+  and `auxiliary.<task>.{provider,model}` for helper models.
+
 ## [0.7.0] — 2026-09-03
 
 ### Added
