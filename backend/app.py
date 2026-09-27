@@ -1,6 +1,6 @@
 import datetime
 import itertools
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -78,7 +78,15 @@ async def _csp(request, call_next):
     # hosts (plugin manifests, config.yaml values), so a second layer here
     # limits what an XSS payload that slips through can actually do.
     response = await call_next(request)
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    # style-src/font-src: frontend/index.html loads IBM Plex from Google
+    # Fonts (the stylesheet from googleapis.com, the actual font files from
+    # gstatic.com) — both need an explicit allowance or the browser silently
+    # drops the request and every page falls back to a system font.
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com"
+    )
     return response
 
 
@@ -98,8 +106,11 @@ def _error_handler(status_code: int):
     return handler
 
 
-# store.NotFound/InvalidId also cover cron_store and templates, which reuse them.
-for _exc, _status in ((store.NotFound, 404), (store.InvalidId, 400), (ValueError, 400)):
+# store.NotFound/InvalidId also cover cron_store and templates, which reuse
+# them. RuntimeError is a driver's own "couldn't talk to the host" signal
+# (e.g. list_plugins on an unreachable agent) — mapped to a real detail
+# message instead of falling through to a bare, undetailed 500.
+for _exc, _status in ((store.NotFound, 404), (store.InvalidId, 400), (ValueError, 400), (RuntimeError, 502)):
     app.add_exception_handler(_exc, _error_handler(_status))
 
 
@@ -116,8 +127,28 @@ def _started(lines: Iterator[str]) -> Iterator[str]:
     return itertools.chain([first], lines)
 
 
+def _split_exit_marker(lines: Iterator[str]) -> tuple[Iterator[str], Callable[[], str | None]]:
+    """ssh.stream_script always ends its stream with a `__BEACON_EXIT__<code>`
+    line — internal bookkeeping, not output for a human. Returns the stream
+    with that line removed, plus a getter for the code it carried (None
+    until the returned iterator has been fully consumed).
+    """
+    code = None
+
+    def filtered() -> Iterator[str]:
+        nonlocal code
+        for line in lines:
+            if line.startswith("__BEACON_EXIT__"):
+                code = line.removeprefix("__BEACON_EXIT__")
+            else:
+                yield line
+
+    return filtered(), lambda: code
+
+
 def _stream(lines: Iterator[str]) -> StreamingResponse:
-    return StreamingResponse((line + "\n" for line in _started(lines)), media_type="text/plain")
+    filtered, _ = _split_exit_marker(_started(lines))
+    return StreamingResponse((line + "\n" for line in filtered), media_type="text/plain")
 
 
 def _used_by(name: str, agents: list[Agent]) -> list[str]:
@@ -289,22 +320,18 @@ def decommission_agent(id_: str, body: DecommissionRequest, request: Request) ->
     if (gate := _confirm_gate("decommission", body.confirm, gate_desc, purge=body.purge, remove_user=body.remove_user)) is not None:
         return JSONResponse(gate)
     agent, host, driver = for_agent(id_)
-    lines = _started(driver.decommission(agent, host, purge=body.purge, remove_user=body.remove_user))
+    filtered, exit_code = _split_exit_marker(_started(driver.decommission(agent, host, purge=body.purge, remove_user=body.remove_user)))
 
     def body_stream():
-        exit_code = None
-        for line in lines:
-            if line.startswith("__BEACON_EXIT__"):
-                exit_code = line.removeprefix("__BEACON_EXIT__")
-            else:
-                yield line + "\n"
+        for line in filtered:
+            yield line + "\n"
 
         # The decommission script never uses `set -e` and swallows its own
         # step failures with `|| echo`, so its exit code is 0 whenever ssh
         # actually reached the host and ran it to completion — anything else
         # (255 = ssh-level failure, none = timeout/no ssh binary) means we
         # have no real confidence teardown happened, so leave the record be.
-        if exit_code == "0":
+        if exit_code() == "0":
             store.archive_agent(id_)
             yield "[beacon] record archived to fleet/decommissioned/\n"
         else:

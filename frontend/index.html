@@ -89,7 +89,7 @@
   <form class="modal" id="host-form">
     <h2 id="host-modal-title">Add host</h2>
     <label>ID <span class="hint">(lowercase, letters/numbers/dashes)</span>
-      <input name="id" required pattern="[a-z0-9][a-z0-9-]*">
+      <input name="id" required pattern="[a-z0-9][a-z0-9\-]*">
     </label>
     <label>Address <input name="address" required placeholder="10.20.4.11"></label>
     <div class="field-row">
@@ -109,7 +109,7 @@
   <form class="modal" id="agent-form">
     <h2 id="agent-modal-title">Add agent</h2>
     <label>ID <span class="hint">(lowercase, letters/numbers/dashes)</span>
-      <input name="id" required pattern="[a-z0-9][a-z0-9-]*">
+      <input name="id" required pattern="[a-z0-9][a-z0-9\-]*">
     </label>
     <div class="field-row">
       <label>Type <input name="type" required value="hermes"></label>
@@ -227,7 +227,7 @@
   <form class="modal" id="cron-job-form">
     <h2 id="cron-job-modal-title">Add cron job</h2>
     <label>ID <span class="hint">(lowercase, letters/numbers/dashes)</span>
-      <input name="id" required pattern="[a-z0-9][a-z0-9-]*">
+      <input name="id" required pattern="[a-z0-9][a-z0-9\-]*">
     </label>
     <label>Schedule <span class="hint">(5-field cron, UTC unless timezone set)</span>
       <input name="schedule" required placeholder="0 2 * * *" pattern="\S+ \S+ \S+ \S+ \S+">

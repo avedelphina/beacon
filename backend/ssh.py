@@ -102,7 +102,10 @@ def stream_script(host: Host, script: str, timeout: int = 900) -> Iterator[str]:
             yield value  # type: ignore[misc]
         proc.kill()
         terminated = True
-        yield f"[beacon] deploy exceeded {timeout}s timeout, killed"
+        # Generic wording: this is every stream_script caller's timeout, not
+        # just deploy()'s (update_agent, push_config, decommission all hit
+        # this same path).
+        yield f"[beacon] script exceeded {timeout}s timeout, killed"
         yield "__BEACON_EXIT__none"
     finally:
         if not terminated and proc.poll() is None:

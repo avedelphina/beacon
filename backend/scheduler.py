@@ -12,8 +12,10 @@ YAML-backed, git-diffable fleet model.
 """
 
 import argparse
+import concurrent.futures
 import datetime
 import sys
+import zoneinfo
 
 import yaml
 
@@ -29,13 +31,16 @@ _CRON_RANGES = [(0, 59), (0, 23), (1, 31), (1, 12), (0, 6)]
 
 
 def _field_matches(field: str, value: int, min_val: int, max_val: int) -> bool:
+    # Comma-list first: a term after the first comma can itself be a step
+    # (e.g. "*/10,*/20"), which the "*/" branch below would otherwise
+    # swallow whole and fail to int() as a single step.
+    if "," in field:
+        return any(_field_matches(part, value, min_val, max_val) for part in field.split(","))
     if field == "*":
         return True
     if field.startswith("*/"):
         step = int(field[2:])
         return (value - min_val) % step == 0
-    if "," in field:
-        return any(_field_matches(part, value, min_val, max_val) for part in field.split(","))
     if "-" in field:
         lo, hi = field.split("-", 1)
         return int(lo) <= value <= int(hi)
@@ -43,9 +48,9 @@ def _field_matches(field: str, value: int, min_val: int, max_val: int) -> bool:
 
 
 def _is_due(schedule: str, dt: datetime.datetime) -> bool:
-    """Evaluate a 5-field cron expression against `dt` (naive, in the caller's
-    timezone). We use the caller-provided `dt` rather than converting timezones
-    so the scheduler can be run with a consistent UTC or local clock.
+    """Evaluate a 5-field cron expression against `dt`'s wall-clock fields —
+    `dt` is taken exactly as given, so the caller (_in_job_tz) is responsible
+    for it already being in whatever timezone the schedule should be read in.
     """
     fields = schedule.split()
     values = [dt.minute, dt.hour, dt.day, dt.month, dt.isoweekday() % 7]
@@ -55,9 +60,21 @@ def _is_due(schedule: str, dt: datetime.datetime) -> bool:
     return True
 
 
+def _in_job_tz(job: CronJob, now: datetime.datetime) -> datetime.datetime:
+    """`now` converted into the job's own `timezone` field. A schedule is
+    always evaluated in the timezone the job was configured with, not
+    whatever clock the caller (tick()'s default, or the `scheduler tick`
+    CLI) happens to be running — `timezone` was previously stored and shown
+    in the GUI but never actually read here."""
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=_UTC)
+    return now.astimezone(zoneinfo.ZoneInfo(job.timezone))
+
+
 def preview(job: CronJob, now: datetime.datetime) -> dict:
     """Whether `job` would fire at `now`, without running it."""
-    return {"job_id": job.id, "due": job.enabled and _is_due(job.schedule, now), "schedule": job.schedule, "ran_at": None}
+    due = job.enabled and _is_due(job.schedule, _in_job_tz(job, now))
+    return {"job_id": job.id, "due": due, "schedule": job.schedule, "ran_at": None}
 
 
 def _run_action(agent_id: str, action: str) -> dict:
@@ -72,6 +89,28 @@ def _run_action(agent_id: str, action: str) -> dict:
     raise ValueError(f"unsupported action {action!r}")
 
 
+def _run_action_bounded(agent_id: str, action: str, timeout: int | None) -> dict:
+    """_run_action(), but gives up and reports failure after `timeout`
+    seconds instead of blocking run_job() for as long as the driver call
+    itself is willing to wait (job.timeout was previously stored and shown
+    in the GUI but never enforced). The underlying ssh call keeps running to
+    its own internal limit in the background thread; only how long we wait
+    for it is bounded here.
+    """
+    if timeout is None:
+        return _run_action(agent_id, action)
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(_run_action, agent_id, action)
+    try:
+        return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        return {"ok": False, "output": f"cron job timed out after {timeout}s waiting on {agent_id!r}"}
+    finally:
+        # wait=False: don't block *this* call on the abandoned thread — it
+        # keeps running to the driver's own internal timeout regardless.
+        pool.shutdown(wait=False)
+
+
 def run_job(job: CronJob, now: datetime.datetime) -> dict:
     """Execute a single cron job against all its target agents and update its
     persisted last-run state. Returns a summary dict.
@@ -84,7 +123,7 @@ def run_job(job: CronJob, now: datetime.datetime) -> dict:
     overall_ok = True
     for agent_id in job.target_agent_ids:
         try:
-            result = _run_action(agent_id, action)
+            result = _run_action_bounded(agent_id, action, job.timeout)
             ok = result.get("ok", True)
             output = result.get("output", str(result))
         except Exception as exc:  # noqa: BLE001
@@ -122,7 +161,7 @@ def tick(now: datetime.datetime | None = None, dry_run: bool = False) -> list[di
             continue
         if dry_run:
             results.append(preview(job, now))
-        elif _is_due(job.schedule, now):
+        elif _is_due(job.schedule, _in_job_tz(job, now)):
             results.append(run_job(job, now))
         else:
             results.append({"job_id": job.id, "due": False, "ran_at": None})
