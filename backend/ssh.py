@@ -33,6 +33,14 @@ class SSHResult:
     stderr: str
     returncode: int | None
 
+    @property
+    def transport_error(self) -> str | None:
+        """Set when ssh itself failed, not the remote command: ssh exits 255
+        on transport/auth failure, and None means it never returned at all."""
+        if self.returncode is None or self.returncode == 255:
+            return self.stderr.strip() or "ssh connection failed"
+        return None
+
 
 def run(host: Host, command: str, timeout: int = 10) -> SSHResult:
     cmd = _base_cmd(host) + [command]
@@ -81,27 +89,24 @@ def stream_script(host: Host, script: str, timeout: int = 900) -> Iterator[str]:
     deadline = time.monotonic() + timeout
     terminated = False
     try:
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                proc.kill()
-                terminated = True
-                yield f"[beacon] deploy exceeded {timeout}s timeout, killed"
-                yield "__BEACON_EXIT__none"
-                return
+        # Deadline is re-checked every line, not just when the queue goes
+        # quiet — a chatty process must not be able to outrun it.
+        while (remaining := deadline - time.monotonic()) > 0:
             try:
                 kind, value = events.get(timeout=remaining)
             except queue.Empty:
-                proc.kill()
-                terminated = True
-                yield f"[beacon] deploy exceeded {timeout}s timeout, killed"
-                yield "__BEACON_EXIT__none"
-                return
-            if kind == "line":
-                yield value  # type: ignore[misc]
-            else:
+                break
+            if kind == "eof":
                 yield f"__BEACON_EXIT__{proc.wait(timeout=5)}"
                 return
+            yield value  # type: ignore[misc]
+        proc.kill()
+        terminated = True
+        # Generic wording: this is every stream_script caller's timeout, not
+        # just deploy()'s (update_agent, push_config, decommission all hit
+        # this same path).
+        yield f"[beacon] script exceeded {timeout}s timeout, killed"
+        yield "__BEACON_EXIT__none"
     finally:
         if not terminated and proc.poll() is None:
             proc.kill()

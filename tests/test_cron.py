@@ -251,7 +251,8 @@ def test_api_cron_job_dry_run(client):
     })
     client.put("/api/agents/a1", json={"id": "a1", "type": "hermes", "host": "edge-01", "desired": {}})
     client.put("/api/cron-jobs/check", json={
-        "id": "check", "enabled": True, "schedule": "30 * * * *",
+        # Feb 31 never happens — "not due" must not depend on the wall clock.
+        "id": "check", "enabled": True, "schedule": "0 0 31 2 *",
         "command": {"action": "restart"}, "target_agent_ids": ["a1"],
     })
 

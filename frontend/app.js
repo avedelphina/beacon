@@ -8,132 +8,95 @@ function esc(value) {
   }[c]));
 }
 
+// Every API call goes through here: JSON body in, a non-2xx response's
+// `detail` out as a thrown Error.
+async function request(path, method = "GET", body) {
+  const init = { method };
+  if (body !== undefined) {
+    init.headers = { "Content-Type": "application/json" };
+    init.body = JSON.stringify(body);
+  }
+  const r = await fetch(path, init);
+  if (!r.ok) {
+    // An unhandled server exception is a plain-text 500, not JSON.
+    const detail = await r.json().then((b) => b.detail, () => null);
+    throw new Error(detail || r.statusText);
+  }
+  return r;
+}
+
+async function json(path, method, body) {
+  return (await request(path, method, body)).json();
+}
+
 const api = {
-  async list(kind) {
-    const r = await fetch(`/api/${kind}`);
-    return r.json();
-  },
-  async put(kind, id, body) {
-    const r = await fetch(`/api/${kind}/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async del(kind, id) {
-    const r = await fetch(`/api/${kind}/${id}`, { method: "DELETE" });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-  },
-  async agentStatus(id) {
-    const r = await fetch(`/api/agents/${id}/status`);
-    if (!r.ok) return { state: "unreachable", detail: (await r.json()).detail };
-    return r.json();
-  },
-  async agentLogs(id, lines = 200) {
-    const r = await fetch(`/api/agents/${id}/logs?lines=${lines}`);
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return (await r.json()).text;
-  },
-  async reconcile(id) {
-    const r = await fetch(`/api/agents/${id}/reconcile`);
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async applyFix(id, fix) {
-    const r = await fetch(`/api/agents/${id}/reconcile`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fix, confirm: true }),
-    });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async getAgent(id) {
-    const r = await fetch(`/api/agents/${id}`);
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async configDiff(id) {
-    const r = await fetch(`/api/agents/${id}/config-diff`);
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async restart(id) {
-    const r = await fetch(`/api/agents/${id}/restart?confirm=true`, { method: "POST" });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async listPlugins(id) {
-    const r = await fetch(`/api/agents/${id}/plugins`);
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async updatePlugin(id, plugin) {
-    const r = await fetch(`/api/agents/${id}/plugins/${plugin}/update?confirm=true`, { method: "POST" });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async listTemplates() {
-    const r = await fetch("/api/templates");
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async getTemplate(name) {
-    const r = await fetch(`/api/templates/${name}`);
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async applyTemplate(name, agentIds) {
-    const r = await fetch(`/api/templates/${name}/apply`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ agent_ids: agentIds, confirm: true }),
-    });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async listCronJobs() {
-    const r = await fetch("/api/cron-jobs");
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async getCronJob(id) {
-    const r = await fetch(`/api/cron-jobs/${id}`);
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async putCronJob(id, body) {
-    const r = await fetch(`/api/cron-jobs/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async deleteCronJob(id) {
-    const r = await fetch(`/api/cron-jobs/${id}`, { method: "DELETE" });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-  },
-  async runCronJob(id) {
-    const r = await fetch(`/api/cron-jobs/${id}/run`, { method: "POST" });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
-  async dryRunCronJob(id) {
-    const r = await fetch(`/api/cron-jobs/${id}/dry-run`, { method: "POST" });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    return r.json();
-  },
+  list: (kind) => json(`/api/${kind}`),
+  get: (kind, id) => json(`/api/${kind}/${id}`),
+  put: (kind, id, body) => json(`/api/${kind}/${id}`, "PUT", body),
+  del: (kind, id) => json(`/api/${kind}/${id}`, "DELETE"),
+  agentStatus: (id) => json(`/api/agents/${id}/status`).catch((err) => ({ state: "unreachable", detail: err.message })),
+  agentLogs: async (id, lines = 200) => (await json(`/api/agents/${id}/logs?lines=${lines}`)).text,
+  reconcile: (id) => json(`/api/agents/${id}/reconcile`),
+  applyFix: (id, fix) => json(`/api/agents/${id}/reconcile`, "POST", { fix, confirm: true }),
+  configDiff: (id) => json(`/api/agents/${id}/config-diff`),
+  restart: (id) => json(`/api/agents/${id}/restart?confirm=true`, "POST"),
+  listPlugins: (id) => json(`/api/agents/${id}/plugins`),
+  updatePlugin: (id, plugin) => json(`/api/agents/${id}/plugins/${plugin}/update?confirm=true`, "POST"),
+  applyTemplate: (name, agentIds) => json(`/api/templates/${name}/apply`, "POST", { agent_ids: agentIds, confirm: true }),
+  runCronJob: (id) => json(`/api/cron-jobs/${id}/run`, "POST"),
+  dryRunCronJob: (id) => json(`/api/cron-jobs/${id}/dry-run`, "POST"),
 };
+
+const splitList = (value) => value.split(",").map((t) => t.trim()).filter(Boolean);
 
 function statusPill(state) {
   const labels = { "not-installed": "not installed", crashlooping: "crash-looping" };
   const safeState = ["loading", "active", "inactive", "failed", "unreachable", "not-installed", "crashlooping", "starting", "stopping"].includes(state) ? state : "unknown";
   const label = labels[safeState] || safeState;
   return `<span class="status-pill ${safeState}"><span class="dot"></span>${esc(label)}</span>`;
+}
+
+// One finding row. `summary` and `extra` are markup — escape before passing.
+function finding(severity, summary, extra = "") {
+  return `<div class="finding ${esc(severity)}"><span class="sev"></span><span class="summary">${summary}</span>${extra}</div>`;
+}
+
+// Wire every [data-<attr>] button under `root` to handler(attrValue, button).
+function bindActions(root, handlers) {
+  for (const [attr, handler] of Object.entries(handlers)) {
+    root.querySelectorAll(`[data-${attr}]`).forEach((b) =>
+      b.addEventListener("click", () => handler(b.getAttribute(`data-${attr}`), b))
+    );
+  }
+}
+
+// Fill #<name>-body with one <tr> per item, toggle #<name>-empty.
+function renderRows(name, items, rowHtml, handlers) {
+  const body = document.getElementById(`${name}-body`);
+  document.getElementById(`${name}-empty`).hidden = items.length > 0;
+  body.innerHTML = items.map((item) => `<tr>${rowHtml(item)}</tr>`).join("");
+  bindActions(body, handlers);
+}
+
+// POST to a text/plain streaming endpoint, appending output to `out` live.
+async function streamInto(out, btn, path, body) {
+  out.hidden = false;
+  out.textContent = "";
+  btn.disabled = true;
+  try {
+    const reader = (await request(path, "POST", body)).body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out.textContent += decoder.decode(value, { stream: true });
+      out.scrollTop = out.scrollHeight;
+    }
+  } catch (err) {
+    out.textContent += `${out.textContent && "\n"}[error] ${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ---- tabs ----
@@ -155,13 +118,7 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
 
 // ---- hosts ----
 async function renderHosts() {
-  const hosts = await api.list("hosts");
-  const body = document.getElementById("hosts-body");
-  body.innerHTML = "";
-  document.getElementById("hosts-empty").hidden = hosts.length > 0;
-  for (const h of hosts) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
+  renderRows("hosts", await api.list("hosts"), (h) => `
       <td>${esc(h.id)}</td>
       <td>${esc(h.address)}</td>
       <td>${esc(h.ssh.user)}</td>
@@ -171,16 +128,7 @@ async function renderHosts() {
       <td class="row-actions">
         <button class="link-btn" data-edit="${esc(h.id)}">Edit</button>
         <button class="link-btn danger" data-del="${esc(h.id)}">Delete</button>
-      </td>`;
-    body.appendChild(tr);
-  }
-  body.querySelectorAll("[data-edit]").forEach((b) =>
-    b.addEventListener("click", () => editHost(b.dataset.edit))
-  );
-  body.querySelectorAll("[data-del]").forEach((b) =>
-    b.addEventListener("click", () => deleteHost(b.dataset.del))
-  );
-  return hosts;
+      </td>`, { edit: editHost, del: deleteHost });
 }
 
 function fillHostForm(h) {
@@ -201,8 +149,7 @@ document.getElementById("add-host").addEventListener("click", () => {
 });
 
 async function editHost(id) {
-  const hosts = await api.list("hosts");
-  fillHostForm(hosts.find((h) => h.id === id));
+  fillHostForm(await api.get("hosts", id));
   openModal("host-modal");
 }
 
@@ -219,7 +166,7 @@ document.getElementById("host-form").addEventListener("submit", async (e) => {
     id: f.id.value,
     address: f.address.value,
     ssh: { user: f.ssh_user.value, key: f.ssh_key.value, port: Number(f.ssh_port.value) },
-    tags: f.tags.value.split(",").map((t) => t.trim()).filter(Boolean),
+    tags: splitList(f.tags.value),
   };
   try {
     await api.put("hosts", body.id, body);
@@ -247,12 +194,7 @@ async function populateHostSelect() {
 
 async function renderAgents() {
   const agents = await api.list("agents");
-  const body = document.getElementById("agents-body");
-  body.innerHTML = "";
-  document.getElementById("agents-empty").hidden = agents.length > 0;
-  for (const a of agents) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
+  renderRows("agents", agents, (a) => `
       <td id="status-${esc(a.id)}">${statusPill("loading")}</td>
       <td>${esc(a.id)}</td>
       <td>${esc(a.type)}</td>
@@ -263,20 +205,8 @@ async function renderAgents() {
         <button class="link-btn" data-inspect="${esc(a.id)}">Inspect</button>
         <button class="link-btn" data-edit="${esc(a.id)}">Edit</button>
         <button class="link-btn danger" data-del="${esc(a.id)}">Delete</button>
-      </td>`;
-    body.appendChild(tr);
-  }
-  body.querySelectorAll("[data-inspect]").forEach((b) =>
-    b.addEventListener("click", () => openInspect(b.dataset.inspect))
-  );
-  body.querySelectorAll("[data-edit]").forEach((b) =>
-    b.addEventListener("click", () => editAgent(b.dataset.edit))
-  );
-  body.querySelectorAll("[data-del]").forEach((b) =>
-    b.addEventListener("click", () => deleteAgent(b.dataset.del))
-  );
+      </td>`, { inspect: openInspect, edit: editAgent, del: deleteAgent });
   refreshStatuses(agents);
-  return agents;
 }
 
 async function refreshStatuses(agents) {
@@ -296,24 +226,14 @@ async function openInspect(id) {
   document.getElementById("inspect-title").textContent = id;
   document.getElementById("inspect-logs").textContent = "—";
   document.getElementById("inspect-status").textContent = "loading…";
-  const deployOut = document.getElementById("inspect-deploy-output");
-  deployOut.hidden = true;
-  deployOut.textContent = "";
-  const restartOut = document.getElementById("inspect-restart-output");
-  restartOut.hidden = true;
-  restartOut.textContent = "";
-  document.getElementById("inspect-plugins-results").innerHTML = "";
-  const updateAgentOut = document.getElementById("inspect-update-agent-output");
-  updateAgentOut.hidden = true;
-  updateAgentOut.textContent = "";
-  document.getElementById("inspect-reconcile-results").innerHTML = "";
-  document.getElementById("inspect-config-results").innerHTML = "";
-  const configPushOut = document.getElementById("inspect-config-push-output");
-  configPushOut.hidden = true;
-  configPushOut.textContent = "";
-  const decommissionOut = document.getElementById("inspect-decommission-output");
-  decommissionOut.hidden = true;
-  decommissionOut.textContent = "";
+  for (const action of ["deploy", "restart", "update-agent", "config-push", "decommission"]) {
+    const out = document.getElementById(`inspect-${action}-output`);
+    out.hidden = true;
+    out.textContent = "";
+  }
+  for (const panel of ["plugins", "reconcile", "config"]) {
+    document.getElementById(`inspect-${panel}-results`).innerHTML = "";
+  }
   openModal("inspect-modal");
   const s = await api.agentStatus(id);
   document.getElementById("inspect-status").textContent = [
@@ -323,6 +243,19 @@ async function openInspect(id) {
     s.since ? `since       ${s.since}` : null,
     s.detail ? `detail      ${s.detail}` : null,
   ].filter(Boolean).join("\n");
+}
+
+// Show a placeholder in #<elId>, then render load(currentInspectId) into it,
+// or the error if it throws.
+async function loadInto(elId, loadingMsg, load, render) {
+  if (!currentInspectId) return;
+  const el = document.getElementById(elId);
+  el.innerHTML = finding("info", loadingMsg);
+  try {
+    render(await load(currentInspectId));
+  } catch (err) {
+    el.innerHTML = finding("critical", esc(err.message));
+  }
 }
 
 document.getElementById("inspect-load-logs").addEventListener("click", async () => {
@@ -340,46 +273,27 @@ const CONFIG_SEVERITY = { match: "ok", "missing-live": "warn", drift: "warn", pr
 
 function renderConfigFindings(result) {
   const el = document.getElementById("inspect-config-results");
-  el.innerHTML = "";
   if (!result.reachable) {
-    el.innerHTML = `<div class="finding critical"><span class="sev"></span><span class="summary">${esc(result.detail)}</span></div>`;
+    el.innerHTML = finding("critical", esc(result.detail));
     return;
   }
-  for (const c of result.config) {
-    const detail = c.status === "match" ? "" : ` — live: ${esc(JSON.stringify(c.live))}, desired: ${esc(JSON.stringify(c.desired))}`;
-    // Schema guardrail: an "error" finding names a path push will refuse —
-    // escalate it past plain drift so it can't be mistaken for a pushable
-    // change; a "warn" (unknown top-level key) at least surfaces the detail.
-    const schemaSev = c.schema === "error" ? "critical" : c.schema === "warn" ? "warn" : null;
-    const schemaNote = c.schema_detail ? ` — ⚠ ${esc(c.schema_detail)}` : "";
-    const row = document.createElement("div");
-    row.className = `finding ${schemaSev || CONFIG_SEVERITY[c.status] || "info"}`;
-    row.innerHTML = `<span class="sev"></span><span class="summary"><code>${esc(c.path)}</code> ${esc(c.status)}${detail}${schemaNote}</span>`;
-    el.appendChild(row);
-  }
-  for (const e of result.env) {
-    const row = document.createElement("div");
-    row.className = `finding ${CONFIG_SEVERITY[e.status] || "info"}`;
-    row.innerHTML = `<span class="sev"></span><span class="summary"><code>${esc(e.key)}</code> ${esc(e.status)} in .env</span>`;
-    el.appendChild(row);
-  }
-  if (!result.config.length && !result.env.length) {
-    el.innerHTML = '<div class="finding info"><span class="sev"></span><span class="summary">nothing declared in desired.config / env_keys</span></div>';
-  }
+  const rows = [
+    ...result.config.map((c) => {
+      const detail = c.status === "match" ? "" : ` — live: ${esc(JSON.stringify(c.live))}, desired: ${esc(JSON.stringify(c.desired))}`;
+      // Schema guardrail: an "error" finding names a path push will refuse —
+      // escalate it past plain drift so it can't be mistaken for a pushable
+      // change; a "warn" (unknown top-level key) at least surfaces the detail.
+      const schemaSev = c.schema === "error" ? "critical" : c.schema === "warn" ? "warn" : null;
+      const schemaNote = c.schema_detail ? ` — ⚠ ${esc(c.schema_detail)}` : "";
+      return finding(schemaSev || CONFIG_SEVERITY[c.status] || "info", `<code>${esc(c.path)}</code> ${esc(c.status)}${detail}${schemaNote}`);
+    }),
+    ...result.env.map((e) => finding(CONFIG_SEVERITY[e.status] || "info", `<code>${esc(e.key)}</code> ${esc(e.status)} in .env`)),
+  ];
+  el.innerHTML = rows.length ? rows.join("") : finding("info", "nothing declared in desired.config / env_keys");
 }
 
-async function runConfigCheck() {
-  if (!currentInspectId) return;
-  const el = document.getElementById("inspect-config-results");
-  el.innerHTML = '<div class="finding info"><span class="sev"></span><span class="summary">checking…</span></div>';
-  try {
-    renderConfigFindings(await api.configDiff(currentInspectId));
-  } catch (err) {
-    const error = document.createElement("div");
-    error.className = "finding critical";
-    error.textContent = err.message;
-    el.replaceChildren(error);
-  }
+function runConfigCheck() {
+  return loadInto("inspect-config-results", "checking…", api.configDiff, renderConfigFindings);
 }
 
 document.getElementById("inspect-config-diff").addEventListener("click", runConfigCheck);
@@ -387,63 +301,20 @@ document.getElementById("inspect-config-diff").addEventListener("click", runConf
 document.getElementById("inspect-config-push").addEventListener("click", async (e) => {
   if (!currentInspectId) return;
   if (!confirm(`Push desired config to ${currentInspectId}? Runs "hermes config set" for every declared key, then restarts the gateway if it's active.`)) return;
-  const btn = e.target;
-  const out = document.getElementById("inspect-config-push-output");
-  out.hidden = false;
-  out.textContent = "";
-  btn.disabled = true;
-  try {
-    const resp = await fetch(`/api/agents/${currentInspectId}/config-diff?confirm=true`, { method: "POST" });
-    if (!resp.ok) {
-      out.textContent = `[error] ${(await resp.json()).detail || resp.statusText}`;
-      return;
-    }
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      out.textContent += decoder.decode(value, { stream: true });
-      out.scrollTop = out.scrollHeight;
-    }
-  } catch (err) {
-    out.textContent += `\n[error] ${err.message}`;
-  } finally {
-    btn.disabled = false;
-    runConfigCheck();
-  }
+  await streamInto(document.getElementById("inspect-config-push-output"), e.target, `/api/agents/${currentInspectId}/config-diff?confirm=true`);
+  runConfigCheck();
 });
 
 function renderFindings(findings) {
   const el = document.getElementById("inspect-reconcile-results");
-  el.innerHTML = "";
-  for (const f of findings) {
-    const row = document.createElement("div");
-    row.className = `finding ${f.severity}`;
-    row.innerHTML = `
-      <span class="sev"></span>
-      <span class="summary">${esc(f.summary)}</span>
-      ${f.fix ? `<button type="button" class="link-btn" data-fix="${esc(f.fix)}">Fix: ${esc(f.fix)}</button>` : ""}
-    `;
-    el.appendChild(row);
-  }
-  el.querySelectorAll("[data-fix]").forEach((btn) =>
-    btn.addEventListener("click", () => runFix(btn.dataset.fix, btn))
-  );
+  el.innerHTML = findings.map((f) => finding(f.severity, esc(f.summary),
+    f.fix ? `<button type="button" class="link-btn" data-fix="${esc(f.fix)}">Fix: ${esc(f.fix)}</button>` : ""
+  )).join("");
+  bindActions(el, { fix: runFix });
 }
 
-async function runCheck() {
-  if (!currentInspectId) return;
-  const el = document.getElementById("inspect-reconcile-results");
-  el.innerHTML = '<div class="finding info"><span class="sev"></span><span class="summary">checking…</span></div>';
-  try {
-    renderFindings(await api.reconcile(currentInspectId));
-  } catch (err) {
-    const error = document.createElement("div");
-    error.className = "finding critical";
-    error.textContent = err.message;
-    el.replaceChildren(error);
-  }
+function runCheck() {
+  return loadInto("inspect-reconcile-results", "checking…", api.reconcile, renderFindings);
 }
 
 async function runFix(fix, btn) {
@@ -466,31 +337,8 @@ document.getElementById("inspect-reconcile").addEventListener("click", runCheck)
 document.getElementById("inspect-deploy").addEventListener("click", async (e) => {
   if (!currentInspectId) return;
   if (!confirm(`Deploy ${currentInspectId}? This runs install/config/service commands on the host.`)) return;
-  const btn = e.target;
-  const out = document.getElementById("inspect-deploy-output");
-  out.hidden = false;
-  out.textContent = "";
-  btn.disabled = true;
-  try {
-    const resp = await fetch(`/api/agents/${currentInspectId}/deploy?confirm=true`, { method: "POST" });
-    if (!resp.ok) {
-      out.textContent = `[error] ${(await resp.json()).detail || resp.statusText}`;
-      return;
-    }
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      out.textContent += decoder.decode(value, { stream: true });
-      out.scrollTop = out.scrollHeight;
-    }
-  } catch (err) {
-    out.textContent += `\n[error] ${err.message}`;
-  } finally {
-    btn.disabled = false;
-    refreshStatuses(await api.list("agents"));
-  }
+  await streamInto(document.getElementById("inspect-deploy-output"), e.target, `/api/agents/${currentInspectId}/deploy?confirm=true`);
+  refreshStatuses(await api.list("agents"));
 });
 
 document.getElementById("inspect-restart").addEventListener("click", async (e) => {
@@ -512,42 +360,21 @@ document.getElementById("inspect-restart").addEventListener("click", async (e) =
   }
 });
 
+const PLUGIN_SEVERITY = { enabled: "ok", disabled: "warn" };
+
 function renderPlugins(plugins) {
   const el = document.getElementById("inspect-plugins-results");
-  el.innerHTML = "";
-  if (!plugins.length) {
-    el.innerHTML = '<div class="finding info"><span class="sev"></span><span class="summary">no plugins</span></div>';
-    return;
-  }
-  const sevFor = { enabled: "ok", disabled: "warn" };
-  for (const p of plugins) {
-    const row = document.createElement("div");
-    row.className = `finding ${sevFor[p.status] || "info"}`;
-    const canUpdate = p.source === "git";
-    row.innerHTML = `
-      <span class="sev"></span>
-      <span class="summary"><code>${esc(p.name)}</code> v${esc(p.version)} — ${esc(p.status)} (${esc(p.source)})</span>
-      ${canUpdate ? `<button type="button" class="link-btn" data-update-plugin="${esc(p.name)}">Update</button>` : ""}
-    `;
-    el.appendChild(row);
-  }
-  el.querySelectorAll("[data-update-plugin]").forEach((btn) =>
-    btn.addEventListener("click", () => runUpdatePlugin(btn.dataset.updatePlugin, btn))
-  );
+  el.innerHTML = plugins.length
+    ? plugins.map((p) => finding(PLUGIN_SEVERITY[p.status] || "info",
+        `<code>${esc(p.name)}</code> v${esc(p.version)} — ${esc(p.status)} (${esc(p.source)})`,
+        p.source === "git" ? `<button type="button" class="link-btn" data-update-plugin="${esc(p.name)}">Update</button>` : ""
+      )).join("")
+    : finding("info", "no plugins");
+  bindActions(el, { "update-plugin": runUpdatePlugin });
 }
 
-async function runListPlugins() {
-  if (!currentInspectId) return;
-  const el = document.getElementById("inspect-plugins-results");
-  el.innerHTML = '<div class="finding info"><span class="sev"></span><span class="summary">loading…</span></div>';
-  try {
-    renderPlugins(await api.listPlugins(currentInspectId));
-  } catch (err) {
-    const error = document.createElement("div");
-    error.className = "finding critical";
-    error.textContent = err.message;
-    el.replaceChildren(error);
-  }
+function runListPlugins() {
+  return loadInto("inspect-plugins-results", "loading…", api.listPlugins, renderPlugins);
 }
 
 document.getElementById("inspect-plugins-list").addEventListener("click", runListPlugins);
@@ -573,30 +400,7 @@ async function runUpdatePlugin(plugin, btn) {
 document.getElementById("inspect-update-agent").addEventListener("click", async (e) => {
   if (!currentInspectId) return;
   if (!confirm(`Update hermes itself on ${currentInspectId}'s host? This updates the shared code checkout — every profile on that install is affected, not just this one.`)) return;
-  const btn = e.target;
-  const out = document.getElementById("inspect-update-agent-output");
-  out.hidden = false;
-  out.textContent = "";
-  btn.disabled = true;
-  try {
-    const resp = await fetch(`/api/agents/${currentInspectId}/update?confirm=true`, { method: "POST" });
-    if (!resp.ok) {
-      out.textContent = `[error] ${(await resp.json()).detail || resp.statusText}`;
-      return;
-    }
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      out.textContent += decoder.decode(value, { stream: true });
-      out.scrollTop = out.scrollHeight;
-    }
-  } catch (err) {
-    out.textContent += `\n[error] ${err.message}`;
-  } finally {
-    btn.disabled = false;
-  }
+  await streamInto(document.getElementById("inspect-update-agent-output"), e.target, `/api/agents/${currentInspectId}/update?confirm=true`);
 });
 
 document.getElementById("inspect-decommission").addEventListener("click", async (e) => {
@@ -604,7 +408,7 @@ document.getElementById("inspect-decommission").addEventListener("click", async 
   const id = currentInspectId;
   if (!confirm(`Decommission ${id}? This stops and uninstalls its gateway service on the host, then archives its Beacon record.`)) return;
 
-  const agent = await api.getAgent(id);
+  const agent = await api.get("agents", id);
   let purge = false;
   if (agent.profile && agent.profile !== "default") {
     purge = confirm(
@@ -620,61 +424,21 @@ document.getElementById("inspect-decommission").addEventListener("click", async 
     );
   }
 
-  const btn = e.target;
-  const out = document.getElementById("inspect-decommission-output");
-  out.hidden = false;
-  out.textContent = "";
-  btn.disabled = true;
-  try {
-    const resp = await fetch(`/api/agents/${id}/decommission`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ purge, remove_user: removeUser, confirm: true }),
-    });
-    if (!resp.ok) {
-      out.textContent = `[error] ${(await resp.json()).detail || resp.statusText}`;
-      return;
-    }
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      out.textContent += decoder.decode(value, { stream: true });
-      out.scrollTop = out.scrollHeight;
-    }
-  } catch (err) {
-    out.textContent += `\n[error] ${err.message}`;
-  } finally {
-    btn.disabled = false;
-    closeModal("inspect-modal");
-    renderAgents();
-  }
+  await streamInto(document.getElementById("inspect-decommission-output"), e.target,
+    `/api/agents/${id}/decommission`, { purge, remove_user: removeUser, confirm: true });
+  closeModal("inspect-modal");
+  renderAgents();
 });
 
 // ---- templates ----
 async function renderTemplates() {
-  const templates = await api.listTemplates();
-  const body = document.getElementById("templates-body");
-  body.innerHTML = "";
-  document.getElementById("templates-empty").hidden = templates.length > 0;
-  for (const t of templates) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
+  renderRows("templates", await api.list("templates"), (t) => `
       <td>${esc(t.name)}</td>
       <td>${t.used_by.length ? esc(t.used_by.join(", ")) : '<span class="hint">—</span>'}</td>
       <td class="row-actions">
         <button class="link-btn" data-view="${esc(t.name)}">View</button>
         <button class="link-btn" data-apply="${esc(t.name)}">Apply to…</button>
-      </td>`;
-    body.appendChild(tr);
-  }
-  body.querySelectorAll("[data-view]").forEach((b) =>
-    b.addEventListener("click", () => openTemplateView(b.dataset.view))
-  );
-  body.querySelectorAll("[data-apply]").forEach((b) =>
-    b.addEventListener("click", () => openTemplateApply(b.dataset.apply))
-  );
+      </td>`, { view: openTemplateView, apply: openTemplateApply });
 }
 
 async function openTemplateView(name) {
@@ -683,7 +447,7 @@ async function openTemplateView(name) {
   el.textContent = "loading…";
   openModal("template-view-modal");
   try {
-    el.textContent = JSON.stringify((await api.getTemplate(name)).content, null, 2);
+    el.textContent = JSON.stringify((await api.get("templates", name)).content, null, 2);
   } catch (err) {
     el.textContent = `[error] ${err.message}`;
   }
@@ -698,7 +462,7 @@ async function openTemplateApply(name) {
   list.textContent = "loading…";
   openModal("template-apply-modal");
   try {
-    const [agents, tpl] = await Promise.all([api.list("agents"), api.getTemplate(name)]);
+    const [agents, tpl] = await Promise.all([api.list("agents"), api.get("templates", name)]);
     const using = new Set(tpl.used_by);
     list.innerHTML = agents.length
       ? agents.map((a) => `
@@ -731,22 +495,15 @@ document.querySelector('[data-tab="templates"]').addEventListener("click", rende
 
 // ---- cron jobs ----
 async function renderCronJobs() {
-  const jobs = await api.listCronJobs();
-  const body = document.getElementById("cron-jobs-body");
-  body.innerHTML = "";
-  document.getElementById("cron-jobs-empty").hidden = jobs.length > 0;
-  for (const j of jobs) {
-    const tr = document.createElement("tr");
-    const lastRun = j.last_run_at
-      ? `${j.last_run_status || "unknown"} — ${new Date(j.last_run_at).toLocaleString()}`
-      : '<span class="hint">—</span>';
-    tr.innerHTML = `
+  renderRows("cron-jobs", await api.list("cron-jobs"), (j) => `
       <td><input type="checkbox" ${j.enabled ? "checked" : ""} disabled></td>
       <td>${esc(j.id)}</td>
       <td><code>${esc(j.schedule)}</code> ${esc(j.timezone ?? "UTC")}</td>
       <td>${esc(j.command?.action ?? "")}</td>
       <td>${esc((j.target_agent_ids ?? []).join(", "))}</td>
-      <td>${lastRun}</td>
+      <td>${j.last_run_at
+        ? esc(`${j.last_run_status || "unknown"} — ${new Date(j.last_run_at).toLocaleString()}`)
+        : '<span class="hint">—</span>'}</td>
       <td class="row-actions">
         <button class="link-btn" data-run="${esc(j.id)}">Run now</button>
         <button class="link-btn" data-dry="${esc(j.id)}">Dry run</button>
@@ -755,27 +512,11 @@ async function renderCronJobs() {
         <button class="link-btn" data-view="${esc(j.id)}">View</button>
         <button class="link-btn" data-edit="${esc(j.id)}">Edit</button>
         <button class="link-btn danger" data-del="${esc(j.id)}">Delete</button>
-      </td>`;
-    body.appendChild(tr);
-  }
-  body.querySelectorAll("[data-run]").forEach((b) =>
-    b.addEventListener("click", () => runCronJobNow(b.dataset.run, b))
-  );
-  body.querySelectorAll("[data-dry]").forEach((b) =>
-    b.addEventListener("click", () => dryRunCronJob(b.dataset.dry, b))
-  );
-  body.querySelectorAll("[data-view]").forEach((b) =>
-    b.addEventListener("click", () => openCronJobView(b.dataset.view))
-  );
-  body.querySelectorAll("[data-edit]").forEach((b) =>
-    b.addEventListener("click", () => editCronJob(b.dataset.edit))
-  );
-  body.querySelectorAll("[data-del]").forEach((b) =>
-    b.addEventListener("click", () => deleteCronJob(b.dataset.del))
-  );
+      </td>`,
+    { run: runCronJobNow, dry: dryRunCronJob, view: openCronJobView, edit: editCronJob, del: deleteCronJob });
 }
 
-async function fillCronJobForm(j) {
+function fillCronJobForm(j) {
   const f = document.getElementById("cron-job-form");
   f.id.value = j?.id ?? "";
   f.id.readOnly = !!j;
@@ -796,14 +537,13 @@ document.getElementById("add-cron-job").addEventListener("click", () => {
 });
 
 async function editCronJob(id) {
-  const jobs = await api.listCronJobs();
-  await fillCronJobForm(jobs.find((j) => j.id === id));
+  fillCronJobForm(await api.get("cron-jobs", id));
   openModal("cron-job-modal");
 }
 
 async function deleteCronJob(id) {
   if (!confirm(`Delete cron job ${id}?`)) return;
-  await api.deleteCronJob(id);
+  await api.del("cron-jobs", id);
   renderCronJobs();
 }
 
@@ -814,7 +554,7 @@ async function openCronJobView(id) {
   out.textContent = "loading…";
   openModal("cron-job-view-modal");
   try {
-    const j = await api.getCronJob(id);
+    const j = await api.get("cron-jobs", id);
     meta.textContent = [
       `enabled: ${j.enabled}`,
       `schedule: ${j.schedule} (${j.timezone ?? "UTC"})`,
@@ -841,14 +581,14 @@ document.getElementById("cron-job-form").addEventListener("submit", async (e) =>
     schedule: f.schedule.value,
     timezone: f.timezone.value || "UTC",
     command: { action: f.action.value },
-    target_agent_ids: f.target_agent_ids.value.split(",").map((t) => t.trim()).filter(Boolean),
+    target_agent_ids: splitList(f.target_agent_ids.value),
     owner: f.owner.value || null,
     notes: f.notes.value || null,
   };
   const timeout = f.timeout.value.trim();
   if (timeout) body.timeout = Number(timeout);
   try {
-    await api.putCronJob(body.id, body);
+    await api.put("cron-jobs", body.id, body);
     closeModal("cron-job-modal");
     renderCronJobs();
   } catch (err) {
@@ -913,6 +653,8 @@ document.getElementById("add-agent").addEventListener("click", async () => {
 });
 
 async function editAgent(id) {
+  // From the list, not GET /api/agents/{id}: that one resolves templates, so
+  // an agent naming a deleted template would 404 exactly when it needs fixing.
   const agents = await api.list("agents");
   await fillAgentForm(agents.find((a) => a.id === id));
   openModal("agent-modal");
@@ -941,7 +683,7 @@ document.getElementById("agent-form").addEventListener("submit", async (e) => {
     profile: f.profile.value || null,
     owner: f.owner.value || null,
     notes: f.notes.value || null,
-    templates: f.templates.value.split(",").map((t) => t.trim()).filter(Boolean),
+    templates: splitList(f.templates.value),
     desired,
   };
   try {

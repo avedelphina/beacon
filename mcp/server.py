@@ -13,7 +13,7 @@ import re
 from urllib.parse import quote
 
 import httpx
-from auth import is_valid_bearer as _is_valid_bearer
+from auth import is_valid_bearer
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -24,9 +24,6 @@ BEACON_URL = os.environ.get("BEACON_URL", "http://beacon:8642")
 # configured with a fixed API key, not walked through a browser login.
 # Unset, this runs open (same opt-in-via-env convention as backend/auth.py).
 BEACON_MCP_TOKEN = os.environ.get("BEACON_MCP_TOKEN")
-
-
-is_valid_bearer = _is_valid_bearer
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 PLUGIN_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")

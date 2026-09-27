@@ -1,13 +1,16 @@
+import datetime
+import itertools
+from collections.abc import Callable, Iterator
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, cron_store, store, templates
-from .cron_store import InvalidId as CronInvalidId, NotFound as CronNotFound
-from .drivers import get_driver
+from . import auth, cron_store, scheduler, store, templates
+from .drivers import for_agent
 from .schemas import Agent, CronJob, Host
 from .tiers import TIER_LABELS, CAPABILITY_TIERS, requires_confirm, tier_for
 
@@ -75,7 +78,15 @@ async def _csp(request, call_next):
     # hosts (plugin manifests, config.yaml values), so a second layer here
     # limits what an XSS payload that slips through can actually do.
     response = await call_next(request)
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    # style-src/font-src: frontend/index.html loads IBM Plex from Google
+    # Fonts (the stylesheet from googleapis.com, the actual font files from
+    # gstatic.com) — both need an explicit allowance or the browser silently
+    # drops the request and every page falls back to a system font.
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com"
+    )
     return response
 
 
@@ -89,39 +100,59 @@ def list_tiers() -> dict:
     }
 
 
-@app.exception_handler(store.NotFound)
-def not_found(_request, exc: store.NotFound):
-    from fastapi.responses import JSONResponse
-
-    return JSONResponse(status_code=404, content={"detail": str(exc)})
-
-
-@app.exception_handler(store.InvalidId)
-def invalid_id(_request, exc: store.InvalidId):
-    from fastapi.responses import JSONResponse
-
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
+def _error_handler(status_code: int):
+    def handler(_request, exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=status_code, content={"detail": str(exc)})
+    return handler
 
 
-@app.exception_handler(CronNotFound)
-def cron_not_found(_request, exc: CronNotFound):
-    from fastapi.responses import JSONResponse
-
-    return JSONResponse(status_code=404, content={"detail": str(exc)})
-
-
-@app.exception_handler(CronInvalidId)
-def cron_invalid_id(_request, exc: CronInvalidId):
-    from fastapi.responses import JSONResponse
-
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
+# store.NotFound/InvalidId also cover cron_store and templates, which reuse
+# them. RuntimeError is a driver's own "couldn't talk to the host" signal
+# (e.g. list_plugins on an unreachable agent) — mapped to a real detail
+# message instead of falling through to a bare, undetailed 500.
+for _exc, _status in ((store.NotFound, 404), (store.InvalidId, 400), (ValueError, 400), (RuntimeError, 502)):
+    app.add_exception_handler(_exc, _error_handler(_status))
 
 
-@app.exception_handler(ValueError)
-def bad_value(_request, exc: ValueError):
-    from fastapi.responses import JSONResponse
+def _started(lines: Iterator[str]) -> Iterator[str]:
+    """Pull the first chunk here, outside the StreamingResponse body, so a
+    driver's validation error (e.g. bad install_mode, purge on the default
+    profile) raises synchronously and comes back as a clean 400 instead of
+    surfacing mid-stream after a 200 already went out.
+    """
+    try:
+        first = next(lines)
+    except StopIteration:
+        return iter(())
+    return itertools.chain([first], lines)
 
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+def _split_exit_marker(lines: Iterator[str]) -> tuple[Iterator[str], Callable[[], str | None]]:
+    """ssh.stream_script always ends its stream with a `__BEACON_EXIT__<code>`
+    line — internal bookkeeping, not output for a human. Returns the stream
+    with that line removed, plus a getter for the code it carried (None
+    until the returned iterator has been fully consumed).
+    """
+    code = None
+
+    def filtered() -> Iterator[str]:
+        nonlocal code
+        for line in lines:
+            if line.startswith("__BEACON_EXIT__"):
+                code = line.removeprefix("__BEACON_EXIT__")
+            else:
+                yield line
+
+    return filtered(), lambda: code
+
+
+def _stream(lines: Iterator[str]) -> StreamingResponse:
+    filtered, _ = _split_exit_marker(_started(lines))
+    return StreamingResponse((line + "\n" for line in filtered), media_type="text/plain")
+
+
+def _used_by(name: str, agents: list[Agent]) -> list[str]:
+    return sorted(a.id for a in agents if name in a.templates)
 
 
 @app.get("/api/hosts")
@@ -176,17 +207,13 @@ def delete_agent(id_: str) -> dict:
 @app.get("/api/templates")
 def list_templates() -> list[dict]:
     agents = store.list_agents()
-    return [
-        {"name": name, "used_by": sorted(a.id for a in agents if name in a.templates)}
-        for name in templates.list_templates()
-    ]
+    return [{"name": name, "used_by": _used_by(name, agents)} for name in templates.list_templates()]
 
 
 @app.get("/api/templates/{name}")
 def get_template(name: str) -> dict:
     content = templates.load_template(name)  # NotFound -> 404, bad name/keys -> 400
-    agents = store.list_agents()
-    return {"name": name, "content": content, "used_by": sorted(a.id for a in agents if name in a.templates)}
+    return {"name": name, "content": content, "used_by": _used_by(name, store.list_agents())}
 
 
 @app.post("/api/templates/{name}/apply")
@@ -205,25 +232,19 @@ def apply_template(name: str, body: TemplateApplyRequest) -> dict:
 
 @app.get("/api/agents/{id_}/status")
 def get_agent_status(id_: str) -> dict:
-    agent = store.get_agent(id_)
-    host = store.get_host(agent.host)
-    driver = get_driver(agent.type)
+    agent, host, driver = for_agent(id_)
     return driver.status(agent, host)
 
 
 @app.get("/api/agents/{id_}/logs")
 def get_agent_logs(id_: str, lines: int = 200) -> dict:
-    agent = store.get_agent(id_)
-    host = store.get_host(agent.host)
-    driver = get_driver(agent.type)
+    agent, host, driver = for_agent(id_)
     return {"text": driver.logs(agent, host, lines=lines)}
 
 
 @app.get("/api/agents/{id_}/plugins")
 def get_agent_plugins(id_: str) -> list[dict]:
-    agent = store.get_agent(id_)
-    host = store.get_host(agent.host)
-    driver = get_driver(agent.type)
+    agent, host, driver = for_agent(id_)
     return driver.list_plugins(agent, host)
 
 
@@ -231,9 +252,7 @@ def get_agent_plugins(id_: str) -> list[dict]:
 def update_agent_plugin(id_: str, plugin: str, confirm: bool = False) -> dict:
     if (gate := _confirm_gate("update_plugin", confirm, f"update plugin {plugin!r} on {id_!r}")) is not None:
         return gate
-    agent = store.get_agent(id_)
-    host = store.get_host(agent.host)
-    driver = get_driver(agent.type)
+    agent, host, driver = for_agent(id_)
     return driver.update_plugin(agent, host, plugin)
 
 
@@ -241,9 +260,7 @@ def update_agent_plugin(id_: str, plugin: str, confirm: bool = False) -> dict:
 def restart_agent(id_: str, confirm: bool = False) -> dict:
     if (gate := _confirm_gate("restart", confirm, f"restart the gateway for {id_!r}")) is not None:
         return gate
-    agent = store.get_agent(id_)
-    host = store.get_host(agent.host)
-    driver = get_driver(agent.type)
+    agent, host, driver = for_agent(id_)
     return driver.restart(agent, host)
 
 
@@ -251,27 +268,8 @@ def restart_agent(id_: str, confirm: bool = False) -> dict:
 def deploy_agent(id_: str, confirm: bool = False) -> StreamingResponse:
     if (gate := _confirm_gate("deploy", confirm, f"deploy {id_!r}")) is not None:
         return JSONResponse(gate)
-    agent = store.get_agent(id_)
-    host = store.get_host(agent.host)
-    driver = get_driver(agent.type)
-    gen = driver.deploy(agent, host)
-
-    # Pull the first chunk here, outside the StreamingResponse body, so a
-    # validation error (e.g. bad install_mode) raises synchronously and comes
-    # back as a clean 400 instead of surfacing mid-stream after a 200 already
-    # went out.
-    try:
-        first = next(gen)
-    except StopIteration:
-        first = None
-
-    def body():
-        if first is not None:
-            yield first + "\n"
-        for line in gen:
-            yield line + "\n"
-
-    return StreamingResponse(body(), media_type="text/plain")
+    agent, host, driver = for_agent(id_)
+    return _stream(driver.deploy(agent, host))
 
 
 @app.post("/api/agents/{id_}/update")
@@ -279,30 +277,13 @@ def update_agent(id_: str, request: Request, confirm: bool = False) -> Streaming
     _require_human_session(request, "update_agent")
     if (gate := _confirm_gate("update_agent", confirm, f"run `hermes update` on the host for {id_!r} (affects every profile sharing that install)")) is not None:
         return JSONResponse(gate)
-    agent = store.get_agent(id_)
-    host = store.get_host(agent.host)
-    driver = get_driver(agent.type)
-    gen = driver.update_agent(agent, host)
-
-    try:
-        first = next(gen)
-    except StopIteration:
-        first = None
-
-    def body():
-        if first is not None:
-            yield first + "\n"
-        for line in gen:
-            yield line + "\n"
-
-    return StreamingResponse(body(), media_type="text/plain")
+    agent, host, driver = for_agent(id_)
+    return _stream(driver.update_agent(agent, host))
 
 
 @app.get("/api/agents/{id_}/reconcile")
 def reconcile_agent(id_: str) -> list[dict]:
-    agent = store.get_agent(id_)
-    host = store.get_host(agent.host)
-    driver = get_driver(agent.type)
+    agent, host, driver = for_agent(id_)
     return driver.reconcile(agent, host)
 
 
@@ -310,17 +291,13 @@ def reconcile_agent(id_: str) -> list[dict]:
 def apply_fix(id_: str, body: FixRequest) -> dict:
     if (gate := _confirm_gate("apply_fix", body.confirm, f"apply fix {body.fix!r} to {id_!r}")) is not None:
         return gate
-    agent = store.get_agent(id_)
-    host = store.get_host(agent.host)
-    driver = get_driver(agent.type)
+    agent, host, driver = for_agent(id_)
     return driver.apply_fix(agent, host, body.fix)
 
 
 @app.get("/api/agents/{id_}/config-diff")
 def get_config_diff(id_: str) -> dict:
-    agent = store.get_agent(id_, resolved=True)
-    host = store.get_host(agent.host)
-    driver = get_driver(agent.type)
+    agent, host, driver = for_agent(id_, resolved=True)
     return driver.config_diff(agent, host)
 
 
@@ -328,23 +305,8 @@ def get_config_diff(id_: str) -> dict:
 def push_config(id_: str, confirm: bool = False) -> StreamingResponse:
     if (gate := _confirm_gate("push_config", confirm, f"push desired.config to {id_!r} and restart its gateway if active")) is not None:
         return JSONResponse(gate)
-    agent = store.get_agent(id_, resolved=True)
-    host = store.get_host(agent.host)
-    driver = get_driver(agent.type)
-    gen = driver.push_config(agent, host)
-
-    try:
-        first = next(gen)
-    except StopIteration:
-        first = None
-
-    def body():
-        if first is not None:
-            yield first + "\n"
-        for line in gen:
-            yield line + "\n"
-
-    return StreamingResponse(body(), media_type="text/plain")
+    agent, host, driver = for_agent(id_, resolved=True)
+    return _stream(driver.push_config(agent, host))
 
 
 @app.post("/api/agents/{id_}/decommission")
@@ -357,41 +319,19 @@ def decommission_agent(id_: str, body: DecommissionRequest, request: Request) ->
         gate_desc += " and delete its OS user account"
     if (gate := _confirm_gate("decommission", body.confirm, gate_desc, purge=body.purge, remove_user=body.remove_user)) is not None:
         return JSONResponse(gate)
-    agent = store.get_agent(id_)
-    host = store.get_host(agent.host)
-    driver = get_driver(agent.type)
-    gen = driver.decommission(agent, host, purge=body.purge, remove_user=body.remove_user)
-
-    # Same synchronous-first-chunk trick as deploy: a validation error (e.g.
-    # purge on the default profile) raises here as a clean 400, before any
-    # streaming response has gone out.
-    try:
-        first = next(gen)
-    except StopIteration:
-        first = None
+    agent, host, driver = for_agent(id_)
+    filtered, exit_code = _split_exit_marker(_started(driver.decommission(agent, host, purge=body.purge, remove_user=body.remove_user)))
 
     def body_stream():
-        exit_code = None
-
-        def emit(line: str) -> str | None:
-            nonlocal exit_code
-            if line.startswith("__BEACON_EXIT__"):
-                exit_code = line.removeprefix("__BEACON_EXIT__")
-                return None
-            return line + "\n"
-
-        if first is not None and (out := emit(first)):
-            yield out
-        for line in gen:
-            if out := emit(line):
-                yield out
+        for line in filtered:
+            yield line + "\n"
 
         # The decommission script never uses `set -e` and swallows its own
         # step failures with `|| echo`, so its exit code is 0 whenever ssh
         # actually reached the host and ran it to completion — anything else
         # (255 = ssh-level failure, none = timeout/no ssh binary) means we
         # have no real confidence teardown happened, so leave the record be.
-        if exit_code == "0":
+        if exit_code() == "0":
             store.archive_agent(id_)
             yield "[beacon] record archived to fleet/decommissioned/\n"
         else:
@@ -417,22 +357,15 @@ def run_cron_job(id_: str) -> dict:
     This is the GUI's "Run now" button. It bypasses the schedule but keeps
     the same driver dispatch and last-run persistence as the scheduler.
     """
-    from .scheduler import run_job
-    import datetime
-
     job = cron_store.get_cron_job(id_)
-    return run_job(job, datetime.datetime.now(tz=datetime.timezone.utc))
+    return scheduler.run_job(job, datetime.datetime.now(tz=datetime.timezone.utc))
 
 
 @app.post("/api/cron-jobs/{id_}/dry-run")
 def dry_run_cron_job(id_: str) -> dict:
     """Report whether this cron job is due right now without executing it."""
-    from .scheduler import _is_due
-    import datetime
-
     job = cron_store.get_cron_job(id_)
-    now = datetime.datetime.now(tz=datetime.timezone.utc)
-    return {"job_id": job.id, "due": _is_due(job.schedule, now) if job.enabled else False, "schedule": job.schedule, "ran_at": None}
+    return scheduler.preview(job, datetime.datetime.now(tz=datetime.timezone.utc))
 
 
 @app.put("/api/cron-jobs/{id_}")

@@ -1,6 +1,11 @@
 import re
+import zoneinfo
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Charset for every Beacon-owned record id (hosts, agents, cron jobs,
+# templates) — it becomes a fleet/ filename, so nothing path-like gets in.
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 # `user`/`address` end up as the literal `user@address` argv token ssh.py
 # hands to the `ssh` binary — no shell is involved, but ssh itself still
@@ -75,11 +80,21 @@ class Agent(BaseModel):
 # Cron jobs
 # ---------------------------------------------------------------------------
 
-_CRON_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+CRON_ACTIONS = ("restart", "push_config", "status")
 
 # Standard 5-field cron: minute hour day-of-month month day-of-week.
 # We deliberately do not support extended syntax (@yearly, L, W, #) in v1.
-_CRON_FIELD_RE = re.compile(r"^\*|\*/\d+|\d+(-\d+)?(,/\d+)?$")
+#
+# One term is `*`, `*/step` (step >= 1 — `*/0` would divide by zero in
+# scheduler._field_matches), a single value, or a range; a field is one or
+# more terms joined by commas (mirrors scheduler._field_matches, which
+# recurses on comma-split parts the same way). fullmatch, not match — the
+# previous regex's `|` alternation split into three independently-anchored
+# branches, so `.match()` accepted "*foo" (via the bare `^\*` branch, which
+# never checked what followed) and rejected "0,30" (no branch handled a
+# plain comma list).
+_CRON_TERM_RE = r"\*(?:/[1-9]\d*)?|\d+(?:-\d+)?"
+_CRON_FIELD_RE = re.compile(rf"^(?:{_CRON_TERM_RE})(?:,(?:{_CRON_TERM_RE}))*$")
 
 
 def _validate_cron_expression(value: str) -> str:
@@ -89,7 +104,7 @@ def _validate_cron_expression(value: str) -> str:
         raise ValueError(f"cron schedule must have exactly 5 fields, got {len(fields)}: {value!r}")
     names = ["minute", "hour", "day-of-month", "month", "day-of-week"]
     for name, field in zip(names, fields):
-        if not _CRON_FIELD_RE.match(field):
+        if not _CRON_FIELD_RE.fullmatch(field):
             raise ValueError(f"invalid {name} field {field!r} in cron expression {value!r}")
     return value
 
@@ -115,8 +130,8 @@ class CronJob(BaseModel):
     @field_validator("id")
     @classmethod
     def _safe_id(cls, v: str) -> str:
-        if not _CRON_ID_RE.match(v):
-            raise ValueError(f"cron job id {v!r} must match {_CRON_ID_RE.pattern}")
+        if not ID_RE.match(v):
+            raise ValueError(f"cron job id {v!r} must match {ID_RE.pattern}")
         return v
 
     @field_validator("schedule")
@@ -124,16 +139,25 @@ class CronJob(BaseModel):
     def _safe_schedule(cls, v: str) -> str:
         return _validate_cron_expression(v)
 
+    @field_validator("timezone")
+    @classmethod
+    def _safe_timezone(cls, v: str) -> str:
+        # Was persisted and shown in the GUI but never actually read by the
+        # scheduler (schedules were always evaluated in the caller's clock) —
+        # now that scheduler.py honors it, an unknown zone name needs to be
+        # caught here rather than silently doing nothing forever.
+        try:
+            zoneinfo.ZoneInfo(v)
+        except zoneinfo.ZoneInfoNotFoundError:
+            raise ValueError(f"unknown IANA timezone {v!r}") from None
+        return v
+
     @field_validator("command")
     @classmethod
     def _safe_command(cls, v: dict) -> dict:
-        if not isinstance(v, dict):
-            raise ValueError("command must be a dict")
         action = v.get("action")
-        if action not in ("restart", "push_config", "status"):
-            raise ValueError(
-                f"unsupported cron action {action!r}; v1 supports: restart, push_config, status"
-            )
+        if action not in CRON_ACTIONS:
+            raise ValueError(f"unsupported cron action {action!r}; v1 supports: {', '.join(CRON_ACTIONS)}")
         return v
 
     @model_validator(mode="after")
