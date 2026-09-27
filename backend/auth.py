@@ -8,6 +8,7 @@ import base64
 import hashlib
 import os
 import secrets
+from functools import lru_cache
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -69,14 +70,10 @@ if not AUTH_ENABLED:
 
 router = APIRouter()
 
-_jwks_client: "jwt.PyJWKClient | None" = None
 
-
+@lru_cache(maxsize=1)
 def _jwks() -> jwt.PyJWKClient:
-    global _jwks_client
-    if _jwks_client is None:
-        _jwks_client = jwt.PyJWKClient(f"{ZITADEL_ISSUER}/oauth/v2/keys")
-    return _jwks_client
+    return jwt.PyJWKClient(f"{ZITADEL_ISSUER}/oauth/v2/keys")
 
 
 def _pkce_pair() -> tuple[str, str]:
@@ -145,7 +142,7 @@ def callback(request: Request, code: str = "", state: str = "", error: str = "")
 
     request.session["user"] = {
         "sub": claims["sub"],
-        "email": claims.get("email"),
+        "email": email,
         "name": claims.get("name") or claims.get("preferred_username") or claims.get("email"),
     }
     return RedirectResponse("/")

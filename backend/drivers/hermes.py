@@ -29,12 +29,21 @@ PATH_PREFIX = 'export PATH="$HOME/.local/bin:$HOME/.hermes/node/bin:$PATH"'
 # real login and the actual fix under sudo -u, so it's always included.
 RUNTIME_ENV = 'export XDG_RUNTIME_DIR="/run/user/$(id -u)"'
 
+# Header of every multi-line script piped to `bash -s`.
+PREAMBLE = f"set -e\n{RUNTIME_ENV}\n{PATH_PREFIX}"
+
+
+def named_profile(agent: Agent) -> str | None:
+    """The agent's profile, or None for Hermes's default (unnamed) one."""
+    return agent.profile if agent.profile and agent.profile != "default" else None
+
 
 def service_name(agent: Agent) -> str:
     configured = agent.desired.get("service")
     if configured:
         return configured
-    return f"hermes-gateway-{agent.profile}" if agent.profile and agent.profile != "default" else "hermes-gateway"
+    profile = named_profile(agent)
+    return f"hermes-gateway-{profile}" if profile else "hermes-gateway"
 
 
 def target_user(agent: Agent) -> str | None:
@@ -44,11 +53,12 @@ def target_user(agent: Agent) -> str | None:
 def profile_home(agent: Agent) -> str:
     # $HOME, not ~ — tilde only expands unquoted, and reconcile() uses this
     # inside a quoted `[ -d "..." ]` test where a literal ~ silently never matches.
-    return f"$HOME/.hermes/profiles/{agent.profile}" if agent.profile and agent.profile != "default" else "$HOME/.hermes"
+    profile = named_profile(agent)
+    return f"$HOME/.hermes/profiles/{profile}" if profile else "$HOME/.hermes"
 
 
 def _cmd_prefix(agent: Agent) -> str:
-    profile = agent.profile if agent.profile and agent.profile != "default" else None
+    profile = named_profile(agent)
     return f"hermes -p {shlex.quote(profile)}" if profile else "hermes"
 
 
@@ -57,7 +67,7 @@ def _validate_agent(agent: Agent) -> None:
     every entry point (not just deploy) must reject anything outside a safe
     identifier charset before it reaches ssh.run/stream_script.
     """
-    if agent.profile and agent.profile != "default" and not PROFILE_RE.match(agent.profile):
+    if named_profile(agent) and not PROFILE_RE.match(agent.profile):
         raise ValueError(f"profile {agent.profile!r} must match {PROFILE_RE.pattern}")
     os_user = agent.desired.get("os_user")
     if os_user and not OS_USER_RE.match(os_user):
@@ -76,41 +86,43 @@ def _wrap_for_user(agent: Agent, host: Host, command: str) -> str:
     return command
 
 
+def _parse_kv(stdout: str) -> dict[str, str]:
+    return dict(line.split("=", 1) for line in stdout.splitlines() if "=" in line)
+
+
+# systemd ActiveState -> Beacon state; anything unlisted reads as inactive.
+_STATES = {"active": "active", "reloading": "active", "failed": "failed",
+           "activating": "starting", "deactivating": "stopping"}
+
+
 def status(agent: Agent, host: Host) -> dict:
     unit = shlex.quote(service_name(agent))
     inner = f"{RUNTIME_ENV}; {PATH_PREFIX}; systemctl --user show {unit} --no-page -p LoadState,ActiveState,SubState,MainPID,ActiveEnterTimestamp"
     result = ssh.run(host, _wrap_for_user(agent, host, inner))
 
-    # ssh itself (not the remote command) exits 255 on transport/auth failure; None means it never returned at all.
-    if result.returncode is None or result.returncode == 255:
-        return {"reachable": False, "state": "unreachable", "detail": result.stderr.strip() or "ssh connection failed"}
+    if err := result.transport_error:
+        return {"reachable": False, "state": "unreachable", "detail": err}
 
-    fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    fields = _parse_kv(result.stdout)
 
     if fields.get("LoadState") == "not-found":
         return {"reachable": True, "state": "not-installed", "detail": f"no unit {service_name(agent)!r} on host"}
 
     active_state = fields.get("ActiveState", "unknown")
     sub_state = fields.get("SubState")
-    if active_state in ("active", "reloading"):
-        state = "active"
-    elif active_state == "failed":
-        state = "failed"
-    elif active_state == "activating" and sub_state == "auto-restart":
+    if active_state == "activating" and sub_state == "auto-restart":
         # Found on a real box: a unit whose profile dir had been deleted kept
         # retrying every 5s (restart counter in the thousands). Plain
         # "activating" would read as a normal first start, not a crash loop.
         state = "crashlooping"
-    elif active_state in ("activating", "deactivating"):
-        state = "starting" if active_state == "activating" else "stopping"
     else:
-        state = "inactive"
+        state = _STATES.get(active_state, "inactive")
 
     return {
         "reachable": True,
         "state": state,
         "active_state": active_state,
-        "sub_state": fields.get("SubState"),
+        "sub_state": sub_state,
         "pid": int(fields["MainPID"]) if fields.get("MainPID", "0") != "0" else None,
         "since": fields.get("ActiveEnterTimestamp") or None,
     }
@@ -133,8 +145,8 @@ def logs(agent: Agent, host: Host, lines: int = 200) -> str:
     )
     result = ssh.run(host, _wrap_for_user(agent, host, inner))
 
-    if result.returncode is None or result.returncode == 255:
-        return f"[unreachable] {result.stderr.strip() or 'ssh connection failed'}"
+    if err := result.transport_error:
+        return f"[unreachable] {err}"
     return result.stdout if result.ok else f"[error] {result.stderr.strip()}"
 
 
@@ -142,7 +154,7 @@ def validate_deploy(agent: Agent) -> None:
     mode = agent.desired.get("install_mode", "simple")
     if mode not in ("simple", "add-profile", "new-user"):
         raise ValueError(f"desired.install_mode must be one of simple/add-profile/new-user, got {mode!r}")
-    if mode == "add-profile" and not (agent.profile and agent.profile != "default"):
+    if mode == "add-profile" and not named_profile(agent):
         raise ValueError("install_mode 'add-profile' requires a non-default agent.profile")
     if mode == "new-user" and not agent.desired.get("os_user"):
         raise ValueError("install_mode 'new-user' requires desired.os_user")
@@ -155,7 +167,7 @@ def _bringup_script(agent: Agent) -> str:
     acting, so this covers both a bare host (nothing installed yet) and an
     existing install that just needs another profile.
     """
-    profile = agent.profile if agent.profile and agent.profile != "default" else None
+    profile = named_profile(agent)
     profile_step = ""
     if profile:
         p = shlex.quote(profile)
@@ -170,9 +182,7 @@ fi
     cmd_prefix = _cmd_prefix(agent)
 
     return f"""\
-set -e
-{RUNTIME_ENV}
-{PATH_PREFIX}
+{PREAMBLE}
 
 if command -v hermes >/dev/null 2>&1; then
   echo "[beacon] hermes already installed ($(hermes --version 2>&1 | head -1))"
@@ -236,9 +246,7 @@ echo "[beacon] purging profile data at {home}"
 rm -rf "{home}"
 """
     return f"""\
-set -e
-{RUNTIME_ENV}
-{PATH_PREFIX}
+{PREAMBLE}
 
 echo "[beacon] uninstalling gateway service"
 {cmd_prefix} gateway uninstall 2>&1
@@ -257,7 +265,7 @@ def decommission(agent: Agent, host: Host, purge: bool = False, remove_user: boo
     _validate_agent(agent)
     if remove_user and not target_user(agent):
         raise ValueError("remove_user requires desired.os_user")
-    if purge and not (agent.profile and agent.profile != "default"):
+    if purge and not named_profile(agent):
         raise ValueError("purge is only allowed for a named (non-default) profile, to avoid wiping a shared ~/.hermes")
 
     inner = _decommission_script(agent, purge)
@@ -404,8 +412,8 @@ def _read_live_config(agent: Agent, host: Host) -> tuple[dict, list[str]]:
         f'grep -oE "^[A-Za-z_][A-Za-z0-9_]*=" "{home}/.env" 2>/dev/null | sed "s/=$//"\n'
     )
     result = ssh.run(host, _wrap_for_user(agent, host, script), timeout=15)
-    if result.returncode is None or result.returncode == 255:
-        raise RuntimeError(result.stderr.strip() or "ssh connection failed")
+    if err := result.transport_error:
+        raise RuntimeError(err)
     config_part, _, env_part = result.stdout.partition("__BEACON_ENV_KEYS__\n")
     live_config = yaml.safe_load(config_part) or {}
     if not isinstance(live_config, dict):
@@ -491,7 +499,7 @@ def push_config(agent: Agent, host: Host) -> Iterator[str]:
 
     cmd_prefix = _cmd_prefix(agent)
     unit = shlex.quote(service_name(agent))
-    lines = ["set -e", RUNTIME_ENV, PATH_PREFIX, ""]
+    lines = [PREAMBLE, ""]
     for finding in schema_findings:  # warnings only — errors raised above
         # shlex.quote the whole message: detail text is built from operator
         # YAML keys and must not expand inside the remote shell.
@@ -512,14 +520,20 @@ def push_config(agent: Agent, host: Host) -> Iterator[str]:
     yield from ssh.stream_script(host, script, timeout=120)
 
 
-# Fix ids reconcile() can propose and apply() can run. Each maps to a short,
-# fast, targeted command — never the full installer (that's deploy()'s job).
+# Fix ids reconcile() can propose and apply_fix() can run. Each maps to a
+# short, fast, targeted command — never the full installer (that's deploy()'s
+# job). {hermes} = profile-scoped CLI prefix, {unit} = quoted service name.
 FIXES = {
-    "install-and-start": "install the gateway service and start it",
-    "restart-failed": "clear the failed state and start the service",
-    "start": "start the (installed but stopped) service",
-    "uninstall-orphan": "remove the systemd unit for a profile that no longer exists",
-    "enable-linger": "enable linger so the service survives SSH logout",
+    # install the gateway service and start it
+    "install-and-start": "{hermes} gateway install && {hermes} gateway start",
+    # clear the failed state and start the service
+    "restart-failed": "systemctl --user reset-failed {unit}; {hermes} gateway start",
+    # start the (installed but stopped) service
+    "start": "{hermes} gateway start",
+    # remove the systemd unit for a profile that no longer exists
+    "uninstall-orphan": "{hermes} gateway uninstall",
+    # enable linger so the service survives SSH logout
+    "enable-linger": 'loginctl enable-linger "$(whoami)" 2>/dev/null || sudo -n loginctl enable-linger "$(whoami)"',
 }
 
 
@@ -543,11 +557,10 @@ def reconcile(agent: Agent, host: Host) -> list[dict]:
     )
     result = ssh.run(host, _wrap_for_user(agent, host, script), timeout=20)
 
-    if result.returncode is None or result.returncode == 255:
-        return [{"id": "unreachable", "severity": "critical",
-                  "summary": result.stderr.strip() or "ssh connection failed", "fix": None}]
+    if err := result.transport_error:
+        return [{"id": "unreachable", "severity": "critical", "summary": err, "fix": None}]
 
-    fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    fields = _parse_kv(result.stdout)
     findings = []
 
     if fields.get("HERMES_PRESENT") == "no":
@@ -596,27 +609,17 @@ def reconcile(agent: Agent, host: Host) -> list[dict]:
 
 
 def _fix_command(agent: Agent, fix: str) -> str:
-    cmd_prefix = _cmd_prefix(agent)
-    unit = shlex.quote(service_name(agent))
-    if fix == "install-and-start":
-        return f"{cmd_prefix} gateway install && {cmd_prefix} gateway start"
-    if fix == "restart-failed":
-        return f"systemctl --user reset-failed {unit}; {cmd_prefix} gateway start"
-    if fix == "start":
-        return f"{cmd_prefix} gateway start"
-    if fix == "uninstall-orphan":
-        return f"{cmd_prefix} gateway uninstall"
-    if fix == "enable-linger":
-        return 'loginctl enable-linger "$(whoami)" 2>/dev/null || sudo -n loginctl enable-linger "$(whoami)"'
-    raise ValueError(f"unknown fix {fix!r}, must be one of {sorted(FIXES)}")
+    if fix not in FIXES:
+        raise ValueError(f"unknown fix {fix!r}, must be one of {sorted(FIXES)}")
+    return FIXES[fix].format(hermes=_cmd_prefix(agent), unit=shlex.quote(service_name(agent)))
 
 
 def _run_command(agent: Agent, host: Host, command: str, timeout: int = 60) -> dict:
     inner = f"{RUNTIME_ENV}; {PATH_PREFIX}; {command}"
     result = ssh.run(host, _wrap_for_user(agent, host, inner), timeout=timeout)
 
-    if result.returncode is None or result.returncode == 255:
-        return {"ok": False, "output": result.stderr.strip() or "ssh connection failed"}
+    if err := result.transport_error:
+        return {"ok": False, "output": err}
     return {"ok": result.ok, "output": (result.stdout + result.stderr).strip()}
 
 
@@ -684,9 +687,7 @@ def update_agent(agent: Agent, host: Host) -> Iterator[str]:
     """
     _validate_agent(agent)
     script = f"""\
-set -e
-{RUNTIME_ENV}
-{PATH_PREFIX}
+{PREAMBLE}
 echo "[beacon] updating hermes"
 hermes update --yes
 echo "[beacon] done"

@@ -14,15 +14,12 @@ YAML-backed, git-diffable fleet model.
 import argparse
 import datetime
 import sys
-from collections.abc import Iterator
 
 import yaml
 
-from . import cron_store, store
-from .drivers import get_driver
-from .schemas import CronJob
-
-SUPPORTED_ACTIONS = {"restart", "push_config", "status"}
+from . import cron_store
+from .drivers import for_agent
+from .schemas import CRON_ACTIONS, CronJob
 
 # For last-run timestamps.
 _UTC = datetime.timezone.utc
@@ -58,10 +55,13 @@ def _is_due(schedule: str, dt: datetime.datetime) -> bool:
     return True
 
 
-def _run_action(job_id: str, agent_id: str, action: str, timeout: int | None) -> dict:
-    agent = store.get_agent(agent_id, resolved=True)
-    host = store.get_host(agent.host)
-    driver = get_driver(agent.type)
+def preview(job: CronJob, now: datetime.datetime) -> dict:
+    """Whether `job` would fire at `now`, without running it."""
+    return {"job_id": job.id, "due": job.enabled and _is_due(job.schedule, now), "schedule": job.schedule, "ran_at": None}
+
+
+def _run_action(agent_id: str, action: str) -> dict:
+    agent, host, driver = for_agent(agent_id, resolved=True)
     if action == "restart":
         return driver.restart(agent, host)
     if action == "status":
@@ -77,14 +77,14 @@ def run_job(job: CronJob, now: datetime.datetime) -> dict:
     persisted last-run state. Returns a summary dict.
     """
     action = job.command.get("action")
-    if action not in SUPPORTED_ACTIONS:
+    if action not in CRON_ACTIONS:
         raise ValueError(f"unsupported cron action {action!r}")
 
     outputs = []
     overall_ok = True
     for agent_id in job.target_agent_ids:
         try:
-            result = _run_action(job.id, agent_id, action, job.timeout)
+            result = _run_action(agent_id, action)
             ok = result.get("ok", True)
             output = result.get("output", str(result))
         except Exception as exc:  # noqa: BLE001
@@ -120,11 +120,9 @@ def tick(now: datetime.datetime | None = None, dry_run: bool = False) -> list[di
     for job in cron_store.list_cron_jobs():
         if not job.enabled:
             continue
-        due = _is_due(job.schedule, now)
         if dry_run:
-            results.append({"job_id": job.id, "due": due, "schedule": job.schedule, "ran_at": None})
-            continue
-        if due:
+            results.append(preview(job, now))
+        elif _is_due(job.schedule, now):
             results.append(run_job(job, now))
         else:
             results.append({"job_id": job.id, "due": False, "ran_at": None})
@@ -143,27 +141,27 @@ def main(argv: list[str] | None = None) -> int:
     p_list.add_argument("--utc", action="store_true", help="use UTC instead of local time")
 
     args = parser.parse_args(argv)
+    now = datetime.datetime.now(tz=_UTC) if args.utc else datetime.datetime.now()
 
     if args.command == "tick":
-        now = datetime.datetime.now(tz=_UTC) if args.utc else datetime.datetime.now()
         results = tick(now=now, dry_run=args.dry_run)
         print(yaml.safe_dump(results, sort_keys=False))
         return 0
 
     if args.command == "list":
-        now = datetime.datetime.now(tz=_UTC) if args.utc else datetime.datetime.now()
-        jobs = []
-        for job in cron_store.list_cron_jobs():
-            jobs.append({
+        jobs = [
+            {
                 "id": job.id,
                 "enabled": job.enabled,
                 "schedule": job.schedule,
-                "due": _is_due(job.schedule, now) if job.enabled else False,
+                "due": preview(job, now)["due"],
                 "command": job.command,
                 "targets": job.target_agent_ids,
                 "last_run_status": job.last_run_status,
                 "last_run_at": job.last_run_at,
-            })
+            }
+            for job in cron_store.list_cron_jobs()
+        ]
         print(yaml.safe_dump(jobs, sort_keys=False))
         return 0
 

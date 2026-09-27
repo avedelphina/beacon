@@ -1,16 +1,15 @@
-import re
 from pathlib import Path
+from typing import TypeVar
 
 import yaml
+from pydantic import BaseModel
 
-from .schemas import Agent, Host
+from .schemas import ID_RE, Agent, Host
 
 FLEET_DIR = Path(__file__).resolve().parent.parent / "fleet"
 HOSTS_FILE = FLEET_DIR / "hosts.yaml"
 AGENTS_DIR = FLEET_DIR / "agents"
 DECOMMISSIONED_DIR = FLEET_DIR / "decommissioned"
-
-ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 class NotFound(Exception):
@@ -21,9 +20,33 @@ class InvalidId(Exception):
     pass
 
 
-def _check_id(id_: str) -> None:
+def check_id(id_: str) -> None:
     if not ID_RE.match(id_):
         raise InvalidId(f"id {id_!r} must match {ID_RE.pattern}")
+
+
+# One-YAML-file-per-record directories (fleet/agents/, fleet/cron_jobs/).
+M = TypeVar("M", bound=BaseModel)
+
+
+def list_dir(dir_: Path, model: type[M]) -> list[M]:
+    dir_.mkdir(parents=True, exist_ok=True)
+    return [model(**yaml.safe_load(p.read_text())) for p in sorted(dir_.glob("*.yaml"))]
+
+
+def existing(path: Path, id_: str) -> Path:
+    if not path.exists():
+        raise NotFound(id_)
+    return path
+
+
+def load(path: Path, id_: str, model: type[M]) -> M:
+    return model(**yaml.safe_load(existing(path, id_).read_text()))
+
+
+def dump(path: Path, record: BaseModel) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(record.model_dump(), sort_keys=False))
 
 
 def _load_hosts_raw() -> list[dict]:
@@ -49,7 +72,7 @@ def get_host(id_: str) -> Host:
 
 
 def upsert_host(host: Host) -> Host:
-    _check_id(host.id)
+    check_id(host.id)
     hosts = _load_hosts_raw()
     payload = host.model_dump()
     for i, h in enumerate(hosts):
@@ -75,11 +98,7 @@ def _agent_path(id_: str) -> Path:
 
 
 def list_agents() -> list[Agent]:
-    AGENTS_DIR.mkdir(parents=True, exist_ok=True)
-    agents = []
-    for path in sorted(AGENTS_DIR.glob("*.yaml")):
-        agents.append(Agent(**yaml.safe_load(path.read_text())))
-    return agents
+    return list_dir(AGENTS_DIR, Agent)
 
 
 def get_agent(id_: str, resolved: bool = False) -> Agent:
@@ -87,10 +106,7 @@ def get_agent(id_: str, resolved: bool = False) -> Agent:
     of its templates and its own overrides (see backend/templates.py). The
     file on disk is never touched — this copy is for reads and driver calls.
     """
-    path = _agent_path(id_)
-    if not path.exists():
-        raise NotFound(id_)
-    agent = Agent(**yaml.safe_load(path.read_text()))
+    agent = load(_agent_path(id_), id_, Agent)
     if resolved:
         from . import templates  # lazy: templates imports store.NotFound
 
@@ -99,27 +115,21 @@ def get_agent(id_: str, resolved: bool = False) -> Agent:
 
 
 def upsert_agent(agent: Agent) -> Agent:
-    _check_id(agent.id)
+    check_id(agent.id)
     if not any(h.id == agent.host for h in list_hosts()):
         raise NotFound(f"host {agent.host!r} not in fleet/hosts.yaml")
-    AGENTS_DIR.mkdir(parents=True, exist_ok=True)
-    _agent_path(agent.id).write_text(yaml.safe_dump(agent.model_dump(), sort_keys=False))
+    dump(_agent_path(agent.id), agent)
     return agent
 
 
 def delete_agent(id_: str) -> None:
-    path = _agent_path(id_)
-    if not path.exists():
-        raise NotFound(id_)
-    path.unlink()
+    existing(_agent_path(id_), id_).unlink()
 
 
 def archive_agent(id_: str) -> None:
     """Move an agent's record out of the live fleet into fleet/decommissioned/
     — kept for history (git-diffable) rather than deleted outright.
     """
-    path = _agent_path(id_)
-    if not path.exists():
-        raise NotFound(id_)
+    path = existing(_agent_path(id_), id_)
     DECOMMISSIONED_DIR.mkdir(parents=True, exist_ok=True)
     path.rename(DECOMMISSIONED_DIR / f"{id_}.yaml")

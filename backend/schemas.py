@@ -2,6 +2,10 @@ import re
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+# Charset for every Beacon-owned record id (hosts, agents, cron jobs,
+# templates) — it becomes a fleet/ filename, so nothing path-like gets in.
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
 # `user`/`address` end up as the literal `user@address` argv token ssh.py
 # hands to the `ssh` binary — no shell is involved, but ssh itself still
 # parses a leading `-` as an option (e.g. `-oProxyCommand=...`), which is
@@ -75,7 +79,7 @@ class Agent(BaseModel):
 # Cron jobs
 # ---------------------------------------------------------------------------
 
-_CRON_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+CRON_ACTIONS = ("restart", "push_config", "status")
 
 # Standard 5-field cron: minute hour day-of-month month day-of-week.
 # We deliberately do not support extended syntax (@yearly, L, W, #) in v1.
@@ -115,8 +119,8 @@ class CronJob(BaseModel):
     @field_validator("id")
     @classmethod
     def _safe_id(cls, v: str) -> str:
-        if not _CRON_ID_RE.match(v):
-            raise ValueError(f"cron job id {v!r} must match {_CRON_ID_RE.pattern}")
+        if not ID_RE.match(v):
+            raise ValueError(f"cron job id {v!r} must match {ID_RE.pattern}")
         return v
 
     @field_validator("schedule")
@@ -127,13 +131,9 @@ class CronJob(BaseModel):
     @field_validator("command")
     @classmethod
     def _safe_command(cls, v: dict) -> dict:
-        if not isinstance(v, dict):
-            raise ValueError("command must be a dict")
         action = v.get("action")
-        if action not in ("restart", "push_config", "status"):
-            raise ValueError(
-                f"unsupported cron action {action!r}; v1 supports: restart, push_config, status"
-            )
+        if action not in CRON_ACTIONS:
+            raise ValueError(f"unsupported cron action {action!r}; v1 supports: {', '.join(CRON_ACTIONS)}")
         return v
 
     @model_validator(mode="after")

@@ -14,16 +14,14 @@ file — round-tripping that through GET/PUT would bake the template in
 permanently.
 """
 
-import re
 from pathlib import Path
 
 import yaml
 
-from .schemas import Agent
-from .store import NotFound
+from .schemas import ID_RE as NAME_RE, Agent
+from .store import FLEET_DIR, NotFound
 
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "fleet" / "templates"
-NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+TEMPLATES_DIR = FLEET_DIR / "templates"
 ALLOWED_KEYS = {"config", "env_keys"}
 
 

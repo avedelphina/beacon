@@ -1,27 +1,9 @@
-import re
 from pathlib import Path
 
-import yaml
-
 from .schemas import CronJob
+from .store import FLEET_DIR, InvalidId, NotFound, check_id, dump, existing, list_dir, load  # noqa: F401 — re-exported
 
-FLEET_DIR = Path(__file__).resolve().parent.parent / "fleet"
 CRON_DIR = FLEET_DIR / "cron_jobs"
-
-ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-
-
-class NotFound(Exception):
-    pass
-
-
-class InvalidId(Exception):
-    pass
-
-
-def _check_id(id_: str) -> None:
-    if not ID_RE.match(id_):
-        raise InvalidId(f"id {id_!r} must match {ID_RE.pattern}")
 
 
 def _job_path(id_: str) -> Path:
@@ -29,30 +11,19 @@ def _job_path(id_: str) -> Path:
 
 
 def list_cron_jobs() -> list[CronJob]:
-    CRON_DIR.mkdir(parents=True, exist_ok=True)
-    jobs = []
-    for path in sorted(CRON_DIR.glob("*.yaml")):
-        jobs.append(CronJob(**yaml.safe_load(path.read_text())))
-    return jobs
+    return list_dir(CRON_DIR, CronJob)
 
 
 def get_cron_job(id_: str) -> CronJob:
-    _check_id(id_)
-    path = _job_path(id_)
-    if not path.exists():
-        raise NotFound(id_)
-    return CronJob(**yaml.safe_load(path.read_text()))
+    check_id(id_)
+    return load(_job_path(id_), id_, CronJob)
 
 
 def upsert_cron_job(job: CronJob) -> CronJob:
-    CRON_DIR.mkdir(parents=True, exist_ok=True)
-    _job_path(job.id).write_text(yaml.safe_dump(job.model_dump(), sort_keys=False))
+    dump(_job_path(job.id), job)
     return job
 
 
 def delete_cron_job(id_: str) -> None:
-    _check_id(id_)
-    path = _job_path(id_)
-    if not path.exists():
-        raise NotFound(id_)
-    path.unlink()
+    check_id(id_)
+    existing(_job_path(id_), id_).unlink()
