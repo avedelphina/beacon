@@ -112,7 +112,7 @@ Delivered in 0.10.0:
 - Agents in Docker: `reach.bind`, `install --docker`, and a container
   restart instead of a gateway restart.
 
-Delivered since (unreleased):
+Delivered in 0.11.0:
 
 - The operational store, SQLite at `state/beacon.db`.
 - The mailbox at `/a2a/{agent}`: relay within one network, and

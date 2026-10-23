@@ -8,6 +8,8 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-10-23
+
 ### Added
 
 - **Mailbox: relay and voicemail.** `POST /a2a/{agent}` speaks A2A on the
