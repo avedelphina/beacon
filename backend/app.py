@@ -6,10 +6,10 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, cron_store, scheduler, store, templates
+from . import auth, bus, cron_store, scheduler, store, templates
 from .drivers import for_agent
 from .schemas import Agent, CronJob, Host
 from .tiers import TIER_LABELS, CAPABILITY_TIERS, requires_confirm, tier_for
@@ -29,6 +29,18 @@ class DecommissionRequest(BaseModel):
     purge: bool = False
     remove_user: bool = False
     confirm: bool = False
+
+
+class CallAgentRequest(BaseModel):
+    message: str
+    context: str | None = None
+
+    @field_validator("message")
+    @classmethod
+    def _message_present(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("message must not be empty")
+        return v
 
 app = FastAPI(title="Beacon", version="0.9.0")
 
@@ -110,7 +122,7 @@ def _error_handler(status_code: int):
 # them. RuntimeError is a driver's own "couldn't talk to the host" signal
 # (e.g. list_plugins on an unreachable agent) — mapped to a real detail
 # message instead of falling through to a bare, undetailed 500.
-for _exc, _status in ((store.NotFound, 404), (store.InvalidId, 400), (ValueError, 400), (RuntimeError, 502)):
+for _exc, _status in ((store.NotFound, 404), (store.InvalidId, 400), (ValueError, 400), (RuntimeError, 502), (bus.Unreachable, 502)):
     app.add_exception_handler(_exc, _error_handler(_status))
 
 
@@ -181,6 +193,30 @@ def delete_host(id_: str) -> dict:
 @app.get("/api/agents")
 def list_agents() -> list[Agent]:
     return store.list_agents()
+
+
+@app.get("/api/agents/registry")
+def agent_registry() -> list[dict]:
+    """Who can be called, and as what. Endpoints and key-env names stay off
+    this list — a caller names an agent, it does not learn how to reach it.
+    """
+    return [
+        {
+            "id": agent.id,
+            "callable": agent.reach is not None,
+            "capabilities": list(agent.reach.capabilities) if agent.reach else [],
+        }
+        for agent in store.list_agents()
+    ]
+
+
+@app.post("/api/agents/{id_}/call")
+def call_agent(id_: str, body: CallAgentRequest) -> dict:
+    """One agent calls another by name. Auth is the same session or MCP
+    bearer as every other /api route; the hop itself is Hermes's API server.
+    """
+    reply = bus.call(store.get_agent(id_), body.message, body.context)
+    return {"agent": id_, "reply": reply}
 
 
 @app.get("/api/agents/{id_}")

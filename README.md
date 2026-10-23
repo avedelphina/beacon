@@ -104,6 +104,12 @@ desired:
   log_path: null               # override the log file path (rarely needed)
   config: {}                   # config.yaml keys Beacon manages — see Config below
   env_keys: []                 # expected .env key NAMES — values never leave the host
+
+reach:                       # omit entirely if this agent is inventory-only
+  transport: hermes_api      # the only transport v1 speaks
+  endpoint: http://10.20.4.11:8644   # Hermes API server base URL, no path
+  api_key_env: BEACON_AGENT_EDGE_01_PRIMARY_KEY
+  capabilities: [relay]      # declared, not enforced — see Agent bus
 ```
 
 Only what you actually declare is managed. An agent record with an empty
@@ -113,6 +119,52 @@ Only what you actually declare is managed. An agent record with an empty
 Nothing here holds live state (running/stopped, PID, current config).
 `status()` and `config_diff()` always poll the host fresh — YAML never goes
 stale in that direction.
+
+## Agent bus
+
+One agent calls another by name. Beacon is the router; it does not invent a
+protocol. v1 speaks exactly one hop: the target's own Hermes API server.
+
+```text
+caller  --session or MCP bearer-->  POST /api/agents/{id}/call
+                                         |
+                                         | POST {endpoint}/v1/chat/completions
+                                         v
+                                    target Hermes API server
+```
+
+`reach` on the agent record says how. `transport` is `hermes_api` and nothing
+else yet. `endpoint` is the API server's base URL, scheme and host and port,
+with no path. `api_key_env` names a Beacon process environment variable that
+holds that agent's `API_SERVER_KEY`. The key itself never goes in fleet YAML,
+and a missing variable fails the call rather than sending it unauthenticated.
+`capabilities` are a declaration for the registry. v1 does not route or
+authorize on them.
+
+`GET /api/agents/registry` returns `id`, `callable`, and `capabilities` for
+every agent. It does not return endpoints or key-env names. A caller names an
+agent; it does not learn how to reach it.
+
+`POST /api/agents/{id}/call` takes `{"message": "...", "context": "..."}`.
+`message` is required and non-empty. `context`, when present, is sent as a
+system message ahead of it. The hop is one non-streaming chat completion.
+The response is `{"agent": "<id>", "reply": "<assistant text>"}`.
+
+An agent with no `reach` block is inventory-only: deploy, status, and the
+rest still work, and a call to it returns 502. An unknown id returns 404.
+A target that refuses the key, doesn't answer, or returns a body Beacon
+cannot read returns 502, and the detail never includes the key.
+
+Auth is the existing gate. With OIDC configured, the route wants a session
+cookie or `Authorization: Bearer <BEACON_MCP_TOKEN>`. Without it, Beacon is
+open, same as every other route. The call does not take `confirm=true`: it
+changes no host, and the only thing it spends is one turn on the target.
+The same two operations are MCP tools, `agent_registry` and `call_agent`.
+
+Not in this slice: streaming, ACP, MCP-as-transport, Delta Chat, event
+subscriptions, and any check that the caller is allowed to reach that
+particular agent. A second transport is a new `transport` value plus a hop
+beside `backend/bus.py`, not a second design.
 
 ### `fleet/templates/<name>.yaml`
 
@@ -397,6 +449,8 @@ this one credential.
 |---|---|---|
 | `GET`/`PUT`/`DELETE` | `/api/hosts/{id}` | Host CRUD |
 | `GET`/`PUT`/`DELETE` | `/api/agents/{id}` | Agent CRUD (`GET` also returns `effective_desired`, the template-merged view) |
+| `GET` | `/api/agents/registry` | Who can be called, and the capabilities each declares. No endpoints, no key names |
+| `POST` | `/api/agents/{id}/call` | Send one message to a registered agent (`{"message": "...", "context": "..."}`) — see [Agent bus](#agent-bus) |
 | `GET` | `/api/templates` | List templates, each with the agent ids using it |
 | `GET` | `/api/templates/{name}` | One template's content + its `used_by` agents |
 | `POST` | `/api/templates/{name}/apply` | Add a template to agents (`{"agent_ids": [...], "confirm": true}`) — T2 |

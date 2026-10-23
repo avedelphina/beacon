@@ -101,6 +101,24 @@ async def list_agents() -> object:
 
 
 @mcp.tool(annotations=READ_ONLY)
+async def agent_registry() -> object:
+    """Who can be called through the agent bus, and the capabilities each one
+    declares. Does not include endpoints or credentials — call_agent names an
+    agent, it does not learn how to reach it."""
+    return await _get("/api/agents/registry")
+
+
+@mcp.tool()
+async def call_agent(agent_id: str, message: str, context: str | None = None) -> object:
+    """Send one message to a registered agent and return its reply. The agent
+    must have a reach block; otherwise Beacon reports it as not callable."""
+    body = {"message": message}
+    if context:
+        body["context"] = context
+    return await _post(f"/api/agents/{_agent_path_id(agent_id)}/call", json=body, timeout=150)
+
+
+@mcp.tool(annotations=READ_ONLY)
 async def get_agent(agent_id: str) -> object:
     """Get one agent's full record, including its desired.config/env_keys."""
     return await _get(f"/api/agents/{_agent_path_id(agent_id)}")

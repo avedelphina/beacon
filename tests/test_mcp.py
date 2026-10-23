@@ -63,11 +63,13 @@ def test_mcp_path_identifiers_allow_valid_ids_and_use_encoded_segments(mcp_serve
     assert asyncio.run(mcp_server.get_agent("agent-1")) == {"desired": {}}
     assert asyncio.run(mcp_server.get_template("base-stack")) == {"desired": {}}
     assert asyncio.run(mcp_server.update_plugin("agent-1", "plugin.v2", confirm=True)) == {}
+    assert asyncio.run(mcp_server.call_agent("agent-1", "ping", context="from alice")) == {}
 
     assert calls == [
         ("get", "/api/agents/agent-1", {}),
         ("get", "/api/templates/base-stack", {}),
         ("post", "/api/agents/agent-1/plugins/plugin.v2/update?confirm=true", {}),
+        ("post", "/api/agents/agent-1/call", {"json": {"message": "ping", "context": "from alice"}, "timeout": 150}),
     ]
 
 

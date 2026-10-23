@@ -61,6 +61,63 @@ class Host(BaseModel):
         return _reject_ssh_option_injection(v, "address")
 
 
+# How another agent reaches this one. v1 speaks exactly one transport: the
+# Hermes API server's OpenAI-compatible chat endpoint. `endpoint` is a base
+# URL (scheme + host + port, no path). `api_key_env` names a Beacon process
+# environment variable that holds the agent's API_SERVER_KEY — the key itself
+# never lands in fleet YAML.
+def _reach_url_pattern() -> re.Pattern[str]:
+    # A raw-string backslash written in this file has been doubled on the
+    # way to disk, so the whitespace and digit classes are built as real
+    # escapes rather than typed as one.
+    not_space_or_slash = "[^" + "\\" + "s/]+"
+    digits = "(?::" + "\\" + "d+)?$"
+    return re.compile("^https?://" + not_space_or_slash + digits)
+
+
+_REACH_URL_RE = _reach_url_pattern()
+_ENV_NAME_RE = re.compile("^[A-Z][A-Z0-9_]*$")
+
+
+class AgentReach(BaseModel):
+    transport: str = "hermes_api"
+    endpoint: str
+    api_key_env: str
+    capabilities: list[str] = Field(default_factory=list)
+
+    @field_validator("transport")
+    @classmethod
+    def _known_transport(cls, v: str) -> str:
+        if v != "hermes_api":
+            raise ValueError(f"unsupported transport {v!r}; v1 supports: hermes_api")
+        return v
+
+    @field_validator("endpoint")
+    @classmethod
+    def _base_url(cls, v: str) -> str:
+        if not _REACH_URL_RE.fullmatch(v):
+            raise ValueError(
+                f"endpoint {v!r} must be an http(s) base URL with no path "
+                "(e.g. http://100.68.84.189:8644)"
+            )
+        return v
+
+    @field_validator("api_key_env")
+    @classmethod
+    def _env_name(cls, v: str) -> str:
+        if not _ENV_NAME_RE.fullmatch(v):
+            raise ValueError(f"api_key_env {v!r} must be an uppercase environment variable name")
+        return v
+
+    @field_validator("capabilities")
+    @classmethod
+    def _capability_names(cls, v: list[str]) -> list[str]:
+        for name in v:
+            if not ID_RE.fullmatch(name):
+                raise ValueError(f"capability {name!r} must match {ID_RE.pattern}")
+        return v
+
+
 class Agent(BaseModel):
     id: str
     type: str
@@ -74,6 +131,9 @@ class Agent(BaseModel):
     desired: dict = Field(default_factory=dict)
     owner: str | None = None
     notes: str | None = None
+    # Absent means this agent is inventory-only: Beacon can still deploy and
+    # observe it, but call_agent refuses it until a reach block exists.
+    reach: AgentReach | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,19 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+### Added
+
+- **Agent bus, first hop.** One agent can call another by name.
+  `POST /api/agents/{id}/call` with `{"message", "context?"}` sends a single
+  non-streaming turn to that agent's Hermes API server
+  (`POST {endpoint}/v1/chat/completions`) and returns the assistant text.
+  `GET /api/agents/registry` lists who is callable and which capabilities they
+  declare, without exposing endpoints or key names. The same MCP tools exist.
+  An agent with no `reach` block stays inventory-only. The target's
+  `API_SERVER_KEY` lives in a Beacon process environment variable named by
+  `reach.api_key_env`; it is never written to fleet YAML. Auth on the route
+  is the existing session or MCP bearer. See README, "Agent bus".
+
 ## [0.9.0] — 2026-09-25
 
 ### Added
