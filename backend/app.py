@@ -3,13 +3,14 @@ import itertools
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, bus, cron_store, mesh, scheduler, store, templates
+from . import auth, bus, cron_store, mailbox, mesh, scheduler, store, templates
 from .drivers import for_agent
 from .schemas import Agent, CronJob, Host
 from .tiers import TIER_LABELS, CAPABILITY_TIERS, requires_confirm, tier_for
@@ -34,6 +35,9 @@ class DecommissionRequest(BaseModel):
 class CallAgentRequest(BaseModel):
     message: str
     context_id: str | None = None
+    # Agent offline? Leave it in the Beacon mailbox instead of failing; the
+    # reply turns up in GET /api/mailbox once the agent is back.
+    queue_if_offline: bool = False
 
     @field_validator("message")
     @classmethod
@@ -42,7 +46,7 @@ class CallAgentRequest(BaseModel):
             raise ValueError("message must not be empty")
         return v
 
-app = FastAPI(title="Beacon", version="0.10.0")
+app = FastAPI(title="Beacon", version="0.11.0")
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:
@@ -215,11 +219,87 @@ def call_agent(id_: str, body: CallAgentRequest) -> dict:
     """One agent calls another by name. Auth is the same session or MCP
     bearer as every other /api route; the hop itself is A2A SendMessage.
     """
-    return {"agent": id_, **bus.call(store.get_agent(id_), body.message, body.context_id)}
+    agent = store.get_agent(id_)
+    try:
+        return {"agent": id_, **bus.call(agent, body.message, body.context_id)}
+    except bus.Unreachable as exc:
+        if not (exc.transient and body.queue_if_offline):
+            raise
+    message_id = mailbox.enqueue(mesh.BEACON_PEER, id_, "message", body.message, body.context_id)
+    return {"agent": id_, "task_id": f"mbx-{message_id}", "context_id": body.context_id,
+            "state": "TASK_STATE_SUBMITTED", "reply": "", "queued": message_id}
+
+
+@app.get("/api/mailbox")
+def mailbox_recent(limit: int = 50) -> list[dict]:
+    """What the mailbox holds, newest first: queued, delivered, and replies
+    addressed to Beacon (recipient "beacon") — the voicemail MCP callers left.
+    """
+    return mailbox.recent(min(max(limit, 1), 500))
+
+
+A2A_METHODS = {"SendMessage": True, "message/send": False}  # name -> answers in the v1.0 {"task": ...} wrapper
+
+
+def _a2a_error(req_id, code: int, message: str, status: int) -> JSONResponse:
+    return JSONResponse({"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}},
+                        status_code=status)
+
+
+@app.post("/a2a/{id_}")
+async def a2a_mailbox(id_: str, request: Request):
+    """The Beacon mailbox, speaking A2A on behalf of agent `id_` (relay now,
+    or hold and deliver later — backend/mailbox.py). Outside /api/: callers
+    are fleet agents, authenticated by their own pairwise token for `id_`.
+    """
+    try:
+        req = await request.json()
+    except ValueError:
+        return _a2a_error(None, -32700, "parse error", 400)
+    req_id = req.get("id") if isinstance(req, dict) else None
+    caller = mailbox.caller_for(id_, request.headers.get("authorization"))
+    if caller is None:
+        return _a2a_error(req_id, -32050, "unauthorized", 401)
+    method = req.get("method")
+    if method not in A2A_METHODS:
+        return _a2a_error(req_id, -32601, f"method not found: {method}", 200)
+    message = (req.get("params") or {}).get("message") or {}
+    text = "\n".join(p["text"] for p in message.get("parts") or [] if isinstance(p, dict) and isinstance(p.get("text"), str))
+    if not text.strip():
+        return _a2a_error(req_id, -32602, "message has no text", 200)
+    try:
+        view = await run_in_threadpool(mailbox.send, caller, id_, text, message.get("contextId"))
+    except (bus.Unreachable, store.NotFound) as exc:
+        return _a2a_error(req_id, -32603, str(exc), 502)
+    status = {"state": view["state"], "message": {"role": "ROLE_AGENT", "parts": [{"text": view["reply"]}],
+                                                  "messageId": view["task_id"] or "mbx"}}
+    task = {"id": view["task_id"], "contextId": view["context_id"], "status": status}
+    return {"jsonrpc": "2.0", "id": req_id, "result": {"task": task} if A2A_METHODS[method] else task}
+
+
+@app.get("/a2a/{id_}/.well-known/agent-card.json")
+@app.get("/a2a/{id_}/.well-known/agent.json")
+def a2a_mailbox_card(id_: str, request: Request) -> dict:
+    """Agent Card for the mailbox. Its URL must point back here: Hermes's
+    client posts to the URL a card advertises, not the one it was given.
+    """
+    store.get_agent(id_)
+    url = f"{mesh.public_url() or str(request.base_url).rstrip('/')}/a2a/{id_}"
+    return {
+        "name": f"{id_} (Beacon mailbox)",
+        "description": (f"Reaches {id_} through Beacon. Use it when {id_} cannot be reached directly: the "
+                        f"message is delivered now if possible, otherwise when {id_} is back online, and the "
+                        "reply then arrives later as a new message."),
+        "url": url, "version": "1.0.0",
+        "supportedInterfaces": [{"url": url, "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}],
+        "capabilities": {"streaming": False, "pushNotifications": False},
+        "defaultInputModes": ["text/plain"], "defaultOutputModes": ["text/plain"], "skills": [],
+        "securitySchemes": {"bearer": {"type": "http", "scheme": "bearer"}}, "security": [{"bearer": []}],
+    }
 
 
 @app.get("/mesh/{id_}")
-def mesh_config(id_: str, authorization: str | None = Header(None)) -> dict:
+def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None = Header(None)) -> dict:
     """An agent's own A2A mesh config, pulled by its host's sync job. Outside
     /api/ on purpose: the only credential is that agent's derived pull token —
     not a session, not the MCP bearer — because the body holds tokens no one
@@ -228,6 +308,9 @@ def mesh_config(id_: str, authorization: str | None = Header(None)) -> dict:
     """
     if not mesh.may_pull(id_, authorization):
         raise HTTPException(401, "not authorized for this agent's mesh config")
+    # The pull proves the agent's host is up: hand over anything the mailbox
+    # holds for it, after this response, so the sync isn't kept waiting.
+    background.add_task(mailbox.deliver_pending, id_)
     return mesh.config(id_)
 
 

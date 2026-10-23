@@ -36,6 +36,11 @@ PUBLIC_URL_ENV = "BEACON_PUBLIC_URL"
 BEACON_PEER = "beacon"
 
 
+def public_url() -> str:
+    """Beacon's URL as agents' hosts see it, or "" when not configured."""
+    return os.environ.get(PUBLIC_URL_ENV, "").rstrip("/")
+
+
 class MissingSecret(RuntimeError):
     """No mesh secret on this Beacon process, so no token can be derived."""
 
@@ -73,17 +78,27 @@ def config(agent_id: str) -> dict:
     endpoint = urlsplit(agent.reach.endpoint)
     listen = urlsplit(f"//{agent.reach.bind}") if agent.reach.bind else endpoint
     loopback = listen.hostname in ("127.0.0.1", "localhost", "::1")
+    beacon_url = public_url()
+    outbound = []
+    for p in direct:
+        outbound.append({"name": p.id, "url": p.reach.endpoint, "token": token(agent.id, p.id),
+                         "capabilities": p.reach.capabilities})
+        if beacon_url:
+            # Same token: the mailbox checks it and delivers with it, so the
+            # peer still sees who wrote (backend/mailbox.py).
+            outbound.append({"name": f"{p.id}-mailbox", "url": f"{beacon_url}/a2a/{p.id}",
+                             "token": token(agent.id, p.id), "capabilities": [*p.reach.capabilities, "mailbox"]})
     return {
         "agent": agent.id,
+        # Where to pull from next time: lets Beacon move hosts without anyone
+        # touching each agent's host.
+        "beacon": beacon_url or None,
         "listen": {
             "port": listen.port or (443 if listen.scheme == "https" else 80),
             "host": None if loopback else listen.hostname,
         },
         "inbound": {name: token(name, agent.id) for name in (BEACON_PEER, *(p.id for p in direct))},
-        "outbound": [
-            {"name": p.id, "url": p.reach.endpoint, "token": token(agent.id, p.id), "capabilities": p.reach.capabilities}
-            for p in direct
-        ],
+        "outbound": outbound,
     }
 
 
@@ -93,14 +108,14 @@ def install_script(agent_id: str, docker: str | None = None, docker_user: str = 
     agent = store.get_agent(agent_id)
     if agent.reach is None:
         raise ValueError(f"agent {agent_id!r} has no reach block; nothing to install")
-    public_url = os.environ.get(PUBLIC_URL_ENV, "").rstrip("/")
-    if not public_url:
+    beacon_url = public_url()
+    if not beacon_url:
         raise ValueError(f"{PUBLIC_URL_ENV} is not set; agents need it to reach Beacon")
     driver = get_driver(agent.type)
     pull_token = token(agent.id, BEACON_PEER)
     if docker:
-        return driver.mesh_install_docker_script(agent, public_url, pull_token, docker, docker_user)
-    return driver.mesh_install_script(agent, public_url, pull_token)
+        return driver.mesh_install_docker_script(agent, beacon_url, pull_token, docker, docker_user)
+    return driver.mesh_install_script(agent, beacon_url, pull_token)
 
 
 def main(argv: list[str] | None = None) -> int:

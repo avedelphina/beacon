@@ -46,6 +46,10 @@ backend/
   templates.py    config template load/validate/deep-merge under `desired`
   tiers.py        capability -> T0–T5 autonomy tier registry
   bus.py          agent bus: one A2A v1.0 SendMessage to an agent's reach.endpoint
+  mailbox.py      relay + voicemail behind POST /a2a/{agent}; delivers on the
+                  recipient's /mesh pull (no scheduler)
+  opstore.py      operational store: SQLite at state/beacon.db (runtime state,
+                  never fleet YAML)
   mesh.py         A2A mesh: same-network peers, derived tokens, /mesh pull config,
                   `install` CLI (host bootstrap)
   ssh.py          the one place that shells out to `ssh` (run + stream_script)
@@ -188,4 +192,5 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 - Single writer: `fleet/*.yaml` has no locking.
 - Hermes is the only implemented driver.
 - No audit trail of who did what.
-- Pull-based only: nothing polls or alerts on its own.
+- Pull-based only: nothing polls or alerts on its own. (The mailbox delivers
+  when an agent's own sync pulls, not on a Beacon timer.)

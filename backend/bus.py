@@ -25,29 +25,42 @@ DEFAULT_TIMEOUT = httpx.Timeout(330, connect=10)
 
 
 class Unreachable(Exception):
-    """The target is registered but this call cannot be delivered."""
+    """The target is registered but this call cannot be delivered.
+
+    `transient` means the agent itself never got the message (no connection,
+    or a gateway in front of it answered 502/503/504), so holding it for later
+    is safe. A refusal, or a read timeout after the agent may already be
+    working on it, is not transient: retrying could deliver it twice.
+    """
+
+    def __init__(self, message: str, transient: bool = False):
+        super().__init__(message)
+        self.transient = transient
 
 
-def call(agent: Agent, message: str, context_id: str | None = None, *, client: httpx.Client | None = None) -> dict:
+def call(agent: Agent, message: str, context_id: str | None = None, *, token: str | None = None,
+         client: httpx.Client | None = None) -> dict:
     """Send one user message to `agent`; return the task's id, thread, state and reply text.
 
     `context_id` continues an earlier thread — pass back the one a previous
-    call returned. Without it the agent starts a new thread.
+    call returned. Without it the agent starts a new thread. `token` defaults
+    to Beacon's own; the mailbox passes the original caller's instead.
     """
     msg = {"role": "ROLE_USER", "parts": [{"text": message}], "messageId": uuid.uuid4().hex}
     if context_id:
         msg["contextId"] = context_id
-    return _task_view(agent.id, _rpc(agent, "SendMessage", {"message": msg}, client))
+    return _task_view(agent.id, _rpc(agent, "SendMessage", {"message": msg}, token, client))
 
 
-def _rpc(agent: Agent, method: str, params: dict, client: httpx.Client | None) -> dict:
+def _rpc(agent: Agent, method: str, params: dict, token: str | None, client: httpx.Client | None) -> dict:
     if agent.reach is None:
         raise Unreachable(f"agent {agent.id!r} has no reach block; it is inventory-only")
     reach = agent.reach
-    try:
-        token = mesh.token(mesh.BEACON_PEER, agent.id)
-    except mesh.MissingSecret as exc:
-        raise Unreachable(str(exc)) from exc
+    if token is None:
+        try:
+            token = mesh.token(mesh.BEACON_PEER, agent.id)
+        except mesh.MissingSecret as exc:
+            raise Unreachable(str(exc)) from exc
 
     body = {"jsonrpc": "2.0", "id": uuid.uuid4().hex, "method": method, "params": params}
     headers = {"Authorization": f"Bearer {token}", "A2A-Version": "1.0"}
@@ -57,7 +70,8 @@ def _rpc(agent: Agent, method: str, params: dict, client: httpx.Client | None) -
     try:
         response = client.post(reach.endpoint, json=body, headers=headers)
     except httpx.HTTPError as exc:
-        raise Unreachable(f"agent {agent.id!r} did not answer: {exc}") from exc
+        never_arrived = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout))
+        raise Unreachable(f"agent {agent.id!r} did not answer: {exc}", transient=never_arrived) from exc
     finally:
         if owns_client:
             client.close()
@@ -74,7 +88,8 @@ def _rpc(agent: Agent, method: str, params: dict, client: httpx.Client | None) -
             f"agent {agent.id!r} refused the call: {str(error.get('message'))[:200]} (A2A error {error.get('code')})"
         )
     if not response.is_success:
-        raise Unreachable(f"agent {agent.id!r} returned HTTP {response.status_code}")
+        raise Unreachable(f"agent {agent.id!r} returned HTTP {response.status_code}",
+                          transient=response.status_code in (502, 503, 504))
     if not isinstance(payload, dict) or not isinstance(payload.get("result"), dict):
         raise Unreachable(f"agent {agent.id!r} returned a response Beacon cannot read")
     return payload["result"]

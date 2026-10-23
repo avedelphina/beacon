@@ -8,6 +8,27 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-10-23
+
+### Added
+
+- **Mailbox: relay and voicemail.** `POST /a2a/{agent}` speaks A2A on the
+  agent's behalf. If the agent answers, Beacon relays the call. If it
+  cannot be reached, Beacon keeps the message and delivers it when the
+  agent's host next pulls its mesh config; that pull is the liveness
+  signal, so there is no scheduler. The reply goes back to the original
+  sender as a new message. Callers keep their identity end to end, and no
+  agent can pose as Beacon. Unanswered messages expire after 72 hours with
+  a notice to the sender. Peer lists gain a `<peer>-mailbox` entry per
+  peer.
+- `queue_if_offline` on `POST /api/agents/{id}/call` and on MCP
+  `call_agent`; `GET /api/mailbox` and the MCP tool `mailbox` to read
+  replies.
+- **Operational store:** `backend/opstore.py`, SQLite at `state/beacon.db`
+  (`BEACON_STATE_DIR`), and a `./state` volume in `docker-compose.yml`.
+- **Movable Beacon:** the mesh config announces Beacon's URL, and the
+  host-side sync follows it.
+
 ## [0.10.0] — 2026-10-23
 
 ### Added
