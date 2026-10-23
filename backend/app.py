@@ -58,7 +58,7 @@ async def lifespan(_app):
         yield
 
 
-app = FastAPI(title="Beacon", version="0.13.0", lifespan=lifespan)
+app = FastAPI(title="Beacon", version="0.14.0", lifespan=lifespan)
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:

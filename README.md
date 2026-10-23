@@ -210,7 +210,7 @@ agent keeps its last config and keeps talking.
   Beacon does not check that the network exists or that it is reachable.
 - **Other networks:** an agent on another network, or on none, appears in
   the peer list under its plain name with Beacon's relay URL. Agents call
-  `holly` the same way in both cases, and Beacon carries the call when
+  `edge-02-primary` the same way in both cases, and Beacon carries the call when
   there is no direct path. Every agent accepts callers from every network,
   because a relayed caller arrives with its own token. The access policy
   (`reach.callers`) still decides who may call.

@@ -8,6 +8,8 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-23
+
 ### Fixed
 
 - **Restarts on Hermes 0.22 are no longer lost.** Hermes 0.22 refuses

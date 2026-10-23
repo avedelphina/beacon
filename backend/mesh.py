@@ -107,7 +107,7 @@ def config(agent_id: str) -> dict:
                              "token": token(agent.id, p.id), "capabilities": [*p.reach.capabilities, "mailbox"]})
     if beacon_url:
         # No direct path to these: one entry under the plain name, through
-        # Beacon's relay. Agents call `holly` either way; Beacon carries it.
+        # Beacon's relay. Agents call a peer by its id either way; Beacon carries it.
         for p in (p for p in relayed if may_call(agent.id, p)):
             outbound.append({"name": p.id, "url": f"{beacon_url}/a2a/{p.id}", "token": token(agent.id, p.id),
                              "capabilities": [*p.reach.capabilities, "relay"]})
