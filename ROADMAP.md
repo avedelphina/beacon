@@ -48,7 +48,7 @@ arbitrary remote shell with a dashboard attached.
 
 ## Current foundation
 
-Beacon 0.9.0 already provides the right starting shape:
+Beacon 0.10.0 already provides the right starting shape:
 
 - Git-diffable YAML inventory in `fleet/hosts.yaml`,
   `fleet/agents/*.yaml`, `fleet/templates/*.yaml`, and
@@ -65,6 +65,9 @@ Beacon 0.9.0 already provides the right starting shape:
 - Capability tiers and confirmation gates.
 - OIDC/browser authentication when configured, plus MCP authentication.
 - Fixed actions rather than arbitrary shell commands.
+- Agent-to-agent communication over A2A: an agent bus for Beacon and MCP
+  clients, and a direct agent mesh that Beacon coordinates but does not sit
+  in (see the priority track below).
 
 The current gaps are equally important:
 
@@ -76,6 +79,106 @@ The current gaps are equally important:
 - Configuration ownership is not expressed per file or YAML path.
 - Backup status and restore readiness are not first-class facts.
 - Long operations do not have a durable job model.
+
+## Priority track — agent communication
+
+**Goal:** agents across the fleet talk to each other: ad hoc, in long
+threads, and around shared tasks. They use an open standard, not a Beacon
+protocol, and Beacon does not become a single point of failure for them.
+
+Principles:
+
+- **A2A v1.0 is the wire format.** Hermes is the first agent type, not the
+  only one. Any A2A agent can join. MCP clients, such as Claude, reach
+  agents through Beacon.
+- **Tailscale-style coordination.** Beacon decides who peers with whom and
+  hands out tokens. Agents on one declared network call each other
+  directly. Beacon is never a required hop between agents that can reach
+  each other. If Beacon is down, every agent keeps its last config.
+- **Resilience before compliance.** Direct traffic is not logged centrally.
+  Anything that needs a central record, such as the relay or the board, is
+  added on top of the direct path and never replaces it.
+- **No network or identity dependency in the core.** Endpoints are URLs,
+  and networks are labels. Tailscale, Teleport, and step-ca are deployment
+  choices, not requirements.
+
+Delivered in 0.10.0:
+
+- The agent bus: `POST /api/agents/{id}/call` and the MCP tool
+  `call_agent`, with threads through `context_id`.
+- The A2A mesh: pairwise derived tokens, and pull distribution through
+  `GET /mesh/{agent}` and a host-side sync. Only inbound changes cause a
+  gateway restart, and that restart waits for running turns.
+- Agents in Docker: `reach.bind`, `install --docker`, and a container
+  restart instead of a gateway restart.
+
+Next, in this order:
+
+### C1 — Relay through Beacon
+
+Some agents cannot reach each other directly: an agent on another network,
+behind NAT, or on a laptop away from the tailnet. For them, Beacon serves
+one A2A endpoint per agent (`/a2a/{agent}`) and forwards each call to the
+target. A peer outside the target's network gets the relay URL in its peer
+list instead of the direct URL.
+
+**Acceptance:** an agent on a second network calls a tailnet agent by name.
+With Beacon down, pairs on the tailnet are not affected.
+
+### C2 — Store-and-forward
+
+When the target is offline, the relay accepts the task, stores it in the
+operational store, and delivers it when the target is back. Retries are
+bounded, and each task has an explicit expiry. The caller gets a task ID.
+It polls for the result or receives a push notification.
+
+**Acceptance:** a message to a stopped agent is delivered after the agent
+restarts, or it expires and the expiry is visible.
+
+### C3 — Fleet board
+
+Hermes Kanban stops at the host boundary. A2A also caps one thread at 20
+turns (5 by default). Long-running work therefore needs a durable card with
+a title, an assignee, a state, a project, and the A2A `contextId`s worked
+under it. Agents read and update cards through MCP or A2A. People see a
+board view in the UI. Mantis stays the place for documentation, not for
+day-to-day coordination.
+
+**Acceptance:** a task that one agent hands to an agent on another host is
+visible with its state and thread history, without reading any agent's
+logs.
+
+### C4 — Access policy
+
+Today every agent on a network may call every other agent on it.
+
+- Add who-may-call-whom, as an allowlist per agent or per group, to the
+  peer config that Beacon distributes.
+- Give agents scoped Beacon credentials instead of the shared MCP bearer
+  (see Horizon 5).
+- Treat chat-platform exposure as policy. Turn on the `a2a` toolset on a
+  chat platform only where that platform accepts known users only.
+  Otherwise an open chat bot becomes a way around another agent's
+  allowlist.
+
+**Acceptance:** the target refuses an agent that is not on its allowlist,
+and the refusal is visible.
+
+### C5 — Transport security beyond an overlay network
+
+Hermes A2A has no native TLS. On a network that does not encrypt traffic,
+terminate TLS on each host and use `https://` endpoints. Any CA works;
+step-ca is a good fit. Mutual TLS waits until Hermes supports client
+certificates.
+
+**Acceptance:** two agents on a plain LAN talk over TLS, with certificates
+from the operator's CA.
+
+Related foundation work, in Horizon 0:
+
+- Replace the expired Teleport machine identity with plain SSH or with
+  step-ca SSH certificates.
+- Allow hosts without SSH settings, for agents that Beacon only talks to.
 
 ## Horizon 0 — Protect and stabilize the foundation
 
@@ -488,6 +591,7 @@ Beacon deliberately does not become:
 - a replacement for Git, Borg, Teleport, Hermes validation, or host
   configuration management;
 - an arbitrary remote shell or script runner;
+- a required hop between agents that can reach each other directly;
 - a secret-value vault or secret exfiltration service;
 - a universal enterprise RBAC/approval matrix;
 - an automatic revert engine for every drift event;
@@ -503,18 +607,22 @@ The design principle is simple:
 
 The repository already has a substantial Horizon 0/early Horizon 1 base: tests,
 CI, fixed driver actions, config-schema validation, templates, cron actions,
-and confirmation tiers.
+and confirmation tiers. Since 0.10.0 it also has agent-to-agent
+communication over A2A.
 
-Before implementing governance features, keep the current working tree safe
-and handle its uncommitted changes separately from this roadmap. The next
-focused implementation slice should be:
+Agent communication is the current priority. Store-and-forward (C2) and the
+fleet board (C3) need the same small SQLite operational store that
+Horizon 1 plans. So the store comes first, and it serves both tracks:
 
 1. add a small SQLite operational store;
-2. record read-only observations and action runs;
-3. add backup evidence as an adapter contract;
-4. keep current mutation endpoints working while introducing plan/execute
+2. relay through Beacon (C1), then store-and-forward on that store (C2);
+3. the fleet board (C3);
+4. record read-only observations and action runs;
+5. add backup evidence as an adapter contract;
+6. keep current mutation endpoints working while introducing plan/execute
    receipts;
-5. add drift and evidence views without automatic remediation.
+7. add drift and evidence views without automatic remediation.
 
-That sequence gives Beacon a trustworthy memory of what happened before it is
-given more authority to change the fleet.
+This order first gives agents a dependable way to coordinate. Then it gives
+Beacon a trustworthy memory of what happened before Beacon gets more
+authority to change the fleet.
