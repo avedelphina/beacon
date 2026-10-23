@@ -24,15 +24,19 @@ import hashlib
 import hmac
 import os
 import sys
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import store
 from .drivers import get_driver
-from .schemas import Agent
+from .schemas import ID_RE, Agent
 
 SECRET_ENV = "BEACON_A2A_SECRET"
 # The URL agents' hosts reach Beacon on for pulls, e.g. http://100.64.0.1:8642.
 PUBLIC_URL_ENV = "BEACON_PUBLIC_URL"
+# Skills Beacon hands every agent with its mesh config; one folder per skill.
+SKILLS_DIR_ENV = "BEACON_SKILLS_DIR"
+MAX_SKILL_BYTES = 64 * 1024
 BEACON_PEER = "beacon"
 
 
@@ -57,6 +61,23 @@ def may_pull(agent_id: str, authorization: str | None) -> bool:
     """True only for the agent's own pull token — the config holds secrets."""
     expected = f"Bearer {token(agent_id, BEACON_PEER)}"
     return isinstance(authorization, str) and hmac.compare_digest(authorization, expected)
+
+
+def skills() -> list[dict]:
+    """The skills to hand out: every `<dir>/<name>/SKILL.md`, as name, content
+    and checksum. The agent's sync writes the ones that differ from its copy,
+    so a skill edited here reaches every agent within one sync interval.
+    Skipped quietly: a bad name (it becomes a path on the agent's host) or a
+    file over the size cap."""
+    root = Path(os.environ.get(SKILLS_DIR_ENV) or Path(__file__).resolve().parent.parent / "skills")
+    found = []
+    for path in sorted(root.glob("*/SKILL.md")) if root.is_dir() else []:
+        if not ID_RE.fullmatch(path.parent.name) or path.stat().st_size > MAX_SKILL_BYTES:
+            continue
+        content = path.read_text()
+        found.append({"name": path.parent.name, "sha256": hashlib.sha256(content.encode()).hexdigest(),
+                      "content": content})
+    return found
 
 
 def may_call(caller: str, target: Agent) -> bool:
@@ -129,6 +150,7 @@ def config(agent_id: str) -> dict:
         "outbound": outbound,
         # The agent signs in to the board with its pull token, which it has.
         "board": {"url": f"{beacon_url}/board/mcp"} if agent.reach.board and beacon_url else None,
+        "skills": skills(),
     }
 
 

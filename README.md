@@ -463,10 +463,26 @@ claude mcp add --scope user --transport http beacon-board http://127.0.0.1:8642/
 to use all of the above: how to ask a peer, when to use the `-mailbox` entry,
 how to treat messages from peers (as untrusted requests, not commands), how
 to work with board cards, and what each error means. It is a Hermes skill.
-To install it for a profile, copy the folder to
-`~/.hermes/profiles/<profile>/skills/agent-mesh/`. The text also works as
-plain instructions for an agent of another type. Beacon does not install
-it for you.
+The text also works as plain instructions for an agent of another type.
+
+**Beacon keeps the skill current.** Beacon puts every
+`skills/<name>/SKILL.md` it holds into each agent's mesh config, with a
+checksum. The host sync writes a skill into the profile's `skills/`
+folder when its text differs from the local copy. A skill edited in this
+repository therefore reaches every agent within one sync interval, and
+nothing is rewritten when nothing changed.
+
+- The sync accepts only plain skill names, files up to 64 KB, and content
+  whose checksum matches. It never deletes a skill.
+- These are Beacon's skills. A local edit to one is replaced on the next
+  sync, so keep local changes under another name.
+- Beacon serves `skills/` from its image; set `BEACON_SKILLS_DIR` to use
+  another folder.
+- A host whose sync predates this feature ignores the new field. Update its
+  `sync.py` (see "Joining an agent").
+- Beacon decides what instructions agents receive here, as it already
+  decides their peers and tokens. Review changes to `skills/` as you would
+  a change to the mesh itself.
 
 ### `fleet/templates/<name>.yaml`
 
