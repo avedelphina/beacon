@@ -148,10 +148,8 @@ Delivered:
 - An agent on another network, or on none, gets a plain-name peer entry
   that points at the relay.
 
-Still open: pull delivery for agents that Beacon cannot reach. Today such
-an agent can send, and gets immediate answers. But it receives held
-messages and late replies only when Beacon can call it. Its own sync could
-fetch them instead.
+- Pull delivery: an agent's own sync delivers its held messages locally,
+  so agents that Beacon cannot reach still get voicemail and late replies.
 
 **Acceptance:** an agent on a second network calls a tailnet agent by name.
 With Beacon down, pairs on the tailnet are not affected.

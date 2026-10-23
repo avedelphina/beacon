@@ -357,10 +357,14 @@ mailbox entry when the direct call fails.
 - **The target answers:** Beacon forwards the call and returns the reply
   (relay).
 - **The target cannot be reached:** Beacon keeps the message and answers
-  `TASK_STATE_SUBMITTED` (voicemail). It delivers the message the next time
-  the target's host pulls its mesh config, which is within 5 minutes of the
-  agent coming back. That pull is the liveness signal, so Beacon needs no
-  scheduler.
+  `TASK_STATE_SUBMITTED` (voicemail). The message travels with the target's
+  next mesh-config pull, which is within 5 minutes of the agent coming
+  back. The target's own sync then delivers it to the agent on its own
+  host and reports the result (pull delivery). Beacon therefore never needs
+  to reach the agent, and this works behind NAT too. A sync older than
+  version 2 does not announce pull delivery. For such a host, Beacon calls
+  the agent itself when the pull arrives. Either way the pull is the
+  liveness signal, so Beacon needs no scheduler.
 - **The reply goes back to the original caller as a new message** from the
   target. Hermes's A2A tools cannot poll a task for a late result, so a
   late answer must arrive like any other message. Replies are never
@@ -377,10 +381,9 @@ mailbox entry when the direct call fails.
 - **Across networks:** the same endpoint relays between networks. It is
   the plain-name peer entry for agents on another network. The caller must
   reach Beacon at `BEACON_PUBLIC_URL`, and Beacon must reach the target.
-- **Limit:** voicemail delivery means Beacon calls the recipient. An agent
-  that Beacon cannot reach can still send through the relay and get
-  immediate answers. But it cannot receive held messages, or replies that
-  arrive later, until Beacon can reach it.
+- **Agents that Beacon cannot reach** still get held messages and late
+  replies, through their own sync (pull delivery). They need only to reach
+  Beacon.
 
 The messages live in the operational store, `state/beacon.db` (SQLite;
 `BEACON_STATE_DIR` changes the directory). In Docker it is the `./state`

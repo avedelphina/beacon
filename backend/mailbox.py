@@ -74,9 +74,10 @@ def recent(limit: int = 50) -> list[dict]:
 
 
 def deliver_pending(recipient_id: str) -> None:
-    """Deliver everything waiting for `recipient_id`, oldest first. Called when
-    its host pulls its mesh config, and for an original sender as soon as its
-    reply exists (it is probably online — it just sent a message)."""
+    """Deliver everything waiting for `recipient_id`, oldest first, by calling
+    it. Used when its host's sync can't deliver locally (an older sync), and
+    for an original sender as soon as its reply exists (it is probably
+    online — it just sent a message)."""
     _expire()
     try:
         agent = store.get_agent(recipient_id)
@@ -84,9 +85,7 @@ def deliver_pending(recipient_id: str) -> None:
         return
     senders_with_replies = set()
     while (row := _claim(recipient_id)) is not None:
-        # Checked again here: the policy may have changed while it waited.
-        if not mesh.may_call(row["sender"], agent):
-            _finish(row["id"], "failed", f"{recipient_id} does not accept calls from {row['sender']}")
+        if not _allowed(row, agent):
             continue
         try:
             view = bus.call(agent, _framed(row), row["context_id"] if row["kind"] == "message" else None,
@@ -96,16 +95,65 @@ def deliver_pending(recipient_id: str) -> None:
             if exc.transient:
                 break  # gone again; the next pull retries
             continue
-        _finish(row["id"], "delivered")
-        if row["kind"] == "message":
-            reply = view["reply"] or f"(no text; task state {view['state']})"
-            if row["sender"] == mesh.BEACON_PEER:
-                enqueue(recipient_id, mesh.BEACON_PEER, "reply", reply, reply_to=row["id"], state="delivered")
-            else:
-                enqueue(recipient_id, row["sender"], "reply", reply, reply_to=row["id"])
-                senders_with_replies.add(row["sender"])
+        if sender := _delivered(row, view["reply"] or f"(no text; task state {view['state']})"):
+            senders_with_replies.add(sender)
     for sender in senders_with_replies:
         deliver_pending(sender)
+
+
+def claim_for_pull(recipient_id: str, limit: int = 10) -> list[dict]:
+    """Pull delivery: hand what waits for `recipient_id` to its own host's
+    sync, which delivers to the agent locally and reports back (`report`).
+    Beacon then never needs to reach the agent — the Tailscale-DERP shape for
+    agents behind NAT or off the network. Claimed items that are never
+    reported go back to the queue after STALE_DELIVERY_SECONDS."""
+    _expire()
+    try:
+        agent = store.get_agent(recipient_id)
+    except store.NotFound:
+        return []
+    items = []
+    while len(items) < limit and (row := _claim(recipient_id)) is not None:
+        if _allowed(row, agent):
+            items.append({"id": row["id"], "text": _framed(row), "token": mesh.token(row["sender"], recipient_id),
+                          "context_id": row["context_id"] if row["kind"] == "message" else None})
+    return items
+
+
+def report(recipient_id: str, message_id: int, ok: bool, reply: str = "", transient: bool = False,
+           error: str = "") -> str | None:
+    """The sync's result for one claimed item. Returns an original sender
+    whose reply should now be delivered (call deliver_pending for it)."""
+    with opstore.connect() as db:
+        row = db.execute("SELECT * FROM mailbox WHERE id = ? AND recipient = ? AND state = 'delivering'",
+                         (message_id, recipient_id)).fetchone()
+    if row is None:
+        raise store.NotFound(f"no delivery in progress for message {message_id} to {recipient_id}")
+    if not ok:
+        _finish(row["id"], "queued" if transient else "failed", error[:500] or "local delivery failed")
+        return None
+    return _delivered(row, reply or "(no text)")
+
+
+def _allowed(row, agent) -> bool:
+    # Checked again at delivery: the policy may have changed while it waited.
+    if mesh.may_call(row["sender"], agent):
+        return True
+    _finish(row["id"], "failed", f"{agent.id} does not accept calls from {row['sender']}")
+    return False
+
+
+def _delivered(row, reply: str) -> str | None:
+    """Mark delivered; for a message, keep the reply for the original sender.
+    Returns that sender when it is an agent (its reply now needs delivery)."""
+    _finish(row["id"], "delivered")
+    if row["kind"] != "message":
+        return None
+    if row["sender"] == mesh.BEACON_PEER:
+        enqueue(row["recipient"], mesh.BEACON_PEER, "reply", reply, reply_to=row["id"], state="delivered")
+        return None
+    enqueue(row["recipient"], row["sender"], "reply", reply, reply_to=row["id"])
+    return row["sender"]
 
 
 def _claim(recipient_id: str):

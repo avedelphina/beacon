@@ -15,8 +15,16 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
   Beacon's relay (`/a2a/{agent}`). Agents call peers by name whether the
   path is direct or relayed. Every agent now accepts callers from every
   network, because they arrive through Beacon with their own token. The
-  access policy still decides who. Limit: voicemail delivery needs Beacon
-  to reach the recipient.
+  access policy still decides who.
+- **Pull delivery.** Messages the mailbox holds for an agent travel with
+  its mesh-config pull. The agent's own sync delivers them on its host and
+  reports each result to `POST /mesh/{agent}/inbox/{id}`. A delivery
+  passes the reply back to the original sender; a delivery that never
+  arrived is handed back; a refusal or timeout is marked failed. Beacon
+  never needs to reach the agent, so it works behind NAT. A sync
+  announces support with `X-Beacon-Sync-Version: 2`; older syncs keep the
+  Beacon-calls-the-agent path. The mesh config now includes the agent's
+  own `endpoint`.
 
 ## [0.13.0] — 2026-10-23
 

@@ -113,6 +113,8 @@ def config(agent_id: str) -> dict:
                              "capabilities": [*p.reach.capabilities, "relay"]})
     return {
         "agent": agent.id,
+        # How peers reach this agent; its own sync delivers held messages here.
+        "endpoint": agent.reach.endpoint,
         # Where to pull from next time: lets Beacon move hosts without anyone
         # touching each agent's host.
         "beacon": beacon_url or None,

@@ -374,8 +374,16 @@ def a2a_mailbox_card(id_: str, request: Request) -> dict:
     }
 
 
+class InboxReport(BaseModel):
+    ok: bool
+    reply: str = ""
+    transient: bool = False
+    error: str = ""
+
+
 @app.get("/mesh/{id_}")
-def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None = Header(None)) -> dict:
+def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None = Header(None),
+                x_beacon_sync_version: str | None = Header(None)) -> dict:
     """An agent's own A2A mesh config, pulled by its host's sync job. Outside
     /api/ on purpose: the only credential is that agent's derived pull token —
     not a session, not the MCP bearer — because the body holds tokens no one
@@ -384,10 +392,27 @@ def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None
     """
     if not mesh.may_pull(id_, authorization):
         raise HTTPException(401, "not authorized for this agent's mesh config")
-    # The pull proves the agent's host is up: hand over anything the mailbox
-    # holds for it, after this response, so the sync isn't kept waiting.
-    background.add_task(mailbox.deliver_pending, id_)
-    return mesh.config(id_)
+    config = mesh.config(id_)
+    if x_beacon_sync_version == "2":
+        # The sync delivers held messages to the agent on its own host and
+        # reports back: Beacon never has to reach the agent (pull delivery).
+        config["inbox"] = mailbox.claim_for_pull(id_)
+    else:
+        # An older sync: the pull proves the host is up, so Beacon delivers
+        # by calling the agent, after this response.
+        background.add_task(mailbox.deliver_pending, id_)
+    return config
+
+
+@app.post("/mesh/{id_}/inbox/{message_id}")
+def mesh_inbox_report(id_: str, message_id: int, body: InboxReport, background: BackgroundTasks,
+                      authorization: str | None = Header(None)) -> dict:
+    """The sync's result for one held message it delivered locally."""
+    if not mesh.may_pull(id_, authorization):
+        raise HTTPException(401, "not authorized for this agent's mesh config")
+    if sender := mailbox.report(id_, message_id, body.ok, body.reply, body.transient, body.error):
+        background.add_task(mailbox.deliver_pending, sender)
+    return {"ok": True}
 
 
 @app.get("/api/agents/{id_}")
