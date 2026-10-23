@@ -36,6 +36,11 @@ services:
       - ./fleet:/app/fleet
       - ./ssh:/etc/beacon:ro
       - ./tbot/data:/tbot-data:ro
+    # Agent-bus tokens are named per agent (reach.token_env), so they can't
+    # be listed below; the whole .env goes in instead.
+    env_file:
+      - path: .env
+        required: false
     environment:
       - ZITADEL_ISSUER=${ZITADEL_ISSUER:-}
       - ZITADEL_CLIENT_ID=${ZITADEL_CLIENT_ID:-}

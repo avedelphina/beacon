@@ -10,16 +10,24 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ### Added
 
-- **Agent bus, first hop.** One agent can call another by name.
-  `POST /api/agents/{id}/call` with `{"message", "context?"}` sends a single
-  non-streaming turn to that agent's Hermes API server
-  (`POST {endpoint}/v1/chat/completions`) and returns the assistant text.
-  `GET /api/agents/registry` lists who is callable and which capabilities they
-  declare, without exposing endpoints or key names. The same MCP tools exist.
-  An agent with no `reach` block stays inventory-only. The target's
-  `API_SERVER_KEY` lives in a Beacon process environment variable named by
-  `reach.api_key_env`; it is never written to fleet YAML. Auth on the route
-  is the existing session or MCP bearer. See README, "Agent bus".
+- **Agent bus over A2A.** Beacon (and any MCP client, such as Claude) can
+  call a registered agent by name. `POST /api/agents/{id}/call` with
+  `{"message", "context_id?"}` sends one A2A v1.0 `SendMessage` to the
+  agent's `reach.endpoint`. It returns `task_id`, `context_id`, `state`, and
+  `reply`. Pass `context_id` back to continue a thread.
+  `GET /api/agents/registry` lists who is callable and which capabilities
+  they declare, without exposing endpoints or token names. MCP tools:
+  `agent_registry` and `call_agent`. An agent with no `reach` block stays
+  inventory-only. The bearer token lives in a Beacon process environment
+  variable named by `reach.token_env`; it is never written to fleet YAML.
+  Auth on the route is the existing session or MCP bearer. See README,
+  "Agent bus".
+
+### Fixed
+
+- `docker-compose.yml` now loads `.env` into the beacon container
+  (`env_file`, optional). Before, per-agent token variables named in fleet
+  YAML never reached the container, so every bus call would have failed.
 
 ## [0.9.0] — 2026-09-25
 

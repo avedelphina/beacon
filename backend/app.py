@@ -33,7 +33,7 @@ class DecommissionRequest(BaseModel):
 
 class CallAgentRequest(BaseModel):
     message: str
-    context: str | None = None
+    context_id: str | None = None
 
     @field_validator("message")
     @classmethod
@@ -213,10 +213,9 @@ def agent_registry() -> list[dict]:
 @app.post("/api/agents/{id_}/call")
 def call_agent(id_: str, body: CallAgentRequest) -> dict:
     """One agent calls another by name. Auth is the same session or MCP
-    bearer as every other /api route; the hop itself is Hermes's API server.
+    bearer as every other /api route; the hop itself is A2A SendMessage.
     """
-    reply = bus.call(store.get_agent(id_), body.message, body.context)
-    return {"agent": id_, "reply": reply}
+    return {"agent": id_, **bus.call(store.get_agent(id_), body.message, body.context_id)}
 
 
 @app.get("/api/agents/{id_}")

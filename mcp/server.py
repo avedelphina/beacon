@@ -109,13 +109,16 @@ async def agent_registry() -> object:
 
 
 @mcp.tool()
-async def call_agent(agent_id: str, message: str, context: str | None = None) -> object:
-    """Send one message to a registered agent and return its reply. The agent
-    must have a reach block; otherwise Beacon reports it as not callable."""
+async def call_agent(agent_id: str, message: str, context_id: str | None = None) -> object:
+    """Send one message to a registered agent over A2A and return its reply,
+    task state, and context_id. Pass a previous reply's context_id to continue
+    that thread; omit it to start a new one. The agent may take minutes to
+    answer. Agents without a reach block are reported as not callable."""
     body = {"message": message}
-    if context:
-        body["context"] = context
-    return await _post(f"/api/agents/{_agent_path_id(agent_id)}/call", json=body, timeout=150)
+    if context_id:
+        body["context_id"] = context_id
+    # Beacon waits up to 330s on the agent; outlast it so its verdict arrives.
+    return await _post(f"/api/agents/{_agent_path_id(agent_id)}/call", json=body, timeout=360)
 
 
 @mcp.tool(annotations=READ_ONLY)

@@ -106,9 +106,9 @@ desired:
   env_keys: []                 # expected .env key NAMES — values never leave the host
 
 reach:                       # omit entirely if this agent is inventory-only
-  transport: hermes_api      # the only transport v1 speaks
-  endpoint: http://10.20.4.11:8644   # Hermes API server base URL, no path
-  api_key_env: BEACON_AGENT_EDGE_01_PRIMARY_KEY
+  transport: a2a             # A2A v1.0 JSON-RPC, the only transport so far
+  endpoint: http://10.20.4.11:9900   # where JSON-RPC is POSTed; a path is allowed
+  token_env: BEACON_A2A_EDGE_01_PRIMARY_TOKEN
   capabilities: [relay]      # declared, not enforced — see Agent bus
 ```
 
@@ -122,38 +122,70 @@ stale in that direction.
 
 ## Agent bus
 
-One agent calls another by name. Beacon is the router; it does not invent a
-protocol. v1 speaks exactly one hop: the target's own Hermes API server.
+Beacon calls an agent by name over [A2A](https://a2a-protocol.org) v1.0,
+the Linux Foundation agent-to-agent standard. Beacon does not invent a
+protocol: any A2A agent can be a target, and Hermes (0.20+) speaks it
+natively. The main caller today is an MCP client such as Claude, which
+cannot speak A2A itself.
 
 ```text
 caller  --session or MCP bearer-->  POST /api/agents/{id}/call
                                          |
-                                         | POST {endpoint}/v1/chat/completions
+                                         | A2A SendMessage (JSON-RPC, bearer token)
                                          v
-                                    target Hermes API server
+                                    target's A2A endpoint
 ```
 
-`reach` on the agent record says how. `transport` is `hermes_api` and nothing
-else yet. `endpoint` is the API server's base URL, scheme and host and port,
-with no path. `api_key_env` names a Beacon process environment variable that
-holds that agent's `API_SERVER_KEY`. The key itself never goes in fleet YAML,
-and a missing variable fails the call rather than sending it unauthenticated.
-`capabilities` are a declaration for the registry. v1 does not route or
-authorize on them.
+`reach` on the agent record says how. `transport` is `a2a` and nothing else
+yet. `endpoint` is the URL that JSON-RPC is POSTed to. Hermes serves its own
+profile at `/` and other local profiles under a path, so a path is allowed.
+`token_env` names a Beacon process environment variable that holds the bearer
+token. The agent's `A2A_PEER_TOKENS` maps that token to the peer name
+`beacon`. The token itself never goes in fleet YAML, and a missing variable
+fails the call rather than sending it unauthenticated. `capabilities` are a
+declaration for the registry. Beacon does not route or authorize on them.
+
+On a Hermes agent, the A2A side is four lines in the profile's `.env`:
+
+```bash
+A2A_PORT=9900
+A2A_AGENT_NAME=Anikke
+A2A_PEER_TOKENS=beacon:<token>      # same value as Beacon's token_env variable
+A2A_TRUSTED_PEERS=beacon
+```
+
+Hermes binds `127.0.0.1` unless `A2A_HOST` widens it. Set `A2A_HOST` only
+when Beacon reaches the agent from another machine.
 
 `GET /api/agents/registry` returns `id`, `callable`, and `capabilities` for
-every agent. It does not return endpoints or key-env names. A caller names an
-agent; it does not learn how to reach it.
+every agent. It does not return endpoints or token-env names. A caller names
+an agent; it does not learn how to reach it.
 
-`POST /api/agents/{id}/call` takes `{"message": "...", "context": "..."}`.
-`message` is required and non-empty. `context`, when present, is sent as a
-system message ahead of it. The hop is one non-streaming chat completion.
-The response is `{"agent": "<id>", "reply": "<assistant text>"}`.
+`POST /api/agents/{id}/call` takes `{"message": "...", "context_id": "..."}`.
+`message` is required and non-empty. `context_id` is optional. Without it,
+the agent starts a new thread. To continue a thread, pass back the
+`context_id` from an earlier reply. The response is:
+
+```json
+{"agent": "<id>", "task_id": "...", "context_id": "...",
+ "state": "TASK_STATE_COMPLETED", "reply": "<agent text>"}
+```
+
+The call blocks until the agent answers. Hermes gives up after
+`A2A_REPLY_TIMEOUT` (300 s by default) and answers `TASK_STATE_FAILED`.
+Beacon waits 330 s, so the agent's verdict arrives first. A failed or
+rejected task is a normal 200 response with that `state`. Hermes also caps
+one thread at `A2A_MAX_PINGPONG_TURNS` (5 by default, 20 at most). After the
+cap, it rejects the turn. Start a new thread at that point.
 
 An agent with no `reach` block is inventory-only: deploy, status, and the
 rest still work, and a call to it returns 502. An unknown id returns 404.
-A target that refuses the key, doesn't answer, or returns a body Beacon
-cannot read returns 502, and the detail never includes the key.
+These also return 502, and the detail never includes the token:
+
+- the target refuses the token or the peer (the A2A error message and code
+  are passed through);
+- the target does not answer;
+- the target returns a body Beacon cannot read.
 
 Auth is the existing gate. With OIDC configured, the route wants a session
 cookie or `Authorization: Bearer <BEACON_MCP_TOKEN>`. Without it, Beacon is
@@ -161,10 +193,16 @@ open, same as every other route. The call does not take `confirm=true`: it
 changes no host, and the only thing it spends is one turn on the target.
 The same two operations are MCP tools, `agent_registry` and `call_agent`.
 
-Not in this slice: streaming, ACP, MCP-as-transport, Delta Chat, event
-subscriptions, and any check that the caller is allowed to reach that
-particular agent. A second transport is a new `transport` value plus a hop
-beside `backend/bus.py`, not a second design.
+Not in this slice:
+
+- direct agent-to-agent peer config generated by Beacon;
+- a relay for agents on another network;
+- streaming and push notifications;
+- a shared task board;
+- any check that the caller is allowed to reach that particular agent.
+
+Agents can already call each other directly with Hermes's own `a2a_call`.
+Beacon does not write their peer lists yet.
 
 ### `fleet/templates/<name>.yaml`
 
@@ -450,7 +488,7 @@ this one credential.
 | `GET`/`PUT`/`DELETE` | `/api/hosts/{id}` | Host CRUD |
 | `GET`/`PUT`/`DELETE` | `/api/agents/{id}` | Agent CRUD (`GET` also returns `effective_desired`, the template-merged view) |
 | `GET` | `/api/agents/registry` | Who can be called, and the capabilities each declares. No endpoints, no key names |
-| `POST` | `/api/agents/{id}/call` | Send one message to a registered agent (`{"message": "...", "context": "..."}`) — see [Agent bus](#agent-bus) |
+| `POST` | `/api/agents/{id}/call` | Send one A2A message to a registered agent (`{"message": "...", "context_id": "..."}`) — see [Agent bus](#agent-bus) |
 | `GET` | `/api/templates` | List templates, each with the agent ids using it |
 | `GET` | `/api/templates/{name}` | One template's content + its `used_by` agents |
 | `POST` | `/api/templates/{name}/apply` | Add a template to agents (`{"agent_ids": [...], "confirm": true}`) — T2 |
