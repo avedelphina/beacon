@@ -27,7 +27,7 @@ def test_service_name_default():
 
 
 def test_service_name_with_profile():
-    assert hermes.service_name(make_agent(profile="holly")) == "hermes-gateway-holly"
+    assert hermes.service_name(make_agent(profile="demo-profile")) == "hermes-gateway-demo-profile"
 
 
 def test_service_name_default_profile_string_treated_as_no_profile():
@@ -43,7 +43,7 @@ def test_profile_home_default():
 
 
 def test_profile_home_with_profile():
-    assert hermes.profile_home(make_agent(profile="holly")) == "$HOME/.hermes/profiles/holly"
+    assert hermes.profile_home(make_agent(profile="demo-profile")) == "$HOME/.hermes/profiles/demo-profile"
 
 
 def test_cmd_prefix_default():
@@ -51,7 +51,7 @@ def test_cmd_prefix_default():
 
 
 def test_cmd_prefix_with_profile():
-    assert hermes._cmd_prefix(make_agent(profile="holly")) == "hermes -p holly"
+    assert hermes._cmd_prefix(make_agent(profile="demo-profile")) == "hermes -p demo-profile"
 
 
 def test_target_user_none_by_default():
@@ -59,7 +59,7 @@ def test_target_user_none_by_default():
 
 
 def test_target_user_from_desired():
-    assert hermes.target_user(make_agent(desired={"os_user": "james"})) == "james"
+    assert hermes.target_user(make_agent(desired={"os_user": "demo-user"})) == "demo-user"
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ def test_target_user_from_desired():
 
 
 def test_validate_agent_accepts_clean_profile():
-    hermes._validate_agent(make_agent(profile="holly"))  # no raise
+    hermes._validate_agent(make_agent(profile="demo-profile"))  # no raise
 
 
 def test_validate_agent_rejects_injection_in_profile():
@@ -89,7 +89,7 @@ def test_validate_deploy_rejects_unknown_install_mode():
 def test_validate_deploy_add_profile_requires_profile():
     with pytest.raises(ValueError):
         hermes.validate_deploy(make_agent(desired={"install_mode": "add-profile"}))
-    hermes.validate_deploy(make_agent(profile="holly", desired={"install_mode": "add-profile"}))  # no raise
+    hermes.validate_deploy(make_agent(profile="demo-profile", desired={"install_mode": "add-profile"}))  # no raise
 
 
 def test_validate_deploy_new_user_requires_os_user():
@@ -169,11 +169,11 @@ def test_status_no_pid_when_zero(fake_ssh):
 
 def test_logs_uses_default_path_and_journalctl_fallback(fake_ssh):
     fake_ssh.result = SSHResult(ok=True, stdout="log line 1\nlog line 2", stderr="", returncode=0)
-    text = hermes.logs(make_agent(profile="holly"), make_host(), lines=50)
+    text = hermes.logs(make_agent(profile="demo-profile"), make_host(), lines=50)
     assert text == "log line 1\nlog line 2"
     cmd = fake_ssh.last_command
-    assert "$HOME/.hermes/profiles/holly/logs/gateway.log" in cmd
-    assert "[ -f $HOME/.hermes/profiles/holly/logs/gateway.log ]" in cmd
+    assert "$HOME/.hermes/profiles/demo-profile/logs/gateway.log" in cmd
+    assert "[ -f $HOME/.hermes/profiles/demo-profile/logs/gateway.log ]" in cmd
     assert "journalctl --user -u" in cmd
     assert "-n 50" in cmd
 
@@ -321,9 +321,9 @@ def test_apply_fix_commands(fake_ssh, fix, expected_substring):
 
 def test_restart_command_and_output(fake_ssh):
     fake_ssh.result = SSHResult(ok=True, stdout="restarted", stderr="", returncode=0)
-    result = hermes.restart(make_agent(profile="holly"), make_host())
+    result = hermes.restart(make_agent(profile="demo-profile"), make_host())
     assert result == {"ok": True, "output": "restarted"}
-    assert "hermes -p holly gateway restart" in fake_ssh.last_command
+    assert "hermes -p demo-profile gateway restart" in fake_ssh.last_command
 
 
 def test_restart_unreachable(fake_ssh):
@@ -436,11 +436,11 @@ def test_push_config_rejects_empty_desired_config():
 
 
 def test_push_config_script_content(fake_ssh):
-    agent = make_agent(profile="holly", desired={"config": {"agent": {"max_turns": 42}, "toolsets": ["a", "b"], "skip_me": None}})
+    agent = make_agent(profile="demo-profile", desired={"config": {"agent": {"max_turns": 42}, "toolsets": ["a", "b"], "skip_me": None}})
     list(hermes.push_config(agent, make_host()))
     script = fake_ssh.last_command
-    assert "hermes -p holly config set agent.max_turns 42" in script
-    assert 'hermes -p holly config set toolsets \'["a", "b"]\'' in script
+    assert "hermes -p demo-profile config set agent.max_turns 42" in script
+    assert 'hermes -p demo-profile config set toolsets \'["a", "b"]\'' in script
     assert "skip_me" not in script  # None values are skipped, no clear "unset" semantics
     assert "gateway restart" in script
 
@@ -501,10 +501,10 @@ def test_deploy_simple_mode_script(fake_ssh):
 
 
 def test_deploy_add_profile_mode_creates_profile(fake_ssh):
-    list(hermes.deploy(make_agent(profile="holly", desired={"install_mode": "add-profile"}), make_host()))
+    list(hermes.deploy(make_agent(profile="demo-profile", desired={"install_mode": "add-profile"}), make_host()))
     script = fake_ssh.last_command
-    assert "hermes profile create holly" in script
-    assert "hermes -p holly gateway install" in script
+    assert "hermes profile create demo-profile" in script
+    assert "hermes -p demo-profile gateway install" in script
 
 
 def test_deploy_new_user_mode_wraps_in_sudo(fake_ssh):
@@ -562,9 +562,9 @@ def test_decommission_purge_requires_named_profile(fake_ssh):
 
 
 def test_decommission_purge_named_profile_script(fake_ssh):
-    list(hermes.decommission(make_agent(profile="holly"), make_host(), purge=True))
+    list(hermes.decommission(make_agent(profile="demo-profile"), make_host(), purge=True))
     script = fake_ssh.last_command
-    assert 'rm -rf "$HOME/.hermes/profiles/holly"' in script
+    assert 'rm -rf "$HOME/.hermes/profiles/demo-profile"' in script
 
 
 def test_decommission_remove_user_requires_os_user(fake_ssh):

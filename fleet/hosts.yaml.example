@@ -10,8 +10,8 @@ hosts:
 
   # Via a Teleport tbot identity instead — see tbot/README.md. address is
   # the Teleport-qualified node name; config_file replaces key entirely.
-  - id: alice
-    address: alice.teleport.example.com
+  - id: edge-01
+    address: edge-01.teleport.example.com
     ssh:
       user: deploy
       config_file: /absolute/path/to/tbot/data/ssh_config

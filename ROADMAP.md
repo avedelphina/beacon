@@ -614,7 +614,7 @@ fork of the core.
 Use rollout rings rather than updating every agent at once:
 
 1. Beacon itself and a disposable test agent;
-2. Anikke or another local canary;
+2. A local canary agent;
 3. one low-risk remote agent;
 4. family/team canaries;
 5. the remaining fleet.
