@@ -126,6 +126,11 @@ Delivered in 0.12.0:
   for agents (opt-in per agent), and assignment notices through the
   mailbox.
 
+Delivered in 0.13.0:
+
+- Access policy (C4): `reach.callers`, enforced on direct calls, the
+  mailbox, and board assignments.
+
 Next, in this order:
 
 ### C1 — Relay through Beacon

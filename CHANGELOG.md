@@ -8,6 +8,8 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-10-23
+
 ### Added
 
 - **Access policy:** `reach.callers` lists the agents that may call an
