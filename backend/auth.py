@@ -189,17 +189,17 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Gates every request except /auth/*, /mesh/* and /a2a/* behind a logged-in session.
+    """Gates every request except /auth/*, /mesh/*, /a2a/* and /board/* behind a logged-in session.
     JSON API paths get a 401; anything else (the GUI) gets redirected to
     /auth/login — a plain GET to `/` shouldn't have to know it needs auth,
     it should just land on the login page.
     """
 
     async def dispatch(self, request: Request, call_next):
-        # /mesh/* and /a2a/* authenticate each agent with its own token in
-        # the route itself (backend/mesh.py, mailbox.py) — a session must
-        # not unlock them.
-        if request.url.path.startswith(("/auth/", "/mesh/", "/a2a/")):
+        # /mesh/*, /a2a/* and /board/* authenticate each agent with its own
+        # token themselves (backend/mesh.py, mailbox.py, board_mcp.py) — a
+        # session must not unlock them.
+        if request.url.path.startswith(("/auth/", "/mesh/", "/a2a/", "/board/")):
             return await call_next(request)
         if is_mcp_authorization(request.headers.get("authorization")):
             # Keep the service credential distinct from a browser-session

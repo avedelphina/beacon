@@ -120,6 +120,12 @@ Delivered in 0.11.0:
   pull. The reply returns to the sender as a new message.
 - A movable Beacon: agents follow the URL that Beacon announces.
 
+Delivered in 0.12.0:
+
+- The fleet board (C3): cards with history, the Board tab, `/board/mcp`
+  for agents (opt-in per agent), and assignment notices through the
+  mailbox.
+
 Next, in this order:
 
 ### C1 — Relay through Beacon
@@ -149,7 +155,7 @@ notifications, the reply returns to the caller as a new message.
 **Acceptance:** a message to a stopped agent is delivered after the agent
 restarts, or it expires and the expiry is visible.
 
-### C3 — Fleet board
+### C3 — Fleet board (delivered)
 
 Hermes Kanban stops at the host boundary. A2A also caps one thread at 20
 turns (5 by default). Long-running work therefore needs a durable card with
