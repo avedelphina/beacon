@@ -111,6 +111,7 @@ reach:                       # omit entirely if this agent is inventory-only
   network: tailnet           # agents sharing a network call each other directly
   bind: 0.0.0.0:9900         # optional: where the agent listens, if not the endpoint (Docker, NAT)
   board: false               # true: the agent gets the fleet board's MCP tools (see Fleet board)
+  callers: [edge-02-primary] # optional: only these agents may call it (see Access policy)
   capabilities: [relay]      # declared, not enforced — see Agent bus
 ```
 
@@ -315,6 +316,32 @@ process does not exit, and the agent stays half down. `docker restart -t
 120` gives running turns two minutes to finish. If `sudo` asks for a
 password, copy the script to the host and run it there with `sudo bash`.
 
+### Access policy
+
+`reach.callers` lists the agents that may call an agent. If it is not
+set, any agent on the same network may call it. Beacon itself, which
+means operators and MCP clients, is always allowed, so nobody locks
+themselves out. A single rule, `mesh.may_call`, applies on every path, so
+no path routes around it:
+
+- **Direct calls:** the target's `A2A_PEER_TOKENS` holds only allowed
+  callers, so Hermes refuses anyone else. The host sync distributes the
+  list.
+- **The mailbox:** Beacon refuses with HTTP 403, `"<target> does not
+  accept calls from <caller>"`, and logs the refusal. A message queued
+  before a policy change is checked again at delivery and marked `failed`
+  with the reason.
+- **The board:** an agent cannot assign a card to an agent that would
+  not accept a call from it. Handing over work is a way of calling. People
+  and Beacon are not limited.
+- **Peer lists:** an agent's list includes only peers that accept it, so
+  it is never offered a call that can only fail.
+
+`GET /api/agents/registry` shows each agent's `callers`.
+
+A change to `callers` changes who the target accepts. Its gateway therefore
+restarts once, gracefully, on the next sync.
+
 ### Mailbox: relay and voicemail
 
 `POST /a2a/{agent}` is an A2A endpoint that Beacon serves for each agent.
@@ -402,7 +429,9 @@ mcp_servers:
 
 The token goes into the profile `.env`. The gateway restarts once, because
 Hermes connects MCP servers at startup. If `board` is turned off later, the
-server entry is disabled and the token is removed.
+server entry is disabled and the token is removed. `/board/mcp` enforces
+the opt-in as well: an agent without `reach.board` is refused even when it
+presents its valid pull token.
 
 To connect Claude Code:
 

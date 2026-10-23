@@ -1,5 +1,6 @@
 import contextlib
 import datetime
+import logging
 import itertools
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -47,6 +48,9 @@ class CallAgentRequest(BaseModel):
         if not v.strip():
             raise ValueError("message must not be empty")
         return v
+
+logger = logging.getLogger("beacon")
+
 
 @contextlib.asynccontextmanager
 async def lifespan(_app):
@@ -217,6 +221,8 @@ def agent_registry() -> list[dict]:
             "id": agent.id,
             "callable": agent.reach is not None,
             "capabilities": list(agent.reach.capabilities) if agent.reach else [],
+            # Who may call it: a list of agent ids, or null for anyone on its network.
+            "callers": agent.reach.callers if agent.reach else None,
         }
         for agent in store.list_agents()
     ]
@@ -323,6 +329,13 @@ async def a2a_mailbox(id_: str, request: Request):
     caller = mailbox.caller_for(id_, request.headers.get("authorization"))
     if caller is None:
         return _a2a_error(req_id, -32050, "unauthorized", 401)
+    try:
+        target = store.get_agent(id_)
+    except store.NotFound:
+        return _a2a_error(req_id, -32001, f"no agent {id_!r}", 404)
+    if not mesh.may_call(caller, target):
+        logger.warning("mailbox: refused %s -> %s (not in %s's callers)", caller, id_, id_)
+        return _a2a_error(req_id, -32052, f"{id_} does not accept calls from {caller}", 403)
     method = req.get("method")
     if method not in A2A_METHODS:
         return _a2a_error(req_id, -32601, f"method not found: {method}", 200)

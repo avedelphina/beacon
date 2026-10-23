@@ -146,6 +146,10 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
   Register any new mutating capability in `CAPABILITY_TIERS` with a rationale.
 - **Live state is never stored in YAML.** `status()` and `config_diff()` poll
   the host fresh; fleet records hold only intent (`desired`).
+- **Agent access policy is one rule**, `mesh.may_call(caller, target)`
+  (`reach.callers`; Beacon is always allowed). Any new path by which one
+  agent reaches or hands work to another must check it, as direct calls,
+  the mailbox and board assignment do.
 - **Templates deep-merge** into an agent's `desired` in listed order, agent
   wins; the merge happens on read, never rewrites the file.
 - **Config pushes are validated** against
