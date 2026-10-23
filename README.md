@@ -205,10 +205,15 @@ Each agent's host pulls its own config from Beacon every few minutes and
 applies it. Beacon is never on the message path. If Beacon is down, every
 agent keeps its last config and keeps talking.
 
-- **Peers:** two agents peer when their `reach.network` labels match. The
-  label is free text, for example `tailnet` or `office-lan`. Beacon does
-  not check that the network exists or that it is reachable. An agent
-  without a network is reachable only through Beacon.
+- **Peers:** two agents peer directly when their `reach.network` labels
+  match. The label is free text, for example `tailnet` or `office-lan`.
+  Beacon does not check that the network exists or that it is reachable.
+- **Other networks:** an agent on another network, or on none, appears in
+  the peer list under its plain name with Beacon's relay URL. Agents call
+  `edge-02-primary` the same way in both cases, and Beacon carries the call when
+  there is no direct path. Every agent accepts callers from every network,
+  because a relayed caller arrives with its own token. The access policy
+  (`reach.callers`) still decides who may call.
 - **Tokens:** pairwise and derived, `HMAC(BEACON_A2A_SECRET, "caller>target")`.
   Beacon keeps one secret, not N² tokens. A host that leaks its tokens
   exposes only calls into itself. An agent pulls with its own derived token,
@@ -269,8 +274,13 @@ The script does these things on the host:
   Tokens appear there only as `${env:A2A_TOKEN_<PEER>}` references.
 - Outbound changes take effect on the agent's next turn, with no restart.
   Inbound changes (who may call in) need a restart, because Hermes reads
-  them at startup. For those, the sync starts a graceful
-  `hermes gateway restart`, which waits for running turns.
+  them at startup. For those, the sync asks for a graceful
+  `hermes gateway restart`. The request is kept until it succeeds and is
+  retried on every run. Hermes 0.21 waits for running turns before
+  restarting. Hermes 0.22 instead refuses while sessions are live, and
+  offers only `--yes`, which would interrupt them. The retry gets past
+  that: the restart happens at the first idle moment, and no session is
+  cut off.
 - If Beacon cannot be reached, nothing changes. A lock file stops two
   runs from overlapping.
 
@@ -352,10 +362,14 @@ mailbox entry when the direct call fails.
 - **The target answers:** Beacon forwards the call and returns the reply
   (relay).
 - **The target cannot be reached:** Beacon keeps the message and answers
-  `TASK_STATE_SUBMITTED` (voicemail). It delivers the message the next time
-  the target's host pulls its mesh config, which is within 5 minutes of the
-  agent coming back. That pull is the liveness signal, so Beacon needs no
-  scheduler.
+  `TASK_STATE_SUBMITTED` (voicemail). The message travels with the target's
+  next mesh-config pull, which is within 5 minutes of the agent coming
+  back. The target's own sync then delivers it to the agent on its own
+  host and reports the result (pull delivery). Beacon therefore never needs
+  to reach the agent, and this works behind NAT too. A sync older than
+  version 2 does not announce pull delivery. For such a host, Beacon calls
+  the agent itself when the pull arrives. Either way the pull is the
+  liveness signal, so Beacon needs no scheduler.
 - **The reply goes back to the original caller as a new message** from the
   target. Hermes's A2A tools cannot poll a task for a late result, so a
   late answer must arrive like any other message. Replies are never
@@ -369,9 +383,12 @@ mailbox entry when the direct call fails.
   timeout after the agent may have started on the message, is returned as
   an error instead. Retrying either could deliver the message twice.
 - **Messages expire after 72 hours.** The sender then gets a notice.
-- **Scope:** delivery works between agents on the same network, because
-  only same-network peers accept each other's tokens. Relaying across
-  networks is C1 on the roadmap.
+- **Across networks:** the same endpoint relays between networks. It is
+  the plain-name peer entry for agents on another network. The caller must
+  reach Beacon at `BEACON_PUBLIC_URL`, and Beacon must reach the target.
+- **Agents that Beacon cannot reach** still get held messages and late
+  replies, through their own sync (pull delivery). They need only to reach
+  Beacon.
 
 The messages live in the operational store, `state/beacon.db` (SQLite;
 `BEACON_STATE_DIR` changes the directory). In Docker it is the `./state`

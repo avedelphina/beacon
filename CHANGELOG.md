@@ -8,6 +8,34 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-23
+
+### Fixed
+
+- **Restarts on Hermes 0.22 are no longer lost.** Hermes 0.22 refuses
+  `gateway restart` while sessions are live, where 0.21 waited for them.
+  The host sync now keeps a restart request until one succeeds. It
+  records each detached attempt's exit code and retries on every run. It
+  never stacks attempts on a drain that is still running.
+
+### Added
+
+- **Relay across networks (C1).** An agent on another network, or on
+  none, appears in each peer list under its plain name, pointing at
+  Beacon's relay (`/a2a/{agent}`). Agents call peers by name whether the
+  path is direct or relayed. Every agent now accepts callers from every
+  network, because they arrive through Beacon with their own token. The
+  access policy still decides who.
+- **Pull delivery.** Messages the mailbox holds for an agent travel with
+  its mesh-config pull. The agent's own sync delivers them on its host and
+  reports each result to `POST /mesh/{agent}/inbox/{id}`. A delivery
+  passes the reply back to the original sender; a delivery that never
+  arrived is handed back; a refusal or timeout is marked failed. Beacon
+  never needs to reach the agent, so it works behind NAT. A sync
+  announces support with `X-Beacon-Sync-Version: 2`; older syncs keep the
+  Beacon-calls-the-agent path. The mesh config now includes the agent's
+  own `endpoint`.
+
 ## [0.13.0] — 2026-10-23
 
 ### Added

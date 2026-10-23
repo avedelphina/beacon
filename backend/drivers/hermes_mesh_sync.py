@@ -8,7 +8,10 @@ A2A_* settings into the profile's .env, the peer list into config.yaml's
 config.yaml never holds a secret.
 
 Tailscale-style resilience: if Beacon is unreachable nothing changes, and
-the mesh keeps running on the last applied config. Outbound changes go
+the mesh keeps running on the last applied config. Messages the Beacon
+mailbox held for this agent come along with the config (pull delivery): the
+sync hands each one to the agent on this host and reports the result, so
+Beacon never needs to reach the agent — it works behind NAT, too. Outbound changes go
 live on the agent's next turn (Hermes re-reads .env and config.yaml).
 Inbound ones — who may call in — are read once when the gateway starts, so
 only those trigger a graceful `hermes gateway restart`, which waits for
@@ -24,9 +27,14 @@ import fcntl
 import hashlib
 import json
 import os
+import shlex
+import socket
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 
 # Read once, when Hermes's A2A adapter starts; a change needs a restart.
@@ -34,6 +42,13 @@ INBOUND_KEYS = ("A2A_PORT", "A2A_HOST", "A2A_AGENT_NAME", "A2A_PEER_TOKENS", "A2
 BOARD_TOKEN_KEY = "BEACON_BOARD_TOKEN"
 BOARD_SERVER = "beacon-board"
 MAX_LOG_BYTES = 1_000_000
+# Announces that this sync delivers held messages itself (pull delivery).
+SYNC_VERSION = "2"
+# Hermes answers within its A2A_REPLY_TIMEOUT (300s); wait a little longer.
+LOCAL_REPLY_TIMEOUT = 330
+# A restart still marked as running after this long is assumed dead
+# (longer than Hermes 0.21's 30-minute graceful drain cap).
+RESTART_STALE_SECONDS = 40 * 60
 
 
 def log(message: str) -> None:
@@ -84,6 +99,61 @@ def peer_list(mesh: dict) -> dict:
     }
 
 
+def parts_text(obj) -> str:
+    parts = obj.get("parts") if isinstance(obj, dict) else None
+    return "\n".join(p["text"] for p in parts or [] if isinstance(p, dict) and isinstance(p.get("text"), str))
+
+
+def deliver_locally(url: str, token: str, text: str, context_id: str | None) -> dict:
+    """One A2A SendMessage to the agent on this host. Returns the report for
+    Beacon: ok + reply, or the error and whether retrying later is safe. Only
+    "never got there" is transient; a refusal, or a timeout while the agent
+    may already be working on it, is not — retrying could deliver it twice."""
+    message = {"role": "ROLE_USER", "parts": [{"text": text}], "messageId": uuid.uuid4().hex}
+    if context_id:
+        message["contextId"] = context_id
+    body = json.dumps({"jsonrpc": "2.0", "id": uuid.uuid4().hex, "method": "SendMessage",
+                       "params": {"message": message}}).encode()
+    request = urllib.request.Request(url, data=body, method="POST", headers={
+        "Authorization": f"Bearer {token}", "Content-Type": "application/json", "A2A-Version": "1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=LOCAL_REPLY_TIMEOUT) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as exc:
+        try:
+            payload = json.load(exc)
+        except Exception:
+            payload = None
+        if isinstance(payload, dict) and isinstance(payload.get("error"), dict):
+            return {"ok": False, "transient": False, "error": str(payload["error"].get("message"))}
+        return {"ok": False, "transient": exc.code in (502, 503, 504), "error": f"HTTP {exc.code}"}
+    except urllib.error.URLError as exc:  # no connection: it never got the message
+        return {"ok": False, "transient": True, "error": str(exc.reason)}
+    except (socket.timeout, OSError) as exc:  # waiting for the answer: it may be working on it
+        return {"ok": False, "transient": False, "error": f"no answer: {exc}"}
+    if not isinstance(payload, dict) or isinstance(payload.get("error"), dict):
+        error = payload.get("error", {}).get("message") if isinstance(payload, dict) else "unreadable answer"
+        return {"ok": False, "transient": False, "error": str(error)}
+    result = payload.get("result") or {}
+    answer = result.get("task") or result.get("message") or result
+    status = answer.get("status") or {}
+    reply = (parts_text(status.get("message")) or "\n".join(parts_text(a) for a in answer.get("artifacts") or [])
+             or parts_text(answer))
+    return {"ok": True, "reply": reply or f"(no text; task state {status.get('state')})"}
+
+
+def post_report(cfg: dict, pull_token: str, message_id: int, report: dict) -> None:
+    request = urllib.request.Request(
+        f"{cfg['beacon']}/mesh/{cfg['agent']}/inbox/{message_id}", data=json.dumps(report).encode(), method="POST",
+        headers={"Authorization": f"Bearer {pull_token}", "Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(request, timeout=20).close()
+    except Exception as exc:
+        # Unreported, the claim lapses on Beacon and the message is offered
+        # again later — possibly a duplicate for the agent.
+        log(f"could not report message {message_id} to Beacon: {exc}")
+
+
 def read_env(path: Path) -> tuple[list[str], dict[str, str]]:
     """(lines this script doesn't own, current values of the ones it does)."""
     kept, current = [], {}
@@ -104,6 +174,41 @@ def write_env(path: Path, kept: list[str], settings: dict[str, str]) -> None:
 
 
 def restart(cfg: dict, state: Path) -> None:
+    """Ask for a restart, and keep asking until one succeeds.
+
+    Hermes 0.21 waits for running turns before restarting. 0.22 refuses
+    while sessions are live (turns, cron jobs) and only offers --yes, which
+    interrupts them. So a restart is recorded as pending and retried on
+    every run until it goes through — on 0.22 that is the first idle moment,
+    and no one's session is cut off.
+    """
+    # Settle an earlier attempt first, or its success would clear this request.
+    settle_restart(state)
+    (state / "restart.pending").touch()
+    run_pending_restart(cfg, state)
+
+
+def settle_restart(state: Path) -> None:
+    """Read the exit code an earlier detached restart left behind."""
+    result = state / "restart.result"
+    if not result.exists():
+        return
+    code = result.read_text().strip()
+    result.unlink()
+    if code == "0":
+        (state / "restart.pending").unlink(missing_ok=True)
+        log("restart done")
+    else:
+        log(f"restart refused or failed (exit {code}); retrying on the next run")
+
+
+def run_pending_restart(cfg: dict, state: Path) -> None:
+    pending, result, started = state / "restart.pending", state / "restart.result", state / "restart.started"
+    settle_restart(state)
+    if not pending.exists():
+        return
+    if started.exists() and time.time() - started.stat().st_mtime < RESTART_STALE_SECONDS:
+        return  # one is still running: a graceful drain can take a while
     # sync.json "restart" overrides the command. Docker agents need it: under
     # an s6-supervised image, `hermes gateway restart` stops the platforms but
     # the process never exits, leaving the agent half down. There the sync
@@ -114,11 +219,17 @@ def restart(cfg: dict, state: Path) -> None:
     # `systemctl --user` (Linux) needs this; cron doesn't set it.
     if "XDG_RUNTIME_DIR" not in env and os.path.isdir(runtime_dir):
         env["XDG_RUNTIME_DIR"] = runtime_dir
-    # Detached: the restart waits for running turns, which can take many minutes.
+    started.touch()
+    # Detached, since a graceful drain can take many minutes; the wrapper
+    # leaves the exit code for the next run to read.
+    # Clear "started" before publishing the result, so a reader that sees the
+    # result never also sees the attempt as still running.
+    script = (f"{shlex.join(command)}; code=$?; rm -f {shlex.quote(str(started))}; "
+              f"echo $code > {shlex.quote(str(result))}")
     with open(state / "restart.log", "a") as out:
-        subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
+        subprocess.Popen(["sh", "-c", script], env=env, stdin=subprocess.DEVNULL,
                          stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
-    log(f"who may call in, or the board server, changed; restart requested: {' '.join(command)}")
+    log(f"restart requested: {' '.join(command)}")
 
 
 def sync(state: Path) -> int:
@@ -133,7 +244,8 @@ def sync(state: Path) -> int:
             return 0  # a previous run is still going
         pull_token = (state / "token").read_text().strip()
         request = urllib.request.Request(f"{cfg['beacon']}/mesh/{cfg['agent']}",
-                                         headers={"Authorization": f"Bearer {pull_token}"})
+                                         headers={"Authorization": f"Bearer {pull_token}",
+                                                  "X-Beacon-Sync-Version": SYNC_VERSION})
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
                 mesh = json.load(response)
@@ -177,8 +289,20 @@ def sync(state: Path) -> int:
             board_stamp.write_text(json.dumps(board))
             log(f"board MCP server {'set' if board else 'disabled'}")
 
-        if any(settings.get(k) != current.get(k) for k in INBOUND_KEYS) or (board_changed and (board or previous)):
+        restarting = any(settings.get(k) != current.get(k) for k in INBOUND_KEYS) or (board_changed and (board or previous))
+        if restarting:
             restart(cfg, state)
+        else:
+            run_pending_restart(cfg, state)  # an earlier one may have been refused
+
+        for item in mesh.get("inbox") or []:
+            if restarting:  # the gateway is draining; hand it back for the next run
+                report = {"ok": False, "transient": True, "error": "agent restarting"}
+            else:
+                report = deliver_locally(mesh["endpoint"], item["token"], item["text"], item.get("context_id"))
+            post_report(cfg, pull_token, item["id"], report)
+            log(f"held message {item['id']}: " + ("delivered" if report["ok"] else
+                ("handed back" if report["transient"] else "failed") + f" ({report['error']})"))
     return 0
 
 

@@ -67,7 +67,10 @@ def test_config_lists_listen_inbound_and_outbound(two_agents):
 
     assert cfg["agent"] == "alpha"
     assert cfg["listen"] == {"port": 9900, "host": "100.1.1.1"}
-    assert cfg["inbound"] == {"beacon": mesh.token("beacon", "alpha"), "bravo": mesh.token("bravo", "alpha")}
+    # lan-only is on another network: it can't dial alpha directly, but it can
+    # be relayed through Beacon with its own token, so alpha accepts it.
+    assert cfg["inbound"] == {"beacon": mesh.token("beacon", "alpha"), "bravo": mesh.token("bravo", "alpha"),
+                              "lan-only": mesh.token("lan-only", "alpha")}
     assert cfg["outbound"] == [{"name": "bravo", "url": "http://bravo.test:9900",
                                 "token": mesh.token("alpha", "bravo"), "capabilities": ["chat"]}]
 
@@ -396,3 +399,39 @@ def test_sync_follows_beacon_to_its_new_url(synced, host):
     sync.sync(state)
 
     assert json.loads((state / "sync.json").read_text())["beacon"] == "https://beacon.example"
+
+
+def test_a_refused_restart_is_retried_until_it_succeeds(synced, host, tmp_path):
+    """Hermes 0.22 refuses to restart while sessions are live. The request
+    must survive the refusal and be retried on later runs."""
+    sync, state = synced
+    exit_code = tmp_path / "exit-code"
+    exit_code.write_text("1")
+    fake = host["hermes"]
+    fake.write_text(fake.read_text().replace("exit 0\n", f'case "$*" in *"gateway restart"*) exit $(cat {exit_code});; esac\nexit 0\n'))
+    cfg = mesh.config("alpha")
+    cfg["inbound"]["charlie"] = "t-charlie-in"
+    _serve(host, cfg)
+
+    def wait_for(path, present=True):
+        deadline = time.monotonic() + 3
+        while path.exists() != present and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return path.exists() == present
+
+    sync.sync(state)  # restart requested; refused (exit 1)
+    assert wait_for(state / "restart.result")
+    assert (state / "restart.pending").exists()
+
+    sync.sync(state)  # nothing changed, but the refused restart is retried
+    assert wait_for(state / "restart.result")  # the retry is detached; let it finish
+    assert _argv(host).count("gateway restart") == 2
+    exit_code.write_text("0")
+
+    sync.sync(state)  # reads the second refusal, retries; this one succeeds
+    assert wait_for(state / "restart.result")
+    sync.sync(state)  # reads the success: settled
+    assert not (state / "restart.pending").exists()
+    restarts = _argv(host).count("gateway restart")
+    sync.sync(state)
+    assert _argv(host).count("gateway restart") == restarts  # settled: no more attempts

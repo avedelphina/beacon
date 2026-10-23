@@ -131,9 +131,15 @@ Delivered in 0.13.0:
 - Access policy (C4): `reach.callers`, enforced on direct calls, the
   mailbox, and board assignments.
 
+Delivered in 0.14.0:
+
+- Relay across networks (C1) and pull delivery: agents that Beacon cannot
+  reach still get held messages and late replies.
+- Restart requests survive Hermes 0.22's refusal while sessions are live.
+
 Next, in this order:
 
-### C1 — Relay through Beacon
+### C1 — Relay through Beacon (delivered)
 
 Some agents cannot reach each other directly: an agent on another network,
 behind NAT, or on a laptop away from the tailnet. For them, Beacon serves
@@ -141,10 +147,15 @@ one A2A endpoint per agent (`/a2a/{agent}`) and forwards each call to the
 target. A peer outside the target's network gets the relay URL in its peer
 list instead of the direct URL.
 
-The endpoint exists already as the mailbox. It works within one network
-only, because a target accepts tokens only from its own network's peers.
-What remains: accept callers from every network in each target's inbound
-list, and give agents on other networks only the mailbox entry.
+Delivered:
+
+- Every agent accepts callers from every network, subject to
+  `reach.callers`.
+- An agent on another network, or on none, gets a plain-name peer entry
+  that points at the relay.
+
+- Pull delivery: an agent's own sync delivers its held messages locally,
+  so agents that Beacon cannot reach still get voicemail and late replies.
 
 **Acceptance:** an agent on a second network calls a tailnet agent by name.
 With Beacon down, pairs on the tailnet are not affected.
