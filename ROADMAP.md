@@ -120,7 +120,7 @@ Delivered in 0.11.0:
   pull. The reply returns to the sender as a new message.
 - A movable Beacon: agents follow the URL that Beacon announces.
 
-Delivered since (unreleased):
+Delivered in 0.12.0:
 
 - The fleet board (C3): cards with history, the Board tab, `/board/mcp`
   for agents (opt-in per agent), and assignment notices through the

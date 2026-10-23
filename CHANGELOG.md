@@ -8,6 +8,8 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-10-23
+
 ### Added
 
 - **Fleet board.** Shared cards with a state (`todo`, `doing`, `blocked`,
