@@ -126,6 +126,8 @@ def test_board_mcp_refuses_strangers_and_other_tokens(fleet_agents, monkeypatch)
         assert _mcp(c, "tools/list", token="wrong").status_code == 401
         # An agent's A2A token is not its board token.
         assert _mcp(c, "tools/list", token=mesh.token("alpha", "bravo")).status_code == 401
+        # bravo is not opted in (reach.board false): its own pull token is refused too.
+        assert _mcp(c, "tools/list", token=mesh.token("bravo", mesh.BEACON_PEER)).status_code == 401
         card = _tool(c, "card_create", {"title": "from the operator"}, "test-mcp-token")
     assert card["created_by"] == "beacon"
 

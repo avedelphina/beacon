@@ -126,6 +126,11 @@ Delivered in 0.12.0:
   for agents (opt-in per agent), and assignment notices through the
   mailbox.
 
+Delivered in 0.13.0:
+
+- Access policy (C4): `reach.callers`, enforced on direct calls, the
+  mailbox, and board assignments.
+
 Next, in this order:
 
 ### C1 — Relay through Beacon
@@ -168,7 +173,7 @@ day-to-day coordination.
 visible with its state and thread history, without reading any agent's
 logs.
 
-### C4 — Access policy
+### C4 — Access policy (mostly delivered)
 
 Today every agent on a network may call every other agent on it.
 
@@ -183,6 +188,20 @@ Today every agent on a network may call every other agent on it.
 
 **Acceptance:** the target refuses an agent that is not on its allowlist,
 and the refusal is visible.
+
+Status:
+
+- **Who-may-call-whom: delivered**, as a per-agent allowlist
+  (`reach.callers`). It applies to direct calls, the mailbox, and board
+  assignments.
+- **Groups: not yet.** Add them when the per-agent lists get long.
+- **Scoped credentials: in effect.** Agents hold only their own derived
+  tokens for `/mesh`, `/a2a`, and `/board`, never the shared MCP bearer.
+  The bearer remains the operators' credential until Horizon 5.
+- **Chat exposure:** handled by keeping board tools opt-in
+  (`reach.board`). An agent whose chat accepts anyone should not get them.
+  Beacon cannot yet see an agent's chat policy. A later step could have
+  the sync report it, so that Beacon can refuse board access on its own.
 
 ### C5 — Transport security beyond an overlay network
 

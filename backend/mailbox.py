@@ -84,6 +84,10 @@ def deliver_pending(recipient_id: str) -> None:
         return
     senders_with_replies = set()
     while (row := _claim(recipient_id)) is not None:
+        # Checked again here: the policy may have changed while it waited.
+        if not mesh.may_call(row["sender"], agent):
+            _finish(row["id"], "failed", f"{recipient_id} does not accept calls from {row['sender']}")
+            continue
         try:
             view = bus.call(agent, _framed(row), row["context_id"] if row["kind"] == "message" else None,
                             token=mesh.token(row["sender"], recipient_id))

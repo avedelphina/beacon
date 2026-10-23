@@ -59,6 +59,17 @@ def may_pull(agent_id: str, authorization: str | None) -> bool:
     return isinstance(authorization, str) and hmac.compare_digest(authorization, expected)
 
 
+def may_call(caller: str, target: Agent) -> bool:
+    """The access policy, in one place: Beacon (operators) always; otherwise
+    the target's `reach.callers` if it has one, else anyone on its network.
+    Applied to direct calls (the target's inbound tokens), the mailbox, and
+    board assignments, so no path routes around it."""
+    if caller == BEACON_PEER:
+        return True
+    callers = target.reach.callers if target.reach else None
+    return callers is None or caller in callers
+
+
 def peers(agent: Agent, fleet: list[Agent]) -> list[Agent]:
     """Agents `agent` calls directly: same declared network, reachable, not itself."""
     network = agent.reach.network if agent.reach else None
@@ -80,7 +91,9 @@ def config(agent_id: str) -> dict:
     loopback = listen.hostname in ("127.0.0.1", "localhost", "::1")
     beacon_url = public_url()
     outbound = []
-    for p in direct:
+    # Only peers that will accept this agent: no peer-list entries that can
+    # only ever be refused.
+    for p in (p for p in direct if may_call(agent.id, p)):
         outbound.append({"name": p.id, "url": p.reach.endpoint, "token": token(agent.id, p.id),
                          "capabilities": p.reach.capabilities})
         if beacon_url:
@@ -97,7 +110,8 @@ def config(agent_id: str) -> dict:
             "port": listen.port or (443 if listen.scheme == "https" else 80),
             "host": None if loopback else listen.hostname,
         },
-        "inbound": {name: token(name, agent.id) for name in (BEACON_PEER, *(p.id for p in direct))},
+        "inbound": {name: token(name, agent.id)
+                    for name in (BEACON_PEER, *(p.id for p in direct if may_call(p.id, agent)))},
         "outbound": outbound,
         # The agent signs in to the board with its pull token, which it has.
         "board": {"url": f"{beacon_url}/board/mcp"} if agent.reach.board and beacon_url else None,

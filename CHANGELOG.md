@@ -8,6 +8,19 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-10-23
+
+### Added
+
+- **Access policy:** `reach.callers` lists the agents that may call an
+  agent; unset means anyone on its network. Beacon is always allowed. One
+  rule (`mesh.may_call`) applies to direct calls (only allowed callers'
+  tokens reach the target), to the mailbox (HTTP 403 with the reason,
+  logged, and re-checked for messages queued before a change), and to
+  board assignments (an agent can only hand work to agents that accept
+  it). Peer lists show only peers that accept the agent. The registry
+  shows each agent's policy.
+
 ## [0.12.0] — 2026-10-23
 
 ### Added

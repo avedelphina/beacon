@@ -49,6 +49,8 @@ def create_card(author: str, title: str, body: str = "", project: str | None = N
                 assignee: str | None = None, state: str = "todo") -> dict:
     title = _required(title, "title")
     _check_state(state)
+    if assignee:
+        _check_may_assign(author, assignee)
     now = time.time()
     with opstore.connect() as db:
         card_id = db.execute(
@@ -72,6 +74,8 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
         _check_state(state)
         changes.append(("state", "state", state, f"{card['state']} -> {state}"))
     if assignee is not None and (assignee or None) != card["assignee"]:
+        if assignee:
+            _check_may_assign(author, assignee)
         changes.append(("assignee", "assign", assignee or None, f"{card['assignee'] or '-'} -> {assignee or '-'}"))
     for column, value in (("title", title), ("body", body), ("project", project)):
         if value is not None and value != (card[column] or ""):
@@ -125,6 +129,16 @@ def _notify_assignee(card_id: int, author: str, assignee: str) -> None:
     mailbox.enqueue(sender, assignee, "notice", text)
     # Deliver now if it's online; otherwise its next mesh pull does.
     threading.Thread(target=mailbox.deliver_pending, args=(assignee,), daemon=True).start()
+
+
+def _check_may_assign(author: str, assignee: str) -> None:
+    """Handing an agent work is a way of calling it: an agent may assign
+    only to agents that accept calls from it (mesh.may_call). People and
+    Beacon are not limited."""
+    if not _is_agent(author) or not _is_agent(assignee):
+        return
+    if not mesh.may_call(author, store.get_agent(assignee)):
+        raise ValueError(f"{assignee} does not accept work from {author}")
 
 
 def _is_agent(name: str) -> bool:

@@ -74,6 +74,8 @@ class Host(BaseModel):
 # `board` gives the agent the fleet board's MCP tools (backend/board_mcp.py).
 # Opt-in: Hermes offers an MCP server on every chat platform, so an agent
 # whose chat is open to strangers would let them write to the board.
+# `callers` limits which agents may call this one (backend/mesh.may_call);
+# unset means any agent on its network. Beacon itself is always allowed.
 # Tokens are derived, never stored.
 class AgentReach(BaseModel):
     transport: str = "a2a"
@@ -81,6 +83,7 @@ class AgentReach(BaseModel):
     network: str | None = None
     bind: str | None = None
     board: bool = False
+    callers: list[str] | None = None
     capabilities: list[str] = Field(default_factory=list)
 
     @field_validator("bind")
@@ -119,6 +122,14 @@ class AgentReach(BaseModel):
     def _network_label(cls, v: str | None) -> str | None:
         if v is not None and not ID_RE.fullmatch(v):
             raise ValueError(f"network {v!r} must match {ID_RE.pattern}")
+        return v
+
+    @field_validator("callers")
+    @classmethod
+    def _caller_ids(cls, v: list[str] | None) -> list[str] | None:
+        for name in v or []:
+            if not ID_RE.fullmatch(name):
+                raise ValueError(f"caller {name!r} must be an agent id matching {ID_RE.pattern}")
         return v
 
     @field_validator("capabilities")
