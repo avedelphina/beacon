@@ -216,10 +216,10 @@ agent keeps its last config and keeps talking.
 **The pull endpoint.** `GET /mesh/{agent-id}` returns that agent's config:
 
 ```json
-{"agent": "anais",
- "listen": {"port": 9900, "host": "100.107.209.203"},
- "inbound": {"beacon": "<token>", "anikke": "<token>"},
- "outbound": [{"name": "anikke", "url": "http://100.68.84.189:9900",
+{"agent": "edge-01-primary",
+ "listen": {"port": 9900, "host": "100.64.0.11"},
+ "inbound": {"beacon": "<token>", "edge-02-primary": "<token>"},
+ "outbound": [{"name": "edge-02-primary", "url": "http://100.64.0.12:9900",
                "token": "<token>", "capabilities": []}]}
 ```
 
@@ -230,8 +230,8 @@ only its own sync. Agents' hosts must reach Beacon for this, so set these in
 `.env`:
 
 ```bash
-BEACON_MESH_BIND=100.68.84.189:8642          # extra port binding for agents
-BEACON_PUBLIC_URL=http://100.68.84.189:8642  # the URL their sync calls
+BEACON_MESH_BIND=100.64.0.1:8642          # extra port binding for agents
+BEACON_PUBLIC_URL=http://100.64.0.1:8642  # the URL their sync calls
 ```
 
 The UI and MCP keep their own bindings (`BEACON_BIND_HOST`). The extra
@@ -242,7 +242,7 @@ environment is. The output contains the agent's pull token, so pipe it to
 the host and do not save it:
 
 ```bash
-python -m backend.mesh install anais | ssh root@anais 'bash -s'
+python -m backend.mesh install edge-01-primary | ssh root@edge-01 'bash -s'
 ```
 
 The script does these things on the host:
@@ -280,7 +280,7 @@ listens on its own address. Declare both:
 
 ```yaml
 reach:
-  endpoint: http://100.68.243.192:9901   # published, tailnet IP only
+  endpoint: http://100.64.0.20:9901   # published, tailnet IP only
   bind: 0.0.0.0:9900                     # inside the container
   network: tailnet
 ```
@@ -290,11 +290,11 @@ If the container shares a host-networked Tailscale sidecar
 Then leave out `bind` and do not publish a port.
 
 1. Otherwise, publish the port on the endpoint address only, for example
-   `ports: ["100.68.243.192:9901:9900"]`, and recreate the container.
+   `ports: ["100.64.0.20:9901:9900"]`, and recreate the container.
 2. Run the install **on the container's host, as root**:
 
    ```bash
-   python -m backend.mesh install alison --docker hermes-alison | ssh root@helsinki 'bash -s'
+   python -m backend.mesh install nas-agent --docker hermes-nas | ssh root@nas 'bash -s'
    ```
 
    The script finds the host path of the data volume with

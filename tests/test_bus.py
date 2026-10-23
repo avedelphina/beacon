@@ -167,7 +167,7 @@ def test_endpoint_path_is_posted_to_as_is(client, monkeypatch):
     _host(client)
     client.put("/api/agents/a1", json={
         "id": "a1", "type": "hermes", "host": "edge-01", "desired": {},
-        "reach": _reach(endpoint="http://agent.test:9900/holly/"),
+        "reach": _reach(endpoint="http://agent.test:9900/foxtrot/"),
     })
     monkeypatch.setenv(mesh.SECRET_ENV, "test-mesh-secret")
     seen = {}
@@ -179,7 +179,7 @@ def test_endpoint_path_is_posted_to_as_is(client, monkeypatch):
     _answer_with(monkeypatch, handler)
 
     assert client.post("/api/agents/a1/call", json={"message": "ping"}).status_code == 200
-    assert seen["url"] == "http://agent.test:9900/holly/"
+    assert seen["url"] == "http://agent.test:9900/foxtrot/"
 
 
 def test_failed_task_is_returned_not_raised(client, reachable, monkeypatch):

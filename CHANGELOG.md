@@ -8,6 +8,8 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-10-23
+
 ### Added
 
 - **Agent bus over A2A.** Beacon (and any MCP client, such as Claude) can

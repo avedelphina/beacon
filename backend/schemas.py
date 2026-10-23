@@ -106,7 +106,7 @@ class AgentReach(BaseModel):
         ):
             raise ValueError(
                 f"endpoint {v!r} must be an http(s) URL with no query or fragment "
-                "(e.g. http://100.68.84.189:9900)"
+                "(e.g. http://100.64.0.1:9900)"
             )
         return v
 

@@ -31,7 +31,7 @@ from .drivers import get_driver
 from .schemas import Agent
 
 SECRET_ENV = "BEACON_A2A_SECRET"
-# The URL agents' hosts reach Beacon on for pulls, e.g. http://100.68.84.189:8642.
+# The URL agents' hosts reach Beacon on for pulls, e.g. http://100.64.0.1:8642.
 PUBLIC_URL_ENV = "BEACON_PUBLIC_URL"
 BEACON_PEER = "beacon"
 
