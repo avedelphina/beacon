@@ -693,3 +693,120 @@ hermes update --yes
 echo "[beacon] done"
 """
     yield from ssh.stream_script(host, _wrap_for_user(agent, host, script), timeout=300)
+
+
+MESH_SYNC = Path(__file__).with_name("hermes_mesh_sync.py")
+
+
+def mesh_install_script(agent: Agent, beacon_url: str, pull_token: str) -> str:
+    """One-time host bootstrap for the A2A mesh pull (see backend/mesh.py).
+
+    Drops `beacon-mesh/` next to the profile's config.yaml — the agent's
+    pull token (0600), hermes_mesh_sync.py, and sync.json — and runs one
+    sync. The token arrives in a heredoc, so it never reaches argv or `ps`.
+    Absolute python3/hermes paths go into sync.json because a scheduler's
+    PATH usually has neither. It deliberately does not schedule itself:
+    adding the printed cron line (or a systemd timer / launchd agent that
+    runs the same command) is the operator's step. Re-running replaces
+    everything but the schedule.
+    """
+    _validate_agent(agent)
+    profile_args = ["-p", named_profile(agent)] if named_profile(agent) else []
+    sync_json = (
+        "import json, os, sys\n"
+        "state, hermes, config = sys.argv[1:4]\n"
+        f"cfg = {{'beacon': {beacon_url!r}, 'agent': {agent.id!r}, 'hermes': [hermes, *{profile_args!r}],\n"
+        "       'env_file': os.path.join(os.path.dirname(config), '.env')}\n"
+        "json.dump(cfg, open(os.path.join(state, 'sync.json'), 'w'), indent=2)"
+    )
+    return "\n".join([
+        f"# Beacon A2A mesh install for {agent.id}. Contains its pull token: pipe it, don't keep it.",
+        PREAMBLE,
+        'hermes_bin="$(command -v hermes)"',
+        # Not the operator's activated venv: a scheduled sync must outlive it.
+        'py="$(PATH="$(printf %s "$PATH" | tr : "\\n" | grep -vxF "${VIRTUAL_ENV:-/nonexistent}/bin" | paste -sd: -)" command -v python3 || command -v python3)"',
+        f'config_path="$({_cmd_prefix(agent)} config path 2>/dev/null | tail -n 1)"',
+        '[ -f "$config_path" ] || { echo "[beacon] no config.yaml found" >&2; exit 1; }',
+        'dir="$(dirname "$config_path")/beacon-mesh"',
+        'install -d -m 700 "$dir"',
+        "(umask 077; cat > \"$dir/token\" <<'BEACON_TOKEN'",
+        pull_token,
+        "BEACON_TOKEN",
+        ")",
+        "cat > \"$dir/sync.py\" <<'BEACON_SYNC_PY'",
+        MESH_SYNC.read_text().rstrip("\n"),
+        "BEACON_SYNC_PY",
+        "\"$py\" - \"$dir\" \"$hermes_bin\" \"$config_path\" <<'BEACON_SYNC_JSON'",
+        sync_json,
+        "BEACON_SYNC_JSON",
+        # The outbound tools (a2a_call, ...) are off per platform by default; a
+        # peer's task can't be passed on without them. Chat platforms are the
+        # operator's call.
+        f"{_cmd_prefix(agent)} tools enable a2a --platform a2a",
+        '"$py" "$dir/sync.py" "$dir" | tee -a "$dir/sync.log"',
+        f'echo "[beacon] mesh sync for {agent.id} installed and run once. To keep it in sync, schedule:"',
+        'echo "  */5 * * * * \\"$py\\" \\"$dir/sync.py\\" \\"$dir\\" >> \\"$dir/sync.log\\" 2>&1"',
+    ]) + "\n"
+
+
+CONTAINER_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
+
+
+def mesh_install_docker_script(agent: Agent, beacon_url: str, pull_token: str, container: str,
+                               container_user: str = "hermes") -> str:
+    """Like mesh_install_script, for an agent in Docker — but runs on the
+    *host*, as root (docker access), not inside the container.
+
+    The sync lives on the host side of the data volume (found with `docker
+    inspect`), drives Hermes through `docker exec`, and restarts the
+    container rather than the gateway: under the s6-supervised official
+    image, `hermes gateway restart` stops the chat platforms but never
+    exits, leaving the agent half down. Schedule it with the host's own
+    scheduler (cron, or DSM Task Scheduler on Synology), as root.
+    """
+    _validate_agent(agent)
+    for value, what in ((container, "container"), (container_user, "container user")):
+        if not CONTAINER_RE.fullmatch(value):
+            raise ValueError(f"{what} {value!r} must match {CONTAINER_RE.pattern}")
+    profile_args = ["-p", named_profile(agent)] if named_profile(agent) else []
+    sync_json = (
+        "import json, os, sys\n"
+        "state, docker, data = sys.argv[1:4]\n"
+        f"exec_ = [docker, 'exec', '-u', {container_user!r}, {container!r}]\n"
+        f"cfg = {{'beacon': {beacon_url!r}, 'agent': {agent.id!r},\n"
+        f"       'hermes': exec_ + ['hermes', *{profile_args!r}],\n"
+        "       'env_file': os.path.join(data, '.env'),\n"
+        f"       'restart': [docker, 'restart', '-t', '120', {container!r}]}}\n"
+        "json.dump(cfg, open(os.path.join(state, 'sync.json'), 'w'), indent=2)"
+    )
+    exec_user = f'"$docker" exec -u {container_user} {container}'
+    return "\n".join([
+        f"# Beacon A2A mesh install for {agent.id} in container {container}. Run on the host as root.",
+        "# Contains its pull token: pipe it, don't keep it.",
+        "set -e",
+        'docker="$(command -v docker || echo /usr/local/bin/docker)"',
+        'py="$(command -v python3)"',
+        f'home="$({exec_user} printenv HERMES_HOME || true)"',
+        '[ -n "$home" ] || home=/opt/data',
+        f'data="$("$docker" inspect -f "{{{{range .Mounts}}}}{{{{if eq .Destination \\"$home\\"}}}}{{{{.Source}}}}{{{{end}}}}{{{{end}}}}" {container})"',
+        f'[ -d "$data" ] || {{ echo "[beacon] no host path for $home in {container}" >&2; exit 1; }}',
+        'dir="$data/beacon-mesh"',
+        'install -d -m 700 "$dir"',
+        "(umask 077; cat > \"$dir/token\" <<'BEACON_TOKEN'",
+        pull_token,
+        "BEACON_TOKEN",
+        ")",
+        "cat > \"$dir/sync.py\" <<'BEACON_SYNC_PY'",
+        MESH_SYNC.read_text().rstrip("\n"),
+        "BEACON_SYNC_PY",
+        "\"$py\" - \"$dir\" \"$docker\" \"$data\" <<'BEACON_SYNC_JSON'",
+        sync_json,
+        "BEACON_SYNC_JSON",
+        # The sync rewrites .env in place from the host; it must already exist,
+        # owned by the container user, or Hermes can't read it.
+        f"{exec_user} sh -c 'touch \"$HERMES_HOME/.env\"'",
+        f"{exec_user} hermes{' ' + ' '.join(profile_args) if profile_args else ''} tools enable a2a --platform a2a",
+        '"$py" "$dir/sync.py" "$dir" | tee -a "$dir/sync.log"',
+        f'echo "[beacon] mesh sync for {agent.id} installed and run once. Schedule as root on this host:"',
+        'echo "  */5 * * * * \\"$py\\" \\"$dir/sync.py\\" \\"$dir\\" >> \\"$dir/sync.log\\" 2>&1"',
+    ]) + "\n"

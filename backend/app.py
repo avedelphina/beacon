@@ -3,13 +3,13 @@ import itertools
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, cron_store, scheduler, store, templates
+from . import auth, bus, cron_store, mesh, scheduler, store, templates
 from .drivers import for_agent
 from .schemas import Agent, CronJob, Host
 from .tiers import TIER_LABELS, CAPABILITY_TIERS, requires_confirm, tier_for
@@ -30,7 +30,19 @@ class DecommissionRequest(BaseModel):
     remove_user: bool = False
     confirm: bool = False
 
-app = FastAPI(title="Beacon", version="0.9.0")
+
+class CallAgentRequest(BaseModel):
+    message: str
+    context_id: str | None = None
+
+    @field_validator("message")
+    @classmethod
+    def _message_present(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("message must not be empty")
+        return v
+
+app = FastAPI(title="Beacon", version="0.10.0")
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:
@@ -110,7 +122,7 @@ def _error_handler(status_code: int):
 # them. RuntimeError is a driver's own "couldn't talk to the host" signal
 # (e.g. list_plugins on an unreachable agent) — mapped to a real detail
 # message instead of falling through to a bare, undetailed 500.
-for _exc, _status in ((store.NotFound, 404), (store.InvalidId, 400), (ValueError, 400), (RuntimeError, 502)):
+for _exc, _status in ((store.NotFound, 404), (store.InvalidId, 400), (ValueError, 400), (RuntimeError, 502), (bus.Unreachable, 502)):
     app.add_exception_handler(_exc, _error_handler(_status))
 
 
@@ -181,6 +193,42 @@ def delete_host(id_: str) -> dict:
 @app.get("/api/agents")
 def list_agents() -> list[Agent]:
     return store.list_agents()
+
+
+@app.get("/api/agents/registry")
+def agent_registry() -> list[dict]:
+    """Who can be called, and as what. Endpoints and key-env names stay off
+    this list — a caller names an agent, it does not learn how to reach it.
+    """
+    return [
+        {
+            "id": agent.id,
+            "callable": agent.reach is not None,
+            "capabilities": list(agent.reach.capabilities) if agent.reach else [],
+        }
+        for agent in store.list_agents()
+    ]
+
+
+@app.post("/api/agents/{id_}/call")
+def call_agent(id_: str, body: CallAgentRequest) -> dict:
+    """One agent calls another by name. Auth is the same session or MCP
+    bearer as every other /api route; the hop itself is A2A SendMessage.
+    """
+    return {"agent": id_, **bus.call(store.get_agent(id_), body.message, body.context_id)}
+
+
+@app.get("/mesh/{id_}")
+def mesh_config(id_: str, authorization: str | None = Header(None)) -> dict:
+    """An agent's own A2A mesh config, pulled by its host's sync job. Outside
+    /api/ on purpose: the only credential is that agent's derived pull token —
+    not a session, not the MCP bearer — because the body holds tokens no one
+    else may read. Checked before the agent is looked up, so a wrong token
+    can't probe which agents exist.
+    """
+    if not mesh.may_pull(id_, authorization):
+        raise HTTPException(401, "not authorized for this agent's mesh config")
+    return mesh.config(id_)
 
 
 @app.get("/api/agents/{id_}")

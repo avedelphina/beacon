@@ -8,6 +8,44 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-10-23
+
+### Added
+
+- **Agent bus over A2A.** Beacon (and any MCP client, such as Claude) can
+  call a registered agent by name. `POST /api/agents/{id}/call` with
+  `{"message", "context_id?"}` sends one A2A v1.0 `SendMessage` to the
+  agent's `reach.endpoint`. It returns `task_id`, `context_id`, `state`, and
+  `reply`. Pass `context_id` back to continue a thread.
+  `GET /api/agents/registry` lists who is callable and which capabilities
+  they declare, without exposing endpoints or token names. MCP tools:
+  `agent_registry` and `call_agent`. An agent with no `reach` block stays
+  inventory-only. Auth on the route is the existing session or MCP bearer.
+  See README, "Agent bus".
+- **A2A mesh.** Agents with the same `reach.network` label call each other
+  directly; Beacon only hands out peer lists, so it is never on the message
+  path. Tokens are pairwise and derived from one secret,
+  `BEACON_A2A_SECRET`. Each agent's host pulls its own config from
+  `GET /mesh/{agent}`, which accepts only that agent's derived pull token,
+  and applies it with a stdlib `sync.py`. If Beacon is down, agents keep
+  their last config. Only inbound changes restart the gateway (gracefully).
+  `python -m backend.mesh install <agent-id>` prints the one-time host
+  bootstrap; scheduling the sync is left to the operator. `reach.bind`
+  declares where an agent listens when that differs from its endpoint
+  (Docker, NAT). `sync.json` takes an optional `restart` command, so a
+  Docker agent's container is restarted from the host instead of its
+  gateway: an s6-supervised image never finishes `hermes gateway restart`.
+  `python -m backend.mesh install <agent> --docker <container>` generates
+  that host-side setup: run on the container's host as root.
+  New `.env` keys:
+  `BEACON_MESH_BIND` and `BEACON_PUBLIC_URL`. See README, "A2A mesh".
+
+### Fixed
+
+- `docker-compose.yml` now loads `.env` into the beacon container
+  (`env_file`, optional). Before, per-agent token variables named in fleet
+  YAML never reached the container, so every bus call would have failed.
+
 ## [0.9.0] — 2026-09-25
 
 ### Added

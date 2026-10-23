@@ -32,10 +32,20 @@ services:
       # BEACON_BIND_HOST to expose it beyond this machine, and set up
       # ZITADEL_ISSUER/ZITADEL_CLIENT_ID first if you do.
       - "${BEACON_BIND_HOST:-127.0.0.1}:8642:8642"
+      # Agents' hosts pull their A2A mesh config (GET /mesh/*) here. Set
+      # BEACON_MESH_BIND to the address:port they reach Beacon on, e.g. a
+      # tailnet IP; the default only duplicates loopback. It is the same app,
+      # so OIDC must be configured before this leaves loopback.
+      - "${BEACON_MESH_BIND:-127.0.0.1:18642}:8642"
     volumes:
       - ./fleet:/app/fleet
       - ./ssh:/etc/beacon:ro
       - ./tbot/data:/tbot-data:ro
+    # Agent-bus tokens are named per agent (reach.token_env), so they can't
+    # be listed below; the whole .env goes in instead.
+    env_file:
+      - path: .env
+        required: false
     environment:
       - ZITADEL_ISSUER=${ZITADEL_ISSUER:-}
       - ZITADEL_CLIENT_ID=${ZITADEL_CLIENT_ID:-}

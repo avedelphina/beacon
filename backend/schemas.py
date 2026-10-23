@@ -1,5 +1,6 @@
 import re
 import zoneinfo
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -61,6 +62,70 @@ class Host(BaseModel):
         return _reject_ssh_option_injection(v, "address")
 
 
+# How this agent is reached: its A2A v1.0 JSON-RPC endpoint. A2A rather
+# than anything Beacon-specific, so a non-Hermes agent joins by speaking the
+# standard, not by getting a new driver. `endpoint` is the URL JSON-RPC is
+# POSTed to, as every caller sees it — Hermes serves its own profile at `/`
+# and other local profiles under a path, so a path is allowed. `network` is
+# a label: agents sharing one call each other directly (backend/mesh.py);
+# without one, only Beacon calls the agent. `bind` ("host:port") is where the
+# agent itself listens, when that differs from `endpoint` — Docker or NAT,
+# e.g. 0.0.0.0:9900 inside a container published on tailnet-ip:9901.
+# Tokens are derived, never stored.
+class AgentReach(BaseModel):
+    transport: str = "a2a"
+    endpoint: str
+    network: str | None = None
+    bind: str | None = None
+    capabilities: list[str] = Field(default_factory=list)
+
+    @field_validator("bind")
+    @classmethod
+    def _host_port(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        parts = urlsplit(f"//{v}")
+        if not parts.hostname or parts.port is None or parts.path or any(c.isspace() for c in v):
+            raise ValueError(f"bind {v!r} must be host:port (e.g. 0.0.0.0:9900)")
+        return v
+
+    @field_validator("transport")
+    @classmethod
+    def _known_transport(cls, v: str) -> str:
+        if v != "a2a":
+            raise ValueError(f"unsupported transport {v!r}; supported: a2a")
+        return v
+
+    @field_validator("endpoint")
+    @classmethod
+    def _http_url(cls, v: str) -> str:
+        parts = urlsplit(v)
+        parts.port  # raises ValueError on a non-numeric port
+        if parts.scheme not in ("http", "https") or not parts.hostname or parts.query or parts.fragment or any(
+            c.isspace() for c in v
+        ):
+            raise ValueError(
+                f"endpoint {v!r} must be an http(s) URL with no query or fragment "
+                "(e.g. http://100.64.0.1:9900)"
+            )
+        return v
+
+    @field_validator("network")
+    @classmethod
+    def _network_label(cls, v: str | None) -> str | None:
+        if v is not None and not ID_RE.fullmatch(v):
+            raise ValueError(f"network {v!r} must match {ID_RE.pattern}")
+        return v
+
+    @field_validator("capabilities")
+    @classmethod
+    def _capability_names(cls, v: list[str]) -> list[str]:
+        for name in v:
+            if not ID_RE.fullmatch(name):
+                raise ValueError(f"capability {name!r} must match {ID_RE.pattern}")
+        return v
+
+
 class Agent(BaseModel):
     id: str
     type: str
@@ -74,6 +139,9 @@ class Agent(BaseModel):
     desired: dict = Field(default_factory=dict)
     owner: str | None = None
     notes: str | None = None
+    # Absent means this agent is inventory-only: Beacon can still deploy and
+    # observe it, but call_agent refuses it until a reach block exists.
+    reach: AgentReach | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +158,7 @@ CRON_ACTIONS = ("restart", "push_config", "status")
 # more terms joined by commas (mirrors scheduler._field_matches, which
 # recurses on comma-split parts the same way). fullmatch, not match — the
 # previous regex's `|` alternation split into three independently-anchored
-# branches, so `.match()` accepted "*foo" (via the bare `^\*` branch, which
+# branches, so `.match()` accepted "*foo" (via the bare `^*` branch, which
 # never checked what followed) and rejected "0,30" (no branch handled a
 # plain comma list).
 _CRON_TERM_RE = r"\*(?:/[1-9]\d*)?|\d+(?:-\d+)?"
