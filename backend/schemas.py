@@ -90,7 +90,7 @@ CRON_ACTIONS = ("restart", "push_config", "status")
 # more terms joined by commas (mirrors scheduler._field_matches, which
 # recurses on comma-split parts the same way). fullmatch, not match — the
 # previous regex's `|` alternation split into three independently-anchored
-# branches, so `.match()` accepted "*foo" (via the bare `^\*` branch, which
+# branches, so `.match()` accepted "*foo" (via the bare `^*` branch, which
 # never checked what followed) and rejected "0,30" (no branch handled a
 # plain comma list).
 _CRON_TERM_RE = r"\*(?:/[1-9]\d*)?|\d+(?:-\d+)?"
