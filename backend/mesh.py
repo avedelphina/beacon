@@ -2,17 +2,20 @@
 
 Tailscale-style: agents that declare the same `reach.network` call each
 other directly, and Beacon only acts as the coordination server that hands
-out peer lists. Nothing here sits on the message path, so a Beacon outage
-leaves direct pairs talking. An agent without a network is reachable only
-through Beacon.
+out peer lists. Each agent's host pulls its own config (GET /mesh/{agent})
+every few minutes and applies it, so Beacon is never on the message path:
+a Beacon outage leaves every agent on its last config, still talking. An
+agent without a network is reachable only through Beacon.
 
 Tokens are pairwise and derived — HMAC(BEACON_A2A_SECRET, "caller>target")
 — so Beacon keeps one secret instead of N² stored tokens. A host that leaks
-its tokens exposes only calls into itself, never another pair. Rotating the
-secret rotates every token at once; re-render and re-apply every agent.
+its tokens exposes only calls into itself, never another pair. An agent
+pulls its config with token("<agent>", "beacon"), which Beacon recomputes
+rather than stores. Rotating the secret rotates every token at once and
+cuts every agent off from pulling; re-run `install` for each agent.
 
-CLI (runs where Beacon's env is; the output contains tokens):
-    python -m backend.mesh render <agent-id>   # host-side script for that agent
+CLI (runs where Beacon's env is; the output contains a token):
+    python -m backend.mesh install <agent-id>   # one-time host bootstrap script
 """
 
 import argparse
@@ -20,12 +23,15 @@ import hashlib
 import hmac
 import os
 import sys
+from urllib.parse import urlsplit
 
 from . import store
 from .drivers import get_driver
 from .schemas import Agent
 
 SECRET_ENV = "BEACON_A2A_SECRET"
+# The URL agents' hosts reach Beacon on for pulls, e.g. http://100.68.84.189:8642.
+PUBLIC_URL_ENV = "BEACON_PUBLIC_URL"
 BEACON_PEER = "beacon"
 
 
@@ -41,6 +47,12 @@ def token(caller: str, target: str) -> str:
     return hmac.new(secret.encode(), f"{caller}>{target}".encode(), hashlib.sha256).hexdigest()
 
 
+def may_pull(agent_id: str, authorization: str | None) -> bool:
+    """True only for the agent's own pull token — the config holds secrets."""
+    expected = f"Bearer {token(agent_id, BEACON_PEER)}"
+    return isinstance(authorization, str) and hmac.compare_digest(authorization, expected)
+
+
 def peers(agent: Agent, fleet: list[Agent]) -> list[Agent]:
     """Agents `agent` calls directly: same declared network, reachable, not itself."""
     network = agent.reach.network if agent.reach else None
@@ -49,23 +61,47 @@ def peers(agent: Agent, fleet: list[Agent]) -> list[Agent]:
     return [a for a in fleet if a.id != agent.id and a.reach is not None and a.reach.network == network]
 
 
-def render(agent_id: str) -> str:
+def config(agent_id: str) -> dict:
+    """Everything `agent_id` needs to sit in the mesh, agent-type neutral:
+    where to listen, who may call in with which token, and whom to call.
+    """
     agent = store.get_agent(agent_id)
     if agent.reach is None:
-        raise ValueError(f"agent {agent_id!r} has no reach block; nothing to render")
+        raise ValueError(f"agent {agent_id!r} has no reach block; it is not in the mesh")
     direct = peers(agent, store.list_agents())
-    inbound = {name: token(name, agent.id) for name in (BEACON_PEER, *(p.id for p in direct))}
-    outbound = [(peer, token(agent.id, peer.id)) for peer in direct]
-    return get_driver(agent.type).a2a_script(agent, inbound, outbound)
+    endpoint = urlsplit(agent.reach.endpoint)
+    loopback = endpoint.hostname in ("127.0.0.1", "localhost", "::1")
+    return {
+        "agent": agent.id,
+        "listen": {
+            "port": endpoint.port or (443 if endpoint.scheme == "https" else 80),
+            "host": None if loopback else endpoint.hostname,
+        },
+        "inbound": {name: token(name, agent.id) for name in (BEACON_PEER, *(p.id for p in direct))},
+        "outbound": [
+            {"name": p.id, "url": p.reach.endpoint, "token": token(agent.id, p.id), "capabilities": p.reach.capabilities}
+            for p in direct
+        ],
+    }
+
+
+def install_script(agent_id: str) -> str:
+    agent = store.get_agent(agent_id)
+    if agent.reach is None:
+        raise ValueError(f"agent {agent_id!r} has no reach block; nothing to install")
+    public_url = os.environ.get(PUBLIC_URL_ENV, "").rstrip("/")
+    if not public_url:
+        raise ValueError(f"{PUBLIC_URL_ENV} is not set; agents need it to reach Beacon")
+    return get_driver(agent.type).mesh_install_script(agent, public_url, token(agent.id, BEACON_PEER))
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m backend.mesh", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("render", help="print the host-side A2A script for one agent").add_argument("agent_id")
+    sub.add_parser("install", help="print the one-time host bootstrap script for one agent").add_argument("agent_id")
     args = parser.parse_args(argv)
     try:
-        sys.stdout.write(render(args.agent_id))
+        sys.stdout.write(install_script(args.agent_id))
     except (store.NotFound, ValueError, MissingSecret) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

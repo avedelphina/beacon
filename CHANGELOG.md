@@ -23,10 +23,13 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 - **A2A mesh.** Agents with the same `reach.network` label call each other
   directly; Beacon only hands out peer lists, so it is never on the message
   path. Tokens are pairwise and derived from one secret,
-  `BEACON_A2A_SECRET`. `python -m backend.mesh render <agent-id>` prints a
-  host script of `hermes config set` lines: `A2A_*` keys go to the profile
-  `.env`, and `a2a_agents` goes to `config.yaml` with `${env:...}` token
-  references only. See README, "A2A mesh".
+  `BEACON_A2A_SECRET`. Each agent's host pulls its own config from
+  `GET /mesh/{agent}`, which accepts only that agent's derived pull token,
+  and applies it with a stdlib `sync.py`. If Beacon is down, agents keep
+  their last config. Only inbound changes restart the gateway (gracefully).
+  `python -m backend.mesh install <agent-id>` prints the one-time host
+  bootstrap; scheduling the sync is left to the operator. New `.env` keys:
+  `BEACON_MESH_BIND` and `BEACON_PUBLIC_URL`. See README, "A2A mesh".
 
 ### Fixed
 

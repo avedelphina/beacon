@@ -46,12 +46,14 @@ backend/
   templates.py    config template load/validate/deep-merge under `desired`
   tiers.py        capability -> T0–T5 autonomy tier registry
   bus.py          agent bus: one A2A v1.0 SendMessage to an agent's reach.endpoint
-  mesh.py         A2A mesh: same-network peers, derived pairwise tokens, render CLI
+  mesh.py         A2A mesh: same-network peers, derived tokens, /mesh pull config,
+                  `install` CLI (host bootstrap)
   ssh.py          the one place that shells out to `ssh` (run + stream_script)
   drivers/
     __init__.py   DRIVERS registry + for_agent() resolution
     hermes.py     the only driver so far: status/logs/deploy/reconcile/
                   config_diff/push_config/decommission/plugins
+    hermes_mesh_sync.py  stdlib-only host-side sync, shipped by `mesh install`
     hermes_config_schema.yaml  checked-in snapshot of Hermes's DEFAULT_CONFIG,
                   used to validate config paths before push
 fleet/            YAML inventory (see Tech stack)
@@ -157,7 +159,10 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
   `tbot/storage/`. Fleet YAML stores `.env` key *names* only (`env_keys`) —
   secret values never leave the host. A2A tokens are derived from one
   Beacon env var, `BEACON_A2A_SECRET`, never stored in YAML or returned by
-  the API. `mesh render` output contains tokens: pipe it, don't keep it.
+  the API — except `GET /mesh/{agent}`, which returns only that agent's
+  config and accepts only its own derived pull token (no session, no MCP
+  bearer). `mesh install` output contains a token: pipe it, don't keep it.
+  The install script never schedules itself; that stays an operator step.
 - **SSH host-key checking is strict.** Static-key hosts require a reviewed
   known-hosts file (`BEACON_KNOWN_HOSTS`); Beacon fails closed and never
   trusts a new key automatically. `config_file` hosts defer to that file's

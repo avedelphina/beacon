@@ -5,7 +5,6 @@ import shlex
 from collections.abc import Iterator
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import yaml
 
@@ -696,59 +695,55 @@ echo "[beacon] done"
     yield from ssh.stream_script(host, _wrap_for_user(agent, host, script), timeout=300)
 
 
-def a2a_script(agent: Agent, inbound: dict[str, str], outbound: list[tuple[Agent, str]]) -> str:
-    """Host-side script joining `agent` to the A2A mesh (see backend/mesh.py).
+MESH_SYNC = Path(__file__).with_name("hermes_mesh_sync.py")
 
-    A2A_* settings, tokens included, are written straight into the profile's
-    .env from a heredoc: `hermes config set` routes UPPER_SNAKE keys to .env
-    only from v0.21.5 (older versions write them into config.yaml), and a
-    heredoc keeps tokens out of argv and `ps`. Every A2A_* line Beacon owns is
-    replaced, so tokens for peers removed from the fleet drop out too.
-    `a2a_agents` goes through `hermes config set --force` (replaced whole) and
-    holds only `${env:...}` refs, so config.yaml stays secret-free.
-    `inbound` maps caller name -> token it presents; `outbound` pairs each
-    peer with the token this agent presents to it. Hermes reads A2A settings
-    at startup, so restart the gateway after applying.
+
+def mesh_install_script(agent: Agent, beacon_url: str, pull_token: str) -> str:
+    """One-time host bootstrap for the A2A mesh pull (see backend/mesh.py).
+
+    Drops `beacon-mesh/` next to the profile's config.yaml — the agent's
+    pull token (0600), hermes_mesh_sync.py, and sync.json — and runs one
+    sync. The token arrives in a heredoc, so it never reaches argv or `ps`.
+    Absolute python3/hermes paths go into sync.json because a scheduler's
+    PATH usually has neither. It deliberately does not schedule itself:
+    adding the printed cron line (or a systemd timer / launchd agent that
+    runs the same command) is the operator's step. Re-running replaces
+    everything but the schedule.
     """
     _validate_agent(agent)
-    endpoint = urlsplit(agent.reach.endpoint)
-    settings = [
-        ("A2A_PORT", str(endpoint.port or (443 if endpoint.scheme == "https" else 80))),
-        ("A2A_AGENT_NAME", agent.id),
-        ("A2A_PEER_TOKENS", ",".join(f"{name}:{tok}" for name, tok in inbound.items())),
-        ("A2A_TRUSTED_PEERS", ",".join(inbound)),
-    ]
-    if endpoint.hostname not in ("127.0.0.1", "localhost", "::1"):
-        # Bind the address callers dial. In Docker, use 0.0.0.0 instead and
-        # publish the port on this address only.
-        settings.append(("A2A_HOST", endpoint.hostname))
-    peers = {}
-    for peer, tok in outbound:
-        env = "A2A_TOKEN_" + peer.id.upper().replace("-", "_")
-        settings.append((env, tok))
-        peers[peer.id] = {
-            "url": peer.reach.endpoint,
-            "auth": {"type": "bearer", "token": f"${{env:{env}}}"},
-            "capabilities": peer.reach.capabilities,
-        }
-    prefix = _cmd_prefix(agent)
-    env_lines = "\n".join(f"{key}={value}" for key, value in settings)
-    return f"""\
-# Beacon A2A mesh config for {agent.id}. Contains tokens: pipe it, don't keep it.
-{PREAMBLE}
-config_path="$({prefix} config path 2>/dev/null | tail -n 1)"
-[ -f "$config_path" ] || {{ echo "[beacon] no config.yaml found for {agent.id}" >&2; exit 1; }}
-env_file="$(dirname "$config_path")/.env"
-[ -e "$env_file" ] || install -m 600 /dev/null "$env_file"
-kept="$(grep -v -E '^A2A_(PORT|HOST|AGENT_NAME|PEER_TOKENS|TRUSTED_PEERS|TOKEN_[A-Z0-9_]+)=' "$env_file" || true)"
-{{ printf '%s\\n' "$kept"; cat <<'BEACON_A2A_ENV'
-{env_lines}
-BEACON_A2A_ENV
-}} > "$env_file"
-echo "[beacon] wrote A2A settings to $env_file"
-{prefix} config set --force a2a_agents {shlex.quote(json.dumps(peers))}
-# The outbound tools (a2a_call, ...) are off by default per platform; a peer's
-# task can't be passed on without them. Chat platforms are the operator's call.
-{prefix} tools enable a2a --platform a2a
-echo "[beacon] A2A config applied; restart the gateway: {prefix} gateway restart"
-"""
+    profile_args = ["-p", named_profile(agent)] if named_profile(agent) else []
+    sync_json = (
+        "import json, os, sys\n"
+        "state, hermes, config = sys.argv[1:4]\n"
+        f"cfg = {{'beacon': {beacon_url!r}, 'agent': {agent.id!r}, 'hermes': [hermes, *{profile_args!r}],\n"
+        "       'env_file': os.path.join(os.path.dirname(config), '.env')}\n"
+        "json.dump(cfg, open(os.path.join(state, 'sync.json'), 'w'), indent=2)"
+    )
+    return "\n".join([
+        f"# Beacon A2A mesh install for {agent.id}. Contains its pull token: pipe it, don't keep it.",
+        PREAMBLE,
+        'hermes_bin="$(command -v hermes)"',
+        # Not the operator's activated venv: a scheduled sync must outlive it.
+        'py="$(PATH="$(printf %s "$PATH" | tr : "\\n" | grep -vxF "${VIRTUAL_ENV:-/nonexistent}/bin" | paste -sd: -)" command -v python3)"',
+        f'config_path="$({_cmd_prefix(agent)} config path 2>/dev/null | tail -n 1)"',
+        '[ -f "$config_path" ] || { echo "[beacon] no config.yaml found" >&2; exit 1; }',
+        'dir="$(dirname "$config_path")/beacon-mesh"',
+        'install -d -m 700 "$dir"',
+        "(umask 077; cat > \"$dir/token\" <<'BEACON_TOKEN'",
+        pull_token,
+        "BEACON_TOKEN",
+        ")",
+        "cat > \"$dir/sync.py\" <<'BEACON_SYNC_PY'",
+        MESH_SYNC.read_text().rstrip("\n"),
+        "BEACON_SYNC_PY",
+        "\"$py\" - \"$dir\" \"$hermes_bin\" \"$config_path\" <<'BEACON_SYNC_JSON'",
+        sync_json,
+        "BEACON_SYNC_JSON",
+        # The outbound tools (a2a_call, ...) are off per platform by default; a
+        # peer's task can't be passed on without them. Chat platforms are the
+        # operator's call.
+        f"{_cmd_prefix(agent)} tools enable a2a --platform a2a",
+        '"$py" "$dir/sync.py" "$dir" | tee -a "$dir/sync.log"',
+        f'echo "[beacon] mesh sync for {agent.id} installed and run once. To keep it in sync, schedule:"',
+        'echo "  */5 * * * * \\"$py\\" \\"$dir/sync.py\\" \\"$dir\\" >> \\"$dir/sync.log\\" 2>&1"',
+    ]) + "\n"

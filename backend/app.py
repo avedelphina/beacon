@@ -3,13 +3,13 @@ import itertools
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, bus, cron_store, scheduler, store, templates
+from . import auth, bus, cron_store, mesh, scheduler, store, templates
 from .drivers import for_agent
 from .schemas import Agent, CronJob, Host
 from .tiers import TIER_LABELS, CAPABILITY_TIERS, requires_confirm, tier_for
@@ -216,6 +216,19 @@ def call_agent(id_: str, body: CallAgentRequest) -> dict:
     bearer as every other /api route; the hop itself is A2A SendMessage.
     """
     return {"agent": id_, **bus.call(store.get_agent(id_), body.message, body.context_id)}
+
+
+@app.get("/mesh/{id_}")
+def mesh_config(id_: str, authorization: str | None = Header(None)) -> dict:
+    """An agent's own A2A mesh config, pulled by its host's sync job. Outside
+    /api/ on purpose: the only credential is that agent's derived pull token —
+    not a session, not the MCP bearer — because the body holds tokens no one
+    else may read. Checked before the agent is looked up, so a wrong token
+    can't probe which agents exist.
+    """
+    if not mesh.may_pull(id_, authorization):
+        raise HTTPException(401, "not authorized for this agent's mesh config")
+    return mesh.config(id_)
 
 
 @app.get("/api/agents/{id_}")

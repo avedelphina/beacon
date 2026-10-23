@@ -195,8 +195,9 @@ Not in this slice:
 
 Agents call each other directly, Tailscale-style. Beacon is only the
 coordination server: it decides who peers with whom and hands out tokens.
-It is never on the message path, so if Beacon is down, direct pairs keep
-talking.
+Each agent's host pulls its own config from Beacon every few minutes and
+applies it. Beacon is never on the message path. If Beacon is down, every
+agent keeps its last config and keeps talking.
 
 - **Peers:** two agents peer when their `reach.network` labels match. The
   label is free text, for example `tailnet` or `office-lan`. Beacon does
@@ -204,37 +205,74 @@ talking.
   without a network is reachable only through Beacon.
 - **Tokens:** pairwise and derived, `HMAC(BEACON_A2A_SECRET, "caller>target")`.
   Beacon keeps one secret, not N² tokens. A host that leaks its tokens
-  exposes only calls into itself. To rotate, change the secret, then render
-  and apply every agent again.
+  exposes only calls into itself. An agent pulls with its own derived token,
+  `token(<agent>, "beacon")`. To rotate everything, change the secret, then
+  run `install` for every agent again (the old pull tokens stop working).
 - **Transport security:** use a network that encrypts (WireGuard, for
   example), or put a TLS terminator in front of each agent and use an
   `https://` endpoint.
 
-`python -m backend.mesh render <agent-id>` prints a script for the agent's
-host. Run it where Beacon's environment is. The output contains tokens, so
-pipe it to the host and do not save it:
+**The pull endpoint.** `GET /mesh/{agent-id}` returns that agent's config:
 
-```bash
-python -m backend.mesh render anais | ssh root@anais 'bash -s'
+```json
+{"agent": "anais",
+ "listen": {"port": 9900, "host": "100.107.209.203"},
+ "inbound": {"beacon": "<token>", "anikke": "<token>"},
+ "outbound": [{"name": "anikke", "url": "http://100.68.84.189:9900",
+               "token": "<token>", "capabilities": []}]}
 ```
 
-The script runs Hermes's own `hermes config set` and sets:
+The only credential it accepts is that agent's own pull token. A browser
+session or the MCP bearer does not work, because the response contains
+tokens. The format is not specific to Hermes; another A2A agent type needs
+only its own sync. Agents' hosts must reach Beacon for this, so set these in
+`.env`:
 
-- In the profile `.env`: `A2A_PORT`, `A2A_HOST`, `A2A_AGENT_NAME`,
-  `A2A_PEER_TOKENS`, `A2A_TRUSTED_PEERS`, and one `A2A_TOKEN_<PEER>` per
-  peer. `A2A_HOST` is the endpoint's address; it is left out for loopback.
-- In `config.yaml`: the whole `a2a_agents` peer list. Tokens appear there
-  only as `${env:A2A_TOKEN_<PEER>}` references, so `config.yaml` holds no
-  secrets.
+```bash
+BEACON_MESH_BIND=100.68.84.189:8642          # extra port binding for agents
+BEACON_PUBLIC_URL=http://100.68.84.189:8642  # the URL their sync calls
+```
 
-The script also turns on the `a2a` toolset for the `a2a` platform. Without
-it, an agent cannot pass a peer's task on to another peer. To let agents
-reach peers from a chat platform, enable the toolset there yourself, for
-example `hermes -p <profile> tools enable a2a --platform deltachat-platform`.
+The UI and MCP keep their own bindings (`BEACON_BIND_HOST`). The extra
+binding serves the whole app, so configure OIDC before you set it.
 
-Restart the gateway afterwards; Hermes reads its A2A settings at startup.
-In Docker, set `A2A_HOST=0.0.0.0` instead, and publish the port on the
-endpoint address only. Agents then use Hermes's `a2a_call`,
+**Joining an agent (one time per agent).** Run this where Beacon's
+environment is. The output contains the agent's pull token, so pipe it to
+the host and do not save it:
+
+```bash
+python -m backend.mesh install anais | ssh root@anais 'bash -s'
+```
+
+The script does these things on the host:
+
+1. It puts `beacon-mesh/` next to the profile's `config.yaml`: the pull
+   token (mode 0600), `sync.py`, and `sync.json`.
+2. It turns on the `a2a` toolset for the `a2a` platform. Without it, an
+   agent cannot pass a peer's task on to another peer.
+3. It runs one sync.
+4. It prints a cron line. **Add the schedule yourself:** the script does
+   not install a cron job, a systemd timer, or a launchd agent on its own.
+
+**Each sync** (`beacon-mesh/sync.py`, stdlib only):
+
+- It writes `A2A_PORT`, `A2A_HOST`, `A2A_AGENT_NAME`, `A2A_PEER_TOKENS`,
+  `A2A_TRUSTED_PEERS`, and one `A2A_TOKEN_<PEER>` per peer into the profile
+  `.env`. Tokens go into `.env` directly, never into argv.
+- It replaces `a2a_agents` in `config.yaml` with `hermes config set --force`.
+  Tokens appear there only as `${env:A2A_TOKEN_<PEER>}` references.
+- Outbound changes take effect on the agent's next turn, with no restart.
+  Inbound changes (who may call in) need a restart, because Hermes reads
+  them at startup. For those, the sync starts a graceful
+  `hermes gateway restart`, which waits for running turns.
+- If Beacon cannot be reached, nothing changes. A lock file stops two
+  runs from overlapping.
+
+To let agents reach peers from a chat platform, turn the toolset on there
+yourself, for example
+`hermes -p <profile> tools enable a2a --platform deltachat-platform`.
+In Docker, set `A2A_HOST=0.0.0.0` in the container and publish the port on
+the endpoint address only. Agents then use Hermes's `a2a_call`,
 `a2a_orchestrate`, and `a2a_history` tools against their peers by name.
 
 ### `fleet/templates/<name>.yaml`
