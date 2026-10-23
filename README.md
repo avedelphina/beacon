@@ -274,8 +274,13 @@ The script does these things on the host:
   Tokens appear there only as `${env:A2A_TOKEN_<PEER>}` references.
 - Outbound changes take effect on the agent's next turn, with no restart.
   Inbound changes (who may call in) need a restart, because Hermes reads
-  them at startup. For those, the sync starts a graceful
-  `hermes gateway restart`, which waits for running turns.
+  them at startup. For those, the sync asks for a graceful
+  `hermes gateway restart`. The request is kept until it succeeds and is
+  retried on every run. Hermes 0.21 waits for running turns before
+  restarting. Hermes 0.22 instead refuses while sessions are live, and
+  offers only `--yes`, which would interrupt them. The retry gets past
+  that: the restart happens at the first idle moment, and no session is
+  cut off.
 - If Beacon cannot be reached, nothing changes. A lock file stops two
   runs from overlapping.
 

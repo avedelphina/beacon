@@ -27,9 +27,11 @@ import fcntl
 import hashlib
 import json
 import os
+import shlex
 import socket
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -44,6 +46,9 @@ MAX_LOG_BYTES = 1_000_000
 SYNC_VERSION = "2"
 # Hermes answers within its A2A_REPLY_TIMEOUT (300s); wait a little longer.
 LOCAL_REPLY_TIMEOUT = 330
+# A restart still marked as running after this long is assumed dead
+# (longer than Hermes 0.21's 30-minute graceful drain cap).
+RESTART_STALE_SECONDS = 40 * 60
 
 
 def log(message: str) -> None:
@@ -169,6 +174,41 @@ def write_env(path: Path, kept: list[str], settings: dict[str, str]) -> None:
 
 
 def restart(cfg: dict, state: Path) -> None:
+    """Ask for a restart, and keep asking until one succeeds.
+
+    Hermes 0.21 waits for running turns before restarting. 0.22 refuses
+    while sessions are live (turns, cron jobs) and only offers --yes, which
+    interrupts them. So a restart is recorded as pending and retried on
+    every run until it goes through — on 0.22 that is the first idle moment,
+    and no one's session is cut off.
+    """
+    # Settle an earlier attempt first, or its success would clear this request.
+    settle_restart(state)
+    (state / "restart.pending").touch()
+    run_pending_restart(cfg, state)
+
+
+def settle_restart(state: Path) -> None:
+    """Read the exit code an earlier detached restart left behind."""
+    result = state / "restart.result"
+    if not result.exists():
+        return
+    code = result.read_text().strip()
+    result.unlink()
+    if code == "0":
+        (state / "restart.pending").unlink(missing_ok=True)
+        log("restart done")
+    else:
+        log(f"restart refused or failed (exit {code}); retrying on the next run")
+
+
+def run_pending_restart(cfg: dict, state: Path) -> None:
+    pending, result, started = state / "restart.pending", state / "restart.result", state / "restart.started"
+    settle_restart(state)
+    if not pending.exists():
+        return
+    if started.exists() and time.time() - started.stat().st_mtime < RESTART_STALE_SECONDS:
+        return  # one is still running: a graceful drain can take a while
     # sync.json "restart" overrides the command. Docker agents need it: under
     # an s6-supervised image, `hermes gateway restart` stops the platforms but
     # the process never exits, leaving the agent half down. There the sync
@@ -179,11 +219,17 @@ def restart(cfg: dict, state: Path) -> None:
     # `systemctl --user` (Linux) needs this; cron doesn't set it.
     if "XDG_RUNTIME_DIR" not in env and os.path.isdir(runtime_dir):
         env["XDG_RUNTIME_DIR"] = runtime_dir
-    # Detached: the restart waits for running turns, which can take many minutes.
+    started.touch()
+    # Detached, since a graceful drain can take many minutes; the wrapper
+    # leaves the exit code for the next run to read.
+    # Clear "started" before publishing the result, so a reader that sees the
+    # result never also sees the attempt as still running.
+    script = (f"{shlex.join(command)}; code=$?; rm -f {shlex.quote(str(started))}; "
+              f"echo $code > {shlex.quote(str(result))}")
     with open(state / "restart.log", "a") as out:
-        subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
+        subprocess.Popen(["sh", "-c", script], env=env, stdin=subprocess.DEVNULL,
                          stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
-    log(f"who may call in, or the board server, changed; restart requested: {' '.join(command)}")
+    log(f"restart requested: {' '.join(command)}")
 
 
 def sync(state: Path) -> int:
@@ -246,6 +292,8 @@ def sync(state: Path) -> int:
         restarting = any(settings.get(k) != current.get(k) for k in INBOUND_KEYS) or (board_changed and (board or previous))
         if restarting:
             restart(cfg, state)
+        else:
+            run_pending_restart(cfg, state)  # an earlier one may have been refused
 
         for item in mesh.get("inbox") or []:
             if restarting:  # the gateway is draining; hand it back for the next run

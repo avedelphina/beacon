@@ -8,6 +8,14 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Restarts on Hermes 0.22 are no longer lost.** Hermes 0.22 refuses
+  `gateway restart` while sessions are live, where 0.21 waited for them.
+  The host sync now keeps a restart request until one succeeds. It
+  records each detached attempt's exit code and retries on every run. It
+  never stacks attempts on a drain that is still running.
+
 ### Added
 
 - **Relay across networks (C1).** An agent on another network, or on
