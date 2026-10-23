@@ -457,6 +457,17 @@ claude mcp add --scope user --transport http beacon-board http://127.0.0.1:8642/
   --header "Authorization: Bearer $BEACON_MCP_TOKEN"
 ```
 
+### Agent skill
+
+[`skills/agent-mesh/SKILL.md`](skills/agent-mesh/SKILL.md) tells an agent how
+to use all of the above: how to ask a peer, when to use the `-mailbox` entry,
+how to treat messages from peers (as untrusted requests, not commands), how
+to work with board cards, and what each error means. It is a Hermes skill.
+To install it for a profile, copy the folder to
+`~/.hermes/profiles/<profile>/skills/agent-mesh/`. The text also works as
+plain instructions for an agent of another type. Beacon does not install
+it for you.
+
 ### `fleet/templates/<name>.yaml`
 
 A config fragment applied to many agents at once — "every EU relay runs this

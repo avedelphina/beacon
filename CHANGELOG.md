@@ -8,6 +8,12 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+### Added
+
+- **Agent skill** (`skills/agent-mesh/SKILL.md`): how an agent should use
+  the peer tools, the mailbox, and the board, how to treat peer messages,
+  and how to read the errors.
+
 ## [0.14.0] — 2026-10-23
 
 ### Fixed
