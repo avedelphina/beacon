@@ -70,12 +70,13 @@ def config(agent_id: str) -> dict:
         raise ValueError(f"agent {agent_id!r} has no reach block; it is not in the mesh")
     direct = peers(agent, store.list_agents())
     endpoint = urlsplit(agent.reach.endpoint)
-    loopback = endpoint.hostname in ("127.0.0.1", "localhost", "::1")
+    listen = urlsplit(f"//{agent.reach.bind}") if agent.reach.bind else endpoint
+    loopback = listen.hostname in ("127.0.0.1", "localhost", "::1")
     return {
         "agent": agent.id,
         "listen": {
-            "port": endpoint.port or (443 if endpoint.scheme == "https" else 80),
-            "host": None if loopback else endpoint.hostname,
+            "port": listen.port or (443 if listen.scheme == "https" else 80),
+            "host": None if loopback else listen.hostname,
         },
         "inbound": {name: token(name, agent.id) for name in (BEACON_PEER, *(p.id for p in direct))},
         "outbound": [

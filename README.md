@@ -109,6 +109,7 @@ reach:                       # omit entirely if this agent is inventory-only
   transport: a2a             # A2A v1.0 JSON-RPC, the only transport so far
   endpoint: http://10.20.4.11:9900   # where JSON-RPC is POSTed, as every caller sees it
   network: tailnet           # agents sharing a network call each other directly
+  bind: 0.0.0.0:9900         # optional: where the agent listens, if not the endpoint (Docker, NAT)
   capabilities: [relay]      # declared, not enforced — see Agent bus
 ```
 
@@ -271,9 +272,38 @@ The script does these things on the host:
 To let agents reach peers from a chat platform, turn the toolset on there
 yourself, for example
 `hermes -p <profile> tools enable a2a --platform deltachat-platform`.
-In Docker, set `A2A_HOST=0.0.0.0` in the container and publish the port on
-the endpoint address only. Agents then use Hermes's `a2a_call`,
-`a2a_orchestrate`, and `a2a_history` tools against their peers by name.
+Agents then use Hermes's `a2a_call`, `a2a_orchestrate`, and `a2a_history`
+tools against their peers by name.
+
+**Agents in Docker.** Callers dial the published port; the container
+listens on its own address. Declare both:
+
+```yaml
+reach:
+  endpoint: http://100.68.243.192:9901   # published, tailnet IP only
+  bind: 0.0.0.0:9900                     # inside the container
+  network: tailnet
+```
+
+1. Publish the port on the endpoint address only, for example
+   `ports: ["100.68.243.192:9901:9900"]`, and recreate the container.
+2. Run `install` inside the container:
+   `... | ssh root@host 'docker exec -i -u hermes <container> bash -s'`.
+3. Run the sync **on the host**, not in the container, and restart the
+   container rather than the gateway. In `beacon-mesh/sync.json` (on the
+   host side of the data volume), set:
+
+   ```json
+   "hermes":   ["docker", "exec", "-u", "hermes", "<container>", "hermes"],
+   "env_file": "<host path of the data volume>/.env",
+   "restart":  ["docker", "restart", "-t", "120", "<container>"]
+   ```
+
+   The default restart is `hermes gateway restart`. In an s6-supervised
+   image, that command stops the chat platforms, but the process does not
+   exit, and the agent stays half down. `docker restart -t 120` gives
+   running turns two minutes to finish.
+4. Schedule the host-side sync with the host's `python3`.
 
 ### `fleet/templates/<name>.yaml`
 

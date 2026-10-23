@@ -90,7 +90,12 @@ def write_env(path: Path, kept: list[str], settings: dict[str, str]) -> None:
     path.write_text("\n".join(kept + [f"{k}={v}" for k, v in settings.items()]) + "\n")
 
 
-def restart(hermes: list[str], state: Path) -> None:
+def restart(cfg: dict, state: Path) -> None:
+    # sync.json "restart" overrides the command. Docker agents need it: under
+    # an s6-supervised image, `hermes gateway restart` stops the platforms but
+    # the process never exits, leaving the agent half down. There the sync
+    # runs on the host and restarts the container instead.
+    command = cfg.get("restart") or cfg["hermes"] + ["gateway", "restart"]
     env = dict(os.environ)
     runtime_dir = f"/run/user/{os.getuid()}"
     # `systemctl --user` (Linux) needs this; cron doesn't set it.
@@ -98,9 +103,9 @@ def restart(hermes: list[str], state: Path) -> None:
         env["XDG_RUNTIME_DIR"] = runtime_dir
     # Detached: the restart waits for running turns, which can take many minutes.
     with open(state / "restart.log", "a") as out:
-        subprocess.Popen(hermes + ["gateway", "restart"], env=env, stdin=subprocess.DEVNULL,
+        subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
                          stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
-    log("inbound peers changed; graceful gateway restart requested")
+    log(f"inbound peers changed; restart requested: {' '.join(command)}")
 
 
 def sync(state: Path) -> int:
@@ -140,7 +145,7 @@ def sync(state: Path) -> int:
             log(f"peer list: {', '.join(peers) or '(none)'}")
 
         if any(settings.get(k) != current.get(k) for k in INBOUND_KEYS):
-            restart(cfg["hermes"], state)
+            restart(cfg, state)
     return 0
 
 

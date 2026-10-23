@@ -68,12 +68,26 @@ class Host(BaseModel):
 # POSTed to, as every caller sees it — Hermes serves its own profile at `/`
 # and other local profiles under a path, so a path is allowed. `network` is
 # a label: agents sharing one call each other directly (backend/mesh.py);
-# without one, only Beacon calls the agent. Tokens are derived, never stored.
+# without one, only Beacon calls the agent. `bind` ("host:port") is where the
+# agent itself listens, when that differs from `endpoint` — Docker or NAT,
+# e.g. 0.0.0.0:9900 inside a container published on tailnet-ip:9901.
+# Tokens are derived, never stored.
 class AgentReach(BaseModel):
     transport: str = "a2a"
     endpoint: str
     network: str | None = None
+    bind: str | None = None
     capabilities: list[str] = Field(default_factory=list)
+
+    @field_validator("bind")
+    @classmethod
+    def _host_port(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        parts = urlsplit(f"//{v}")
+        if not parts.hostname or parts.port is None or parts.path or any(c.isspace() for c in v):
+            raise ValueError(f"bind {v!r} must be host:port (e.g. 0.0.0.0:9900)")
+        return v
 
     @field_validator("transport")
     @classmethod

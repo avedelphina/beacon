@@ -28,7 +28,12 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
   and applies it with a stdlib `sync.py`. If Beacon is down, agents keep
   their last config. Only inbound changes restart the gateway (gracefully).
   `python -m backend.mesh install <agent-id>` prints the one-time host
-  bootstrap; scheduling the sync is left to the operator. New `.env` keys:
+  bootstrap; scheduling the sync is left to the operator. `reach.bind`
+  declares where an agent listens when that differs from its endpoint
+  (Docker, NAT). `sync.json` takes an optional `restart` command, so a
+  Docker agent's container is restarted from the host instead of its
+  gateway: an s6-supervised image never finishes `hermes gateway restart`.
+  New `.env` keys:
   `BEACON_MESH_BIND` and `BEACON_PUBLIC_URL`. See README, "A2A mesh".
 
 ### Fixed

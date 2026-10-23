@@ -297,3 +297,40 @@ def test_sync_script_parses_as_python38():
     import ast
 
     ast.parse(SYNC_PATH.read_text(), feature_version=(3, 8))
+
+
+def test_bind_overrides_where_the_agent_listens(fleet, secret):
+    # Docker: callers dial the published tailnet port, the container binds 0.0.0.0.
+    store.upsert_host(Host.model_validate({"id": "h1", "address": "10.0.0.1", "ssh": {"user": "u", "key": "/k"}}))
+    agent = _agent("alison", endpoint="http://100.1.1.1:9901")
+    agent.reach.bind = "0.0.0.0:9900"
+    store.upsert_agent(agent)
+    store.upsert_agent(_agent("saga", endpoint="http://100.1.1.1:9900"))
+
+    assert mesh.config("alison")["listen"] == {"port": 9900, "host": "0.0.0.0"}
+    assert mesh.config("saga")["outbound"][0]["url"] == "http://100.1.1.1:9901"
+
+
+@pytest.mark.parametrize("bind", ["0.0.0.0", "host:port", "0.0.0.0:9900/x", ":9900"])
+def test_bind_must_be_host_and_port(bind):
+    with pytest.raises(ValueError):
+        Agent.model_validate({"id": "a", "type": "hermes", "host": "h1",
+                              "reach": {"endpoint": "http://a.test:9900", "bind": bind}})
+
+
+def test_restart_command_can_be_overridden_for_docker(synced, host):
+    sync, state = synced
+    cfg = json.loads((state / "sync.json").read_text())
+    cfg["restart"] = [str(host["hermes"]), "docker-restart-stand-in"]
+    (state / "sync.json").write_text(json.dumps(cfg))
+    mesh_cfg = mesh.config("anais")
+    mesh_cfg["inbound"]["saga"] = "t"
+    _serve(host, mesh_cfg)
+
+    sync.sync(state)
+
+    deadline = time.monotonic() + 3
+    while "docker-restart-stand-in" not in _argv(host) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert "docker-restart-stand-in" in _argv(host)
+    assert "gateway restart" not in _argv(host)

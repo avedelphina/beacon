@@ -724,7 +724,7 @@ def mesh_install_script(agent: Agent, beacon_url: str, pull_token: str) -> str:
         PREAMBLE,
         'hermes_bin="$(command -v hermes)"',
         # Not the operator's activated venv: a scheduled sync must outlive it.
-        'py="$(PATH="$(printf %s "$PATH" | tr : "\\n" | grep -vxF "${VIRTUAL_ENV:-/nonexistent}/bin" | paste -sd: -)" command -v python3)"',
+        'py="$(PATH="$(printf %s "$PATH" | tr : "\\n" | grep -vxF "${VIRTUAL_ENV:-/nonexistent}/bin" | paste -sd: -)" command -v python3 || command -v python3)"',
         f'config_path="$({_cmd_prefix(agent)} config path 2>/dev/null | tail -n 1)"',
         '[ -f "$config_path" ] || { echo "[beacon] no config.yaml found" >&2; exit 1; }',
         'dir="$(dirname "$config_path")/beacon-mesh"',
