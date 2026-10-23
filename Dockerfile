@@ -16,6 +16,8 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY backend/ backend/
 COPY frontend/ frontend/
+# Skills agents pull with their mesh config (backend/mesh.py).
+COPY skills/ skills/
 
 # fleet/ is mounted at runtime — it's persistent state, not part of the image.
 

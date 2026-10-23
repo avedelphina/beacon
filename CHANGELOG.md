@@ -8,8 +8,15 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-10-23
+
 ### Added
 
+- **Skill sync.** Beacon hands each agent every `skills/<name>/SKILL.md`
+  with its mesh config, and the host sync writes the ones that differ
+  into the profile's `skills/` folder. Only plain names, up to 64 KB, with
+  a matching checksum; nothing is deleted. The image now includes
+  `skills/`; `BEACON_SKILLS_DIR` overrides it.
 - **Agent skill** (`skills/agent-mesh/SKILL.md`): how an agent should use
   the peer tools, the mailbox, and the board, how to treat peer messages,
   and how to read the errors.

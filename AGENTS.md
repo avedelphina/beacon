@@ -51,6 +51,8 @@ backend/
                   recipient's /mesh pull (no scheduler)
   opstore.py      operational store: SQLite at state/beacon.db (runtime state,
                   never fleet YAML)
+  skills/         skills Beacon hands every agent via the mesh config; the host
+                  sync installs them (mesh.skills, hermes_mesh_sync.install_skills)
   board.py        fleet board: cards + history in the opstore; assignment
                   notices go through the mailbox
   board_mcp.py    /board/mcp: board-only MCP tools for agents (own token) and

@@ -27,6 +27,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shlex
 import socket
 import subprocess
@@ -152,6 +153,41 @@ def post_report(cfg: dict, pull_token: str, message_id: int, report: dict) -> No
         # Unreported, the claim lapses on Beacon and the message is offered
         # again later — possibly a duplicate for the agent.
         log(f"could not report message {message_id} to Beacon: {exc}")
+
+
+SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+MAX_SKILL_BYTES = 64 * 1024
+
+
+def install_skills(skills: list, skills_dir: Path) -> list:
+    """Write Beacon's skills into the agent's skills folder; return the names
+    changed. Skipped: a name that isn't a plain id (it becomes a path), a
+    file over the size cap, and a checksum that doesn't match the content.
+    Nothing is ever deleted, and a skill whose text already matches is not
+    rewritten. A changed local copy is replaced: these are Beacon's skills,
+    so keep local edits under another name."""
+    changed = []
+    for skill in skills:
+        name, content = skill.get("name", ""), skill.get("content", "")
+        if (not SKILL_NAME_RE.fullmatch(name) or not isinstance(content, str)
+                or len(content.encode()) > MAX_SKILL_BYTES
+                or hashlib.sha256(content.encode()).hexdigest() != skill.get("sha256")):
+            log(f"skill {name!r} skipped: not a valid skill")
+            continue
+        target = skills_dir / name / "SKILL.md"
+        if target.exists() and target.read_text() == content:
+            continue
+        existed = skills_dir.is_dir()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+        # When run as root on a host, match the folder's owner: a Docker
+        # agent's files belong to the container user, not root.
+        if os.geteuid() == 0 and existed:
+            owner = skills_dir.stat()
+            for path in (target.parent, target):
+                os.chown(path, owner.st_uid, owner.st_gid)
+        changed.append(name)
+    return changed
 
 
 def read_env(path: Path) -> tuple[list[str], dict[str, str]]:
@@ -288,6 +324,10 @@ def sync(state: Path) -> int:
                                             json.dumps(entry)], check=True, capture_output=True)
             board_stamp.write_text(json.dumps(board))
             log(f"board MCP server {'set' if board else 'disabled'}")
+
+        # Beacon's skills go beside the profile's .env, which sits in Hermes's home.
+        for name in install_skills(mesh.get("skills") or [], Path(cfg["env_file"]).parent / "skills"):
+            log(f"skill installed or updated: {name}")
 
         restarting = any(settings.get(k) != current.get(k) for k in INBOUND_KEYS) or (board_changed and (board or previous))
         if restarting:
