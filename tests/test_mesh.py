@@ -334,3 +334,54 @@ def test_restart_command_can_be_overridden_for_docker(synced, host):
         time.sleep(0.05)
     assert "docker-restart-stand-in" in _argv(host)
     assert "gateway restart" not in _argv(host)
+
+
+def test_docker_install_runs_on_the_host_and_restarts_the_container(two_agents, tmp_path, monkeypatch):
+    """Fake `docker`: answers printenv/inspect, records every call. The script
+    must find the data volume's host path, write the state there, drive
+    Hermes through `docker exec`, and restart the container, not the gateway."""
+    data = tmp_path / "volume" / "data"
+    data.mkdir(parents=True)
+    (data / ".env").write_text("OPENAI_API_KEY=keep-me\n")
+    calls = tmp_path / "docker.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "docker"
+    fake.write_text(
+        "#!/bin/sh\n"
+        f'echo "$@" >> {calls}\n'
+        'case "$*" in\n'
+        '  *"printenv HERMES_HOME"*) echo /opt/data;;\n'
+        f'  inspect*"/opt/data"*) echo {data};;\n'
+        "esac\nexit 0\n")
+    fake.chmod(0o755)
+    beacon = tmp_path / "beacon"
+    (beacon / "mesh").mkdir(parents=True)
+    (beacon / "mesh" / "anais").write_text(json.dumps(mesh.config("anais")))
+    monkeypatch.setenv(mesh.PUBLIC_URL_ENV, f"file://{beacon}")
+    script = mesh.install_script("anais", docker="avril-hermes")
+
+    subprocess.run(["bash", "-s"], input=script, text=True, check=True, capture_output=True,
+                   env={"HOME": str(tmp_path), "PATH": f"{bin_dir}:{Path(sys.executable).parent}:/usr/bin:/bin"})
+
+    state = data / "beacon-mesh"
+    cfg = json.loads((state / "sync.json").read_text())
+    assert cfg["hermes"] == [str(fake), "exec", "-u", "hermes", "avril-hermes", "hermes", "-p", "anais"]
+    assert cfg["restart"] == [str(fake), "restart", "-t", "120", "avril-hermes"]
+    assert cfg["env_file"] == str(data / ".env")
+    assert f"A2A_TOKEN_ANIKKE={mesh.token('anais', 'anikke')}" in (data / ".env").read_text()
+    assert stat.S_IMODE((state / "token").stat().st_mode) == 0o600
+    deadline = time.monotonic() + 3
+    while "restart -t 120 avril-hermes" not in calls.read_text() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    log = calls.read_text()
+    assert "restart -t 120 avril-hermes" in log
+    assert "gateway restart" not in log
+    assert "exec -u hermes avril-hermes hermes -p anais config set --force a2a_agents" in log
+    assert mesh.token("anais", "anikke") not in log
+
+
+def test_docker_install_rejects_unsafe_container_names(two_agents, monkeypatch):
+    monkeypatch.setenv(mesh.PUBLIC_URL_ENV, "http://beacon.test")
+    with pytest.raises(ValueError, match="container"):
+        mesh.install_script("anais", docker="x; rm -rf /")

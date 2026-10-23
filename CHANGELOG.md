@@ -33,6 +33,8 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
   (Docker, NAT). `sync.json` takes an optional `restart` command, so a
   Docker agent's container is restarted from the host instead of its
   gateway: an s6-supervised image never finishes `hermes gateway restart`.
+  `python -m backend.mesh install <agent> --docker <container>` generates
+  that host-side setup: run on the container's host as root.
   New `.env` keys:
   `BEACON_MESH_BIND` and `BEACON_PUBLIC_URL`. See README, "A2A mesh".
 

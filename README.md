@@ -285,25 +285,31 @@ reach:
   network: tailnet
 ```
 
-1. Publish the port on the endpoint address only, for example
-   `ports: ["100.68.243.192:9901:9900"]`, and recreate the container.
-2. Run `install` inside the container:
-   `... | ssh root@host 'docker exec -i -u hermes <container> bash -s'`.
-3. Run the sync **on the host**, not in the container, and restart the
-   container rather than the gateway. In `beacon-mesh/sync.json` (on the
-   host side of the data volume), set:
+If the container shares a host-networked Tailscale sidecar
+(`network_mode: "service:tailscale"`), it can bind the tailnet IP itself.
+Then leave out `bind` and do not publish a port.
 
-   ```json
-   "hermes":   ["docker", "exec", "-u", "hermes", "<container>", "hermes"],
-   "env_file": "<host path of the data volume>/.env",
-   "restart":  ["docker", "restart", "-t", "120", "<container>"]
+1. Otherwise, publish the port on the endpoint address only, for example
+   `ports: ["100.68.243.192:9901:9900"]`, and recreate the container.
+2. Run the install **on the container's host, as root**:
+
+   ```bash
+   python -m backend.mesh install alison --docker hermes-alison | ssh root@helsinki 'bash -s'
    ```
 
-   The default restart is `hermes gateway restart`. In an s6-supervised
-   image, that command stops the chat platforms, but the process does not
-   exit, and the agent stays half down. `docker restart -t 120` gives
-   running turns two minutes to finish.
-4. Schedule the host-side sync with the host's `python3`.
+   The script finds the host path of the data volume with
+   `docker inspect`. It puts `beacon-mesh/` there and writes `sync.json`
+   with Hermes behind `docker exec -u hermes <container>` and restart as
+   `docker restart -t 120 <container>`. Then it runs one sync. If the
+   container user is not `hermes`, add `--docker-user`.
+3. Schedule the printed line as root with the host's scheduler: cron, or
+   Task Scheduler on Synology DSM.
+
+The sync restarts the container, not the gateway. In the s6-supervised
+official image, `hermes gateway restart` stops the chat platforms, but the
+process does not exit, and the agent stays half down. `docker restart -t
+120` gives running turns two minutes to finish. If `sudo` asks for a
+password, copy the script to the host and run it there with `sudo bash`.
 
 ### `fleet/templates/<name>.yaml`
 

@@ -16,6 +16,7 @@ cuts every agent off from pulling; re-run `install` for each agent.
 
 CLI (runs where Beacon's env is; the output contains a token):
     python -m backend.mesh install <agent-id>   # one-time host bootstrap script
+    python -m backend.mesh install <agent-id> --docker <container>   # same, run on the container's host as root
 """
 
 import argparse
@@ -86,23 +87,32 @@ def config(agent_id: str) -> dict:
     }
 
 
-def install_script(agent_id: str) -> str:
+def install_script(agent_id: str, docker: str | None = None, docker_user: str = "hermes") -> str:
+    """`docker` names the agent's container: the script then runs on the
+    container's host as root instead of inside the agent's environment."""
     agent = store.get_agent(agent_id)
     if agent.reach is None:
         raise ValueError(f"agent {agent_id!r} has no reach block; nothing to install")
     public_url = os.environ.get(PUBLIC_URL_ENV, "").rstrip("/")
     if not public_url:
         raise ValueError(f"{PUBLIC_URL_ENV} is not set; agents need it to reach Beacon")
-    return get_driver(agent.type).mesh_install_script(agent, public_url, token(agent.id, BEACON_PEER))
+    driver = get_driver(agent.type)
+    pull_token = token(agent.id, BEACON_PEER)
+    if docker:
+        return driver.mesh_install_docker_script(agent, public_url, pull_token, docker, docker_user)
+    return driver.mesh_install_script(agent, public_url, pull_token)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m backend.mesh", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("install", help="print the one-time host bootstrap script for one agent").add_argument("agent_id")
+    install = sub.add_parser("install", help="print the one-time host bootstrap script for one agent")
+    install.add_argument("agent_id")
+    install.add_argument("--docker", metavar="CONTAINER", help="agent runs in this container; script runs on its host as root")
+    install.add_argument("--docker-user", default="hermes", help="user Hermes runs as in the container (default: hermes)")
     args = parser.parse_args(argv)
     try:
-        sys.stdout.write(install_script(args.agent_id))
+        sys.stdout.write(install_script(args.agent_id, args.docker, args.docker_user))
     except (store.NotFound, ValueError, MissingSecret) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
