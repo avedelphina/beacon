@@ -39,10 +39,12 @@ services:
       - "${BEACON_MESH_BIND:-127.0.0.1:18642}:8642"
     volumes:
       - ./fleet:/app/fleet
+      # Operational store (backend/opstore.py): mailbox now, board next.
+      - ./state:/app/state
       - ./ssh:/etc/beacon:ro
       - ./tbot/data:/tbot-data:ro
-    # Agent-bus tokens are named per agent (reach.token_env), so they can't
-    # be listed below; the whole .env goes in instead.
+    # The agent mesh settings (BEACON_A2A_SECRET, BEACON_PUBLIC_URL, ...)
+    # live in .env too; the whole file goes in rather than a growing list.
     env_file:
       - path: .env
         required: false

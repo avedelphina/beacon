@@ -112,6 +112,14 @@ Delivered in 0.10.0:
 - Agents in Docker: `reach.bind`, `install --docker`, and a container
   restart instead of a gateway restart.
 
+Delivered since (unreleased):
+
+- The operational store, SQLite at `state/beacon.db`.
+- The mailbox at `/a2a/{agent}`: relay within one network, and
+  store-and-forward (C2). Delivery happens on the recipient's next config
+  pull. The reply returns to the sender as a new message.
+- A movable Beacon: agents follow the URL that Beacon announces.
+
 Next, in this order:
 
 ### C1 — Relay through Beacon
@@ -122,15 +130,21 @@ one A2A endpoint per agent (`/a2a/{agent}`) and forwards each call to the
 target. A peer outside the target's network gets the relay URL in its peer
 list instead of the direct URL.
 
+The endpoint exists already as the mailbox. It works within one network
+only, because a target accepts tokens only from its own network's peers.
+What remains: accept callers from every network in each target's inbound
+list, and give agents on other networks only the mailbox entry.
+
 **Acceptance:** an agent on a second network calls a tailnet agent by name.
 With Beacon down, pairs on the tailnet are not affected.
 
-### C2 — Store-and-forward
+### C2 — Store-and-forward (delivered)
 
 When the target is offline, the relay accepts the task, stores it in the
 operational store, and delivers it when the target is back. Retries are
 bounded, and each task has an explicit expiry. The caller gets a task ID.
-It polls for the result or receives a push notification.
+Hermes's A2A tools cannot poll a task, so instead of polling or push
+notifications, the reply returns to the caller as a new message.
 
 **Acceptance:** a message to a stopped agent is delivered after the agent
 restarts, or it expires and the expiry is visible.

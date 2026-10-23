@@ -385,3 +385,14 @@ def test_docker_install_rejects_unsafe_container_names(two_agents, monkeypatch):
     monkeypatch.setenv(mesh.PUBLIC_URL_ENV, "http://beacon.test")
     with pytest.raises(ValueError, match="container"):
         mesh.install_script("alpha", docker="x; rm -rf /")
+
+
+def test_sync_follows_beacon_to_its_new_url(synced, host):
+    sync, state = synced
+    cfg = mesh.config("alpha")
+    cfg["beacon"] = "https://beacon.example"
+    _serve(host, cfg)
+
+    sync.sync(state)
+
+    assert json.loads((state / "sync.json").read_text())["beacon"] == "https://beacon.example"

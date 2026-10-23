@@ -128,6 +128,13 @@ def sync(state: Path) -> int:
             log(f"Beacon unreachable, keeping the last applied config: {exc}")
             return 0
 
+        # Beacon announces where it lives; follow it, so moving Beacon needs
+        # no visit to each host. The old Beacon points here until all moved.
+        if mesh.get("beacon") and mesh["beacon"] != cfg["beacon"]:
+            log(f"Beacon moved: {cfg['beacon']} -> {mesh['beacon']}")
+            cfg["beacon"] = mesh["beacon"]
+            (state / "sync.json").write_text(json.dumps(cfg, indent=2))
+
         env_path = Path(cfg["env_file"])
         kept, current = read_env(env_path)
         settings = env_settings(mesh)

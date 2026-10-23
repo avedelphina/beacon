@@ -109,16 +109,29 @@ async def agent_registry() -> object:
 
 
 @mcp.tool()
-async def call_agent(agent_id: str, message: str, context_id: str | None = None) -> object:
+async def call_agent(agent_id: str, message: str, context_id: str | None = None,
+                     queue_if_offline: bool = False) -> object:
     """Send one message to a registered agent over A2A and return its reply,
     task state, and context_id. Pass a previous reply's context_id to continue
     that thread; omit it to start a new one. The agent may take minutes to
-    answer. Agents without a reach block are reported as not callable."""
+    answer. Agents without a reach block are reported as not callable.
+    With queue_if_offline, an unreachable agent gets the message from the
+    Beacon mailbox when it is back; read the reply later with `mailbox`."""
     body = {"message": message}
     if context_id:
         body["context_id"] = context_id
+    if queue_if_offline:
+        body["queue_if_offline"] = True
     # Beacon waits up to 330s on the agent; outlast it so its verdict arrives.
     return await _post(f"/api/agents/{_agent_path_id(agent_id)}/call", json=body, timeout=360)
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def mailbox(limit: int = 20) -> object:
+    """Recent Beacon mailbox traffic, newest first: messages held for offline
+    agents, their delivery state, and replies to messages you queued with
+    call_agent(queue_if_offline=True) — those have recipient "beacon"."""
+    return await _get("/api/mailbox", limit=limit)
 
 
 @mcp.tool(annotations=READ_ONLY)
