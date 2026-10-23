@@ -3,18 +3,20 @@
 A2A v1.0 JSON-RPC (the Linux Foundation agent-to-agent standard) rather than
 a Beacon-specific protocol, so any A2A agent can be a target — Hermes is the
 first, not the only one. The caller names an agent; it does not learn the
-endpoint or the token. One blocking `SendMessage` per call: Hermes holds the
-request open until the agent answers or its A2A_REPLY_TIMEOUT (300s default)
-passes, then answers with a terminal task either way. Threads ride on A2A's
+endpoint or the token. Beacon calls as the mesh peer "beacon" with the token
+backend/mesh.py derives for that pair. One blocking `SendMessage` per call:
+Hermes holds the request open until the agent answers or its
+A2A_REPLY_TIMEOUT (300s default) passes, then answers with a terminal task
+either way. Threads ride on A2A's
 own `contextId`. Streaming, push notifications, and relaying for agents on
 another network are later steps, not this one.
 """
 
-import os
 import uuid
 
 import httpx
 
+from . import mesh
 from .schemas import Agent
 
 # Hermes's own reply window plus headroom, so Beacon reports the agent's
@@ -42,9 +44,10 @@ def _rpc(agent: Agent, method: str, params: dict, client: httpx.Client | None) -
     if agent.reach is None:
         raise Unreachable(f"agent {agent.id!r} has no reach block; it is inventory-only")
     reach = agent.reach
-    token = os.environ.get(reach.token_env)
-    if not token:
-        raise Unreachable(f"agent {agent.id!r} token env {reach.token_env} is not set on this Beacon process")
+    try:
+        token = mesh.token(mesh.BEACON_PEER, agent.id)
+    except mesh.MissingSecret as exc:
+        raise Unreachable(str(exc)) from exc
 
     body = {"jsonrpc": "2.0", "id": uuid.uuid4().hex, "method": method, "params": params}
     headers = {"Authorization": f"Bearer {token}", "A2A-Version": "1.0"}

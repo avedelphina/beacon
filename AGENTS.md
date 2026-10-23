@@ -46,6 +46,7 @@ backend/
   templates.py    config template load/validate/deep-merge under `desired`
   tiers.py        capability -> T0–T5 autonomy tier registry
   bus.py          agent bus: one A2A v1.0 SendMessage to an agent's reach.endpoint
+  mesh.py         A2A mesh: same-network peers, derived pairwise tokens, render CLI
   ssh.py          the one place that shells out to `ssh` (run + stream_script)
   drivers/
     __init__.py   DRIVERS registry + for_agent() resolution
@@ -154,8 +155,9 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
   `fleet/hosts.yaml`, `fleet/agents/*.yaml`, `fleet/templates/*.yaml`,
   `fleet/cron_jobs/*.yaml`, `fleet/decommissioned/`, `tbot/data/`,
   `tbot/storage/`. Fleet YAML stores `.env` key *names* only (`env_keys`) —
-  secret values never leave the host. Agent A2A tokens live in Beacon process
-  env vars named by `reach.token_env`, never in YAML or API responses.
+  secret values never leave the host. A2A tokens are derived from one
+  Beacon env var, `BEACON_A2A_SECRET`, never stored in YAML or returned by
+  the API. `mesh render` output contains tokens: pipe it, don't keep it.
 - **SSH host-key checking is strict.** Static-key hosts require a reviewed
   known-hosts file (`BEACON_KNOWN_HOSTS`); Beacon fails closed and never
   trusts a new key automatically. `config_file` hosts defer to that file's

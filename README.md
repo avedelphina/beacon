@@ -107,8 +107,8 @@ desired:
 
 reach:                       # omit entirely if this agent is inventory-only
   transport: a2a             # A2A v1.0 JSON-RPC, the only transport so far
-  endpoint: http://10.20.4.11:9900   # where JSON-RPC is POSTed; a path is allowed
-  token_env: BEACON_A2A_EDGE_01_PRIMARY_TOKEN
+  endpoint: http://10.20.4.11:9900   # where JSON-RPC is POSTed, as every caller sees it
+  network: tailnet           # agents sharing a network call each other directly
   capabilities: [relay]      # declared, not enforced — see Agent bus
 ```
 
@@ -137,25 +137,15 @@ caller  --session or MCP bearer-->  POST /api/agents/{id}/call
 ```
 
 `reach` on the agent record says how. `transport` is `a2a` and nothing else
-yet. `endpoint` is the URL that JSON-RPC is POSTed to. Hermes serves its own
-profile at `/` and other local profiles under a path, so a path is allowed.
-`token_env` names a Beacon process environment variable that holds the bearer
-token. The agent's `A2A_PEER_TOKENS` maps that token to the peer name
-`beacon`. The token itself never goes in fleet YAML, and a missing variable
-fails the call rather than sending it unauthenticated. `capabilities` are a
-declaration for the registry. Beacon does not route or authorize on them.
+yet. `endpoint` is the URL that JSON-RPC is POSTed to, as every caller sees
+it. Hermes serves its own profile at `/` and other local profiles under a
+path, so a path is allowed. `network` is a label; see [A2A mesh](#a2a-mesh).
+`capabilities` are a declaration for the registry. Beacon does not route or
+authorize on them.
 
-On a Hermes agent, the A2A side is four lines in the profile's `.env`:
-
-```bash
-A2A_PORT=9900
-A2A_AGENT_NAME=Anikke
-A2A_PEER_TOKENS=beacon:<token>      # same value as Beacon's token_env variable
-A2A_TRUSTED_PEERS=beacon
-```
-
-Hermes binds `127.0.0.1` unless `A2A_HOST` widens it. Set `A2A_HOST` only
-when Beacon reaches the agent from another machine.
+Beacon calls as the peer `beacon`. The token is derived from
+`BEACON_A2A_SECRET` (see below), so nothing is stored per agent. If the
+secret is missing, the call fails rather than going out unauthenticated.
 
 `GET /api/agents/registry` returns `id`, `callable`, and `capabilities` for
 every agent. It does not return endpoints or token-env names. A caller names
@@ -201,8 +191,51 @@ Not in this slice:
 - a shared task board;
 - any check that the caller is allowed to reach that particular agent.
 
-Agents can already call each other directly with Hermes's own `a2a_call`.
-Beacon does not write their peer lists yet.
+### A2A mesh
+
+Agents call each other directly, Tailscale-style. Beacon is only the
+coordination server: it decides who peers with whom and hands out tokens.
+It is never on the message path, so if Beacon is down, direct pairs keep
+talking.
+
+- **Peers:** two agents peer when their `reach.network` labels match. The
+  label is free text, for example `tailnet` or `office-lan`. Beacon does
+  not check that the network exists or that it is reachable. An agent
+  without a network is reachable only through Beacon.
+- **Tokens:** pairwise and derived, `HMAC(BEACON_A2A_SECRET, "caller>target")`.
+  Beacon keeps one secret, not N² tokens. A host that leaks its tokens
+  exposes only calls into itself. To rotate, change the secret, then render
+  and apply every agent again.
+- **Transport security:** use a network that encrypts (WireGuard, for
+  example), or put a TLS terminator in front of each agent and use an
+  `https://` endpoint.
+
+`python -m backend.mesh render <agent-id>` prints a script for the agent's
+host. Run it where Beacon's environment is. The output contains tokens, so
+pipe it to the host and do not save it:
+
+```bash
+python -m backend.mesh render anais | ssh root@anais 'bash -s'
+```
+
+The script runs Hermes's own `hermes config set` and sets:
+
+- In the profile `.env`: `A2A_PORT`, `A2A_HOST`, `A2A_AGENT_NAME`,
+  `A2A_PEER_TOKENS`, `A2A_TRUSTED_PEERS`, and one `A2A_TOKEN_<PEER>` per
+  peer. `A2A_HOST` is the endpoint's address; it is left out for loopback.
+- In `config.yaml`: the whole `a2a_agents` peer list. Tokens appear there
+  only as `${env:A2A_TOKEN_<PEER>}` references, so `config.yaml` holds no
+  secrets.
+
+The script also turns on the `a2a` toolset for the `a2a` platform. Without
+it, an agent cannot pass a peer's task on to another peer. To let agents
+reach peers from a chat platform, enable the toolset there yourself, for
+example `hermes -p <profile> tools enable a2a --platform deltachat-platform`.
+
+Restart the gateway afterwards; Hermes reads its A2A settings at startup.
+In Docker, set `A2A_HOST=0.0.0.0` instead, and publish the port on the
+endpoint address only. Agents then use Hermes's `a2a_call`,
+`a2a_orchestrate`, and `a2a_history` tools against their peers by name.
 
 ### `fleet/templates/<name>.yaml`
 

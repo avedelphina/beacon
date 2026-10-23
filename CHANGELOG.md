@@ -18,10 +18,15 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
   `GET /api/agents/registry` lists who is callable and which capabilities
   they declare, without exposing endpoints or token names. MCP tools:
   `agent_registry` and `call_agent`. An agent with no `reach` block stays
-  inventory-only. The bearer token lives in a Beacon process environment
-  variable named by `reach.token_env`; it is never written to fleet YAML.
-  Auth on the route is the existing session or MCP bearer. See README,
-  "Agent bus".
+  inventory-only. Auth on the route is the existing session or MCP bearer.
+  See README, "Agent bus".
+- **A2A mesh.** Agents with the same `reach.network` label call each other
+  directly; Beacon only hands out peer lists, so it is never on the message
+  path. Tokens are pairwise and derived from one secret,
+  `BEACON_A2A_SECRET`. `python -m backend.mesh render <agent-id>` prints a
+  host script of `hermes config set` lines: `A2A_*` keys go to the profile
+  `.env`, and `a2a_agents` goes to `config.yaml` with `${env:...}` token
+  references only. See README, "A2A mesh".
 
 ### Fixed
 

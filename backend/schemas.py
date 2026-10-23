@@ -62,20 +62,17 @@ class Host(BaseModel):
         return _reject_ssh_option_injection(v, "address")
 
 
-# How Beacon reaches this agent: its A2A v1.0 JSON-RPC endpoint. A2A rather
+# How this agent is reached: its A2A v1.0 JSON-RPC endpoint. A2A rather
 # than anything Beacon-specific, so a non-Hermes agent joins by speaking the
 # standard, not by getting a new driver. `endpoint` is the URL JSON-RPC is
-# POSTed to — Hermes serves its own profile at `/` and other local profiles
-# under a path, so a path is allowed. `token_env` names a Beacon process
-# environment variable holding the bearer token the agent's A2A_PEER_TOKENS
-# maps to Beacon — the token itself never lands in fleet YAML.
-_ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
-
-
+# POSTed to, as every caller sees it — Hermes serves its own profile at `/`
+# and other local profiles under a path, so a path is allowed. `network` is
+# a label: agents sharing one call each other directly (backend/mesh.py);
+# without one, only Beacon calls the agent. Tokens are derived, never stored.
 class AgentReach(BaseModel):
     transport: str = "a2a"
     endpoint: str
-    token_env: str
+    network: str | None = None
     capabilities: list[str] = Field(default_factory=list)
 
     @field_validator("transport")
@@ -99,11 +96,11 @@ class AgentReach(BaseModel):
             )
         return v
 
-    @field_validator("token_env")
+    @field_validator("network")
     @classmethod
-    def _env_name(cls, v: str) -> str:
-        if not _ENV_NAME_RE.fullmatch(v):
-            raise ValueError(f"token_env {v!r} must be an uppercase environment variable name")
+    def _network_label(cls, v: str | None) -> str | None:
+        if v is not None and not ID_RE.fullmatch(v):
+            raise ValueError(f"network {v!r} must match {ID_RE.pattern}")
         return v
 
     @field_validator("capabilities")

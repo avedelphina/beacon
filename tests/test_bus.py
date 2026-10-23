@@ -10,7 +10,7 @@ import json
 import httpx
 import pytest
 
-from backend import bus
+from backend import bus, mesh
 from backend.schemas import Agent
 
 
@@ -45,7 +45,7 @@ def _reach(**overrides) -> dict:
     reach = {
         "transport": "a2a",
         "endpoint": "http://agent.test:9900",
-        "token_env": "BEACON_A2A_A1_TOKEN",
+        "network": "tailnet",
         "capabilities": ["calendar"],
     }
     reach.update(overrides)
@@ -65,7 +65,7 @@ def reachable(client, monkeypatch):
     client.put("/api/agents/a1", json={
         "id": "a1", "type": "hermes", "host": "edge-01", "desired": {}, "reach": _reach(),
     })
-    monkeypatch.setenv("BEACON_A2A_A1_TOKEN", "test-agent-token")
+    monkeypatch.setenv(mesh.SECRET_ENV, "test-mesh-secret")
     return "a1"
 
 
@@ -73,7 +73,7 @@ def _answer_with(monkeypatch, handler):
     monkeypatch.setattr(bus.httpx, "Client", _client_factory(handler))
 
 
-def test_registry_hides_endpoint_and_token(client, reachable):
+def test_registry_hides_endpoint_and_network(client, reachable):
     client.put("/api/agents/idle", json={"id": "idle", "type": "hermes", "host": "edge-01", "desired": {}})
 
     body = client.get("/api/agents/registry").json()
@@ -82,7 +82,7 @@ def test_registry_hides_endpoint_and_token(client, reachable):
     assert by_id["a1"] == {"id": "a1", "callable": True, "capabilities": ["calendar"]}
     assert by_id["idle"]["callable"] is False
     assert "endpoint" not in json.dumps(body)
-    assert "token_env" not in json.dumps(body)
+    assert "tailnet" not in json.dumps(body)
 
 
 def test_unknown_agent_is_404(client):
@@ -100,12 +100,12 @@ def test_agent_without_reach_is_not_callable(client):
     assert "no reach block" in response.json()["detail"]
 
 
-def test_missing_token_does_not_call_out(client, monkeypatch):
+def test_missing_mesh_secret_does_not_call_out(client, monkeypatch):
     _host(client)
     client.put("/api/agents/a1", json={
         "id": "a1", "type": "hermes", "host": "edge-01", "desired": {}, "reach": _reach(),
     })
-    monkeypatch.delenv("BEACON_A2A_A1_TOKEN", raising=False)
+    monkeypatch.delenv(mesh.SECRET_ENV, raising=False)
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("must not call out without a token")
@@ -137,7 +137,7 @@ def test_call_sends_a2a_send_message_and_returns_task(client, reachable, monkeyp
         "state": "TASK_STATE_COMPLETED", "reply": "thursday is free",
     }
     assert seen["url"] == "http://agent.test:9900"
-    assert seen["headers"]["authorization"] == "Bearer test-agent-token"
+    assert seen["headers"]["authorization"] == f"Bearer {mesh.token('beacon', 'a1')}"
     assert seen["headers"]["a2a-version"] == "1.0"
     body = seen["body"]
     assert body["jsonrpc"] == "2.0" and body["method"] == "SendMessage"
@@ -169,7 +169,7 @@ def test_endpoint_path_is_posted_to_as_is(client, monkeypatch):
         "id": "a1", "type": "hermes", "host": "edge-01", "desired": {},
         "reach": _reach(endpoint="http://agent.test:9900/holly/"),
     })
-    monkeypatch.setenv("BEACON_A2A_A1_TOKEN", "test-agent-token")
+    monkeypatch.setenv(mesh.SECRET_ENV, "test-mesh-secret")
     seen = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -220,7 +220,7 @@ def test_jsonrpc_error_is_502_with_reason_and_no_token(client, reachable, monkey
     assert response.status_code == 502
     assert "not trusted" in response.json()["detail"]
     assert "-32052" in response.json()["detail"]
-    assert "test-agent-token" not in response.text
+    assert mesh.token("beacon", "a1") not in response.text
 
 
 def test_non_json_http_error_is_502(client, reachable, monkeypatch):
@@ -295,7 +295,7 @@ def test_wrong_bearer_is_rejected_when_auth_enabled(reachable, monkeypatch):
     {"endpoint": "http://agent.test:port"},
     {"endpoint": "http:///nohost"},
     {"transport": "hermes_api"},
-    {"token_env": "lower_case"},
+    {"network": "Not A Label"},
 ])
 def test_reach_rejects_bad_values(override):
     with pytest.raises(ValueError):
