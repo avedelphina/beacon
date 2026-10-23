@@ -71,12 +71,16 @@ class Host(BaseModel):
 # without one, only Beacon calls the agent. `bind` ("host:port") is where the
 # agent itself listens, when that differs from `endpoint` — Docker or NAT,
 # e.g. 0.0.0.0:9900 inside a container published on tailnet-ip:9901.
+# `board` gives the agent the fleet board's MCP tools (backend/board_mcp.py).
+# Opt-in: Hermes offers an MCP server on every chat platform, so an agent
+# whose chat is open to strangers would let them write to the board.
 # Tokens are derived, never stored.
 class AgentReach(BaseModel):
     transport: str = "a2a"
     endpoint: str
     network: str | None = None
     bind: str | None = None
+    board: bool = False
     capabilities: list[str] = Field(default_factory=list)
 
     @field_validator("bind")

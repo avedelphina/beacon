@@ -31,6 +31,8 @@ from pathlib import Path
 
 # Read once, when Hermes's A2A adapter starts; a change needs a restart.
 INBOUND_KEYS = ("A2A_PORT", "A2A_HOST", "A2A_AGENT_NAME", "A2A_PEER_TOKENS", "A2A_TRUSTED_PEERS")
+BOARD_TOKEN_KEY = "BEACON_BOARD_TOKEN"
+BOARD_SERVER = "beacon-board"
 MAX_LOG_BYTES = 1_000_000
 
 
@@ -43,10 +45,10 @@ def token_env(peer: str) -> str:
 
 
 def owned(key: str) -> bool:
-    return key in INBOUND_KEYS or key.startswith("A2A_TOKEN_")
+    return key in INBOUND_KEYS or key.startswith("A2A_TOKEN_") or key == BOARD_TOKEN_KEY
 
 
-def env_settings(mesh: dict) -> dict[str, str]:
+def env_settings(mesh: dict, pull_token: str = "") -> dict[str, str]:
     settings = {
         "A2A_PORT": str(mesh["listen"]["port"]),
         "A2A_AGENT_NAME": mesh["agent"],
@@ -57,7 +59,18 @@ def env_settings(mesh: dict) -> dict[str, str]:
         settings["A2A_HOST"] = mesh["listen"]["host"]
     for peer in mesh["outbound"]:
         settings[token_env(peer["name"])] = peer["token"]
+    if mesh.get("board") and pull_token:
+        settings[BOARD_TOKEN_KEY] = pull_token
     return settings
+
+
+def board_server(mesh: dict) -> dict | None:
+    """The `mcp_servers` entry for the fleet board, or None when this agent
+    has no board access. The token stays in .env; config.yaml holds a ref."""
+    board = mesh.get("board")
+    if not board:
+        return None
+    return {"url": board["url"], "headers": {"Authorization": "Bearer ${env:%s}" % BOARD_TOKEN_KEY}}
 
 
 def peer_list(mesh: dict) -> dict:
@@ -105,7 +118,7 @@ def restart(cfg: dict, state: Path) -> None:
     with open(state / "restart.log", "a") as out:
         subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
                          stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
-    log(f"inbound peers changed; restart requested: {' '.join(command)}")
+    log(f"who may call in, or the board server, changed; restart requested: {' '.join(command)}")
 
 
 def sync(state: Path) -> int:
@@ -137,7 +150,7 @@ def sync(state: Path) -> int:
 
         env_path = Path(cfg["env_file"])
         kept, current = read_env(env_path)
-        settings = env_settings(mesh)
+        settings = env_settings(mesh, pull_token)
         if settings != current:
             write_env(env_path, kept, settings)
             log(f"wrote {len(settings)} A2A settings to {env_path}")
@@ -151,7 +164,20 @@ def sync(state: Path) -> int:
             stamp.write_text(digest)
             log(f"peer list: {', '.join(peers) or '(none)'}")
 
-        if any(settings.get(k) != current.get(k) for k in INBOUND_KEYS):
+        # Hermes connects MCP servers when the gateway starts: a change to the
+        # board server needs a restart, like an inbound change does.
+        board = board_server(mesh)
+        board_stamp = state / "board.json"
+        previous = json.loads(board_stamp.read_text()) if board_stamp.exists() else None
+        board_changed = board != previous
+        if board_changed and (board or previous):
+            entry = board or {**previous, "enabled": False}
+            subprocess.run(cfg["hermes"] + ["config", "set", "--force", f"mcp_servers.{BOARD_SERVER}",
+                                            json.dumps(entry)], check=True, capture_output=True)
+            board_stamp.write_text(json.dumps(board))
+            log(f"board MCP server {'set' if board else 'disabled'}")
+
+        if any(settings.get(k) != current.get(k) for k in INBOUND_KEYS) or (board_changed and (board or previous)):
             restart(cfg, state)
     return 0
 

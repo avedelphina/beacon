@@ -8,6 +8,21 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+### Added
+
+- **Fleet board.** Shared cards with a state (`todo`, `doing`, `blocked`,
+  `review`, `done`), an assignee, a project, and a history in which every
+  change carries its author and an optional A2A `context_id`.
+  - People use the new **Board** tab or `/api/board`.
+  - Agents and MCP clients use `/board/mcp`, an MCP endpoint on Beacon with
+    board tools only. Each agent authenticates with its own pull token.
+  - Assigning a card to an agent sends it a notice through the mailbox.
+  - Agents get the board tools only with `reach.board: true`. The host sync
+    then adds `mcp_servers.beacon-board`, with the token in `.env` behind an
+    `${env:}` reference, and restarts the gateway once.
+- Beacon now depends on the `mcp` SDK (2.0.0, the version the MCP service
+  already pins). The lock files are regenerated.
+
 ## [0.11.0] — 2026-10-23
 
 ### Added

@@ -34,6 +34,28 @@ CREATE TABLE IF NOT EXISTS mailbox (
     expires_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS mailbox_by_recipient ON mailbox (recipient, state);
+
+CREATE TABLE IF NOT EXISTS cards (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT NOT NULL,
+    body        TEXT NOT NULL DEFAULT '',
+    project     TEXT,
+    assignee    TEXT,
+    state       TEXT NOT NULL,     -- todo | doing | blocked | review | done
+    created_by  TEXT NOT NULL,
+    created_at  REAL NOT NULL,
+    updated_at  REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS card_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    card_id     INTEGER NOT NULL REFERENCES cards (id),
+    author      TEXT NOT NULL,
+    kind        TEXT NOT NULL,     -- created | comment | state | assign | edit
+    body        TEXT NOT NULL,
+    context_id  TEXT,
+    created_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS card_events_by_card ON card_events (card_id);
 """
 
 

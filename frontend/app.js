@@ -696,8 +696,93 @@ document.getElementById("agent-form").addEventListener("submit", async (e) => {
   }
 });
 
+// ---- board ----
+const BOARD_STATES = ["todo", "doing", "blocked", "review", "done"];
+
+async function renderBoard() {
+  const el = document.getElementById("board-columns");
+  let cards;
+  try {
+    cards = await json("/api/board?include_done=true");
+  } catch (err) {
+    el.innerHTML = `<p class="empty">Could not load the board: ${esc(err.message)}</p>`;
+    return;
+  }
+  el.innerHTML = BOARD_STATES.map((state) => {
+    const items = cards.filter((c) => c.state === state);
+    return `<div class="board-col"><h2>${state} <span class="hint">${items.length}</span></h2>${
+      items.map((c) => `<button type="button" class="board-card" data-card="${esc(c.id)}">
+        <span>#${esc(c.id)} ${esc(c.title)}</span>
+        <span class="board-card-meta">${esc(c.assignee ?? "unassigned")}${c.project ? ` · ${esc(c.project)}` : ""}</span>
+      </button>`).join("")}</div>`;
+  }).join("");
+  el.querySelectorAll("[data-card]").forEach((b) => b.addEventListener("click", () => openCard(b.dataset.card)));
+  json("/api/agents/registry").then((agents) => {
+    document.getElementById("agent-ids").innerHTML = agents.filter((a) => a.callable)
+      .map((a) => `<option value="${esc(a.id)}">`).join("");
+  }, () => {});
+}
+
+async function openCard(id) {
+  let c;
+  try {
+    c = await json(`/api/board/cards/${encodeURIComponent(id)}`);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  const when = (t) => new Date(t * 1000).toLocaleString();
+  document.getElementById("card-detail").innerHTML = `
+    <h2>#${esc(c.id)} ${esc(c.title)}</h2>
+    <p class="hint">${esc(c.project ?? "no project")} · created by ${esc(c.created_by)} · ${when(c.created_at)}</p>
+    ${c.body ? `<p class="card-body">${esc(c.body)}</p>` : ""}
+    <ol class="card-history">${c.events.map((e) => `<li>
+      <span class="hint">${when(e.created_at)} · ${esc(e.author)} · ${esc(e.kind)}</span><br>${esc(e.body)}${
+        e.context_id ? ` <code>${esc(e.context_id)}</code>` : ""}</li>`).join("")}</ol>`;
+  const form = document.getElementById("card-update-form");
+  form.dataset.card = c.id;
+  form.state.value = c.state;
+  form.assignee.value = c.assignee ?? "";
+  form.note.value = "";
+  openModal("card-modal");
+}
+
+document.getElementById("card-update-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    await json(`/api/board/cards/${encodeURIComponent(f.dataset.card)}`, "PATCH",
+      { state: f.state.value, assignee: f.assignee.value.trim(), note: f.note.value.trim() || null });
+    closeModal("card-modal");
+    renderBoard();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+document.getElementById("add-card").addEventListener("click", () => {
+  document.getElementById("card-create-form").reset();
+  openModal("card-create-modal");
+});
+
+document.getElementById("card-create-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    await json("/api/board/cards", "POST", {
+      title: f.title.value, body: f.body.value,
+      project: f.project.value.trim() || null, assignee: f.assignee.value.trim() || null,
+    });
+    closeModal("card-create-modal");
+    renderBoard();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
 renderHosts();
 renderAgents();
+renderBoard();
 renderTemplates();
 renderCronJobs();
 populateHostSelect();
@@ -710,4 +795,6 @@ fetch("/auth/me").then((r) => (r.ok ? r.json() : null)).then((user) => {
 
 setInterval(() => {
   if (document.getElementById("agents-view").classList.contains("active")) renderAgents();
+  // Agents change the board too; keep it current while it's open.
+  if (document.getElementById("board-view").classList.contains("active")) renderBoard();
 }, 30000);

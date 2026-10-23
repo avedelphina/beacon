@@ -99,6 +99,8 @@ def config(agent_id: str) -> dict:
         },
         "inbound": {name: token(name, agent.id) for name in (BEACON_PEER, *(p.id for p in direct))},
         "outbound": outbound,
+        # The agent signs in to the board with its pull token, which it has.
+        "board": {"url": f"{beacon_url}/board/mcp"} if agent.reach.board and beacon_url else None,
     }
 
 

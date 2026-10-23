@@ -110,6 +110,7 @@ reach:                       # omit entirely if this agent is inventory-only
   endpoint: http://10.20.4.11:9900   # where JSON-RPC is POSTed, as every caller sees it
   network: tailnet           # agents sharing a network call each other directly
   bind: 0.0.0.0:9900         # optional: where the agent listens, if not the endpoint (Docker, NAT)
+  board: false               # true: the agent gets the fleet board's MCP tools (see Fleet board)
   capabilities: [relay]      # declared, not enforced — see Agent bus
 ```
 
@@ -192,8 +193,7 @@ up later in `GET /api/mailbox` (MCP tool: `mailbox`) with recipient
 `beacon`.
 
 Not yet built: relaying between different networks, streaming and push
-notifications, a shared task board, and any check that a caller may reach
-a particular agent. See ROADMAP.md, "Priority track — agent
+notifications, and any check that a caller may reach a particular agent. See ROADMAP.md, "Priority track — agent
 communication".
 
 ### A2A mesh
@@ -356,6 +356,60 @@ with the same `fleet/`, `state/`, and `BEACON_A2A_SECRET`. Then set the
 old instance's `BEACON_PUBLIC_URL` to the new URL. Every agent's sync
 switches over on its next pull, and nobody has to touch the agents' hosts.
 Keep the old instance until every agent has moved.
+
+### Fleet board
+
+Shared cards for work that spans agents, hosts, or days. Hermes Kanban
+stops at the host boundary, and A2A caps one thread at a few turns. A card
+is the durable record: title, description, project, assignee, state
+(`todo`, `doing`, `blocked`, `review`, `done`), and a history. The history
+records every creation, move, reassignment, and comment, each with its
+author. It also records the A2A `context_id` the work happened under.
+Cards live in the operational store, not in fleet YAML.
+
+**Who uses it, and how:**
+
+- **People:** the **Board** tab in the UI, or `/api/board`
+  (`GET /api/board`, `GET|PATCH /api/board/cards/{id}`,
+  `POST /api/board/cards`, `POST /api/board/cards/{id}/comments`). A
+  logged-in person is recorded by email.
+- **Agents and MCP clients:** the MCP endpoint `/board/mcp` on Beacon
+  itself, with the tools `board_list`, `board_card`, `card_create`,
+  `card_update`, and `card_comment`. It is served at the address agents
+  already reach for their mesh config. An agent authenticates with its own
+  pull token and is recorded under its own name. The MCP bearer is
+  recorded as `beacon`. The endpoint has board tools only; fleet operations
+  stay in the separate MCP service.
+
+**Assigning a card to an agent sends that agent a notice** through the
+mailbox, so it hears about the work even while offline. The notice
+contains the card itself, so the agent can act even without the board
+tools.
+
+**Board tools are opt-in per agent**, with `reach.board: true`. Hermes
+offers an MCP server on every chat platform. For an agent whose chat is
+open to strangers, strangers could then write to the board, and an
+assignment would reach other agents. That is a way around an allowlisted
+agent's restrictions. For each opted-in agent, the host sync adds this to
+`config.yaml`:
+
+```yaml
+mcp_servers:
+  beacon-board:
+    url: <BEACON_PUBLIC_URL>/board/mcp
+    headers: {Authorization: "Bearer ${env:BEACON_BOARD_TOKEN}"}
+```
+
+The token goes into the profile `.env`. The gateway restarts once, because
+Hermes connects MCP servers at startup. If `board` is turned off later, the
+server entry is disabled and the token is removed.
+
+To connect Claude Code:
+
+```bash
+claude mcp add --scope user --transport http beacon-board http://127.0.0.1:8642/board/mcp \
+  --header "Authorization: Bearer $BEACON_MCP_TOKEN"
+```
 
 ### `fleet/templates/<name>.yaml`
 

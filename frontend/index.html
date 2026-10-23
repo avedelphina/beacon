@@ -15,6 +15,7 @@
   <nav class="tabs">
     <button class="tab active" data-tab="hosts">Hosts</button>
     <button class="tab" data-tab="agents">Agents</button>
+    <button class="tab" data-tab="board">Board</button>
     <button class="tab" data-tab="templates">Templates</button>
     <button class="tab" data-tab="cron-jobs">Cron jobs</button>
   </nav>
@@ -66,6 +67,15 @@
       </table>
     </div>
     <p class="empty" id="templates-empty" hidden>No templates. Add a file under fleet/templates/ (see anthropic-stack.yaml.example).</p>
+  </section>
+
+  <section id="board-view" class="view">
+    <div class="view-head">
+      <h1>Board</h1>
+      <button class="btn primary" id="add-card">+ New card</button>
+    </div>
+    <p class="hint" style="margin:-0.6rem 0 1rem">Shared work across agents. Agents use it over MCP at <code>/board/mcp</code>; assigning a card to an agent sends it a notice through the mailbox.</p>
+    <div class="board" id="board-columns"></div>
   </section>
 
   <section id="cron-jobs-view" class="view">
@@ -265,6 +275,46 @@
       <button type="button" class="btn" data-close>Close</button>
     </div>
   </div>
+</div>
+
+<datalist id="agent-ids"></datalist>
+
+<div class="modal-backdrop" id="card-create-modal">
+  <form class="modal" id="card-create-form">
+    <h2>New card</h2>
+    <label>Title <input name="title" required></label>
+    <div class="field-row">
+      <label>Project <input name="project" placeholder="ops"></label>
+      <label>Assignee <span class="hint">(agent id)</span> <input name="assignee" list="agent-ids"></label>
+    </div>
+    <label>Description <span class="hint">(what needs doing, and what "done" means)</span>
+      <textarea name="body" rows="5"></textarea>
+    </label>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary">Create</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal-backdrop" id="card-modal">
+  <form class="modal" id="card-update-form">
+    <div id="card-detail"></div>
+    <div class="field-row">
+      <label>State <select name="state">
+        <option value="todo">todo</option><option value="doing">doing</option><option value="blocked">blocked</option>
+        <option value="review">review</option><option value="done">done</option>
+      </select></label>
+      <label>Assignee <input name="assignee" list="agent-ids"></label>
+    </div>
+    <label>Note <span class="hint">(why, or progress; kept in the history)</span>
+      <textarea name="note" rows="3"></textarea>
+    </label>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Close</button>
+      <button type="submit" class="btn primary">Save</button>
+    </div>
+  </form>
 </div>
 
 <script src="app.js"></script>

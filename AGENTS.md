@@ -15,7 +15,8 @@ follows Keep a Changelog; update it when changing behavior.
 - **Backend**: Python + FastAPI (`backend/`), served by uvicorn on port 8642.
   Python 3.12 in Docker (lock files were compiled with pip-compile on 3.11).
   Key deps: `fastapi`, `uvicorn[standard]`, `pyyaml`, `httpx`, `pyjwt[crypto]`,
-  `itsdangerous`. No `pyproject.toml`; dependencies live in `requirements.txt`.
+  `itsdangerous`, `mcp` (for the board's MCP endpoint). No `pyproject.toml`;
+  dependencies live in `requirements.txt`.
 - **Source of truth**: plain YAML files under `fleet/` — `hosts.yaml` (SSH
   targets), `agents/*.yaml` (one file per agent), `templates/*.yaml` (shared
   config fragments), `cron_jobs/*.yaml`. No database. Real inventory files are
@@ -50,6 +51,10 @@ backend/
                   recipient's /mesh pull (no scheduler)
   opstore.py      operational store: SQLite at state/beacon.db (runtime state,
                   never fleet YAML)
+  board.py        fleet board: cards + history in the opstore; assignment
+                  notices go through the mailbox
+  board_mcp.py    /board/mcp: board-only MCP tools for agents (own token) and
+                  MCP clients (bearer); a fresh server per app lifespan
   mesh.py         A2A mesh: same-network peers, derived tokens, /mesh pull config,
                   `install` CLI (host bootstrap)
   ssh.py          the one place that shells out to `ssh` (run + stream_script)

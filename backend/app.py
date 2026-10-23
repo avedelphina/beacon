@@ -1,3 +1,4 @@
+import contextlib
 import datetime
 import itertools
 from collections.abc import Callable, Iterator
@@ -10,7 +11,8 @@ from pydantic import BaseModel, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, bus, cron_store, mailbox, mesh, scheduler, store, templates
+from . import auth, board, bus, cron_store, mailbox, mesh, scheduler, store, templates
+from .board_mcp import board_app
 from .drivers import for_agent
 from .schemas import Agent, CronJob, Host
 from .tiers import TIER_LABELS, CAPABILITY_TIERS, requires_confirm, tier_for
@@ -46,7 +48,13 @@ class CallAgentRequest(BaseModel):
             raise ValueError("message must not be empty")
         return v
 
-app = FastAPI(title="Beacon", version="0.11.0")
+@contextlib.asynccontextmanager
+async def lifespan(_app):
+    async with board_app.lifespan():
+        yield
+
+
+app = FastAPI(title="Beacon", version="0.11.0", lifespan=lifespan)
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:
@@ -228,6 +236,61 @@ def call_agent(id_: str, body: CallAgentRequest) -> dict:
     message_id = mailbox.enqueue(mesh.BEACON_PEER, id_, "message", body.message, body.context_id)
     return {"agent": id_, "task_id": f"mbx-{message_id}", "context_id": body.context_id,
             "state": "TASK_STATE_SUBMITTED", "reply": "", "queued": message_id}
+
+
+class CardCreate(BaseModel):
+    title: str
+    body: str = ""
+    project: str | None = None
+    assignee: str | None = None
+
+
+class CardUpdate(BaseModel):
+    state: str | None = None
+    assignee: str | None = None
+    title: str | None = None
+    body: str | None = None
+    project: str | None = None
+    note: str | None = None
+    context_id: str | None = None
+
+
+class CardComment(BaseModel):
+    text: str
+    context_id: str | None = None
+
+
+def _board_author(request: Request) -> str:
+    """Who is changing the board from the UI or REST: the logged-in person,
+    else "beacon" (MCP bearer, or open mode). Agents use /board/mcp."""
+    user = request.session.get("user") if "session" in request.scope else None
+    return (user or {}).get("email") or mesh.BEACON_PEER
+
+
+@app.get("/api/board")
+def board_list(project: str | None = None, assignee: str | None = None, state: str | None = None,
+               include_done: bool = False) -> list[dict]:
+    return board.list_cards(project, assignee, state, include_done)
+
+
+@app.get("/api/board/cards/{card_id}")
+def board_card(card_id: int) -> dict:
+    return board.get_card(card_id)
+
+
+@app.post("/api/board/cards")
+def board_create(body: CardCreate, request: Request) -> dict:
+    return board.create_card(_board_author(request), body.title, body.body, body.project, body.assignee)
+
+
+@app.patch("/api/board/cards/{card_id}")
+def board_update(card_id: int, body: CardUpdate, request: Request) -> dict:
+    return board.update_card(_board_author(request), card_id, **body.model_dump())
+
+
+@app.post("/api/board/cards/{card_id}/comments")
+def board_comment(card_id: int, body: CardComment, request: Request) -> dict:
+    return board.comment(_board_author(request), card_id, body.text, body.context_id)
 
 
 @app.get("/api/mailbox")
@@ -516,4 +579,7 @@ def delete_cron_job(id_: str) -> dict:
 
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+# Board tools over MCP for agents and operators (backend/board_mcp.py), before
+# the frontend's catch-all.
+app.mount("/board", board_app)
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
