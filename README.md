@@ -205,10 +205,15 @@ Each agent's host pulls its own config from Beacon every few minutes and
 applies it. Beacon is never on the message path. If Beacon is down, every
 agent keeps its last config and keeps talking.
 
-- **Peers:** two agents peer when their `reach.network` labels match. The
-  label is free text, for example `tailnet` or `office-lan`. Beacon does
-  not check that the network exists or that it is reachable. An agent
-  without a network is reachable only through Beacon.
+- **Peers:** two agents peer directly when their `reach.network` labels
+  match. The label is free text, for example `tailnet` or `office-lan`.
+  Beacon does not check that the network exists or that it is reachable.
+- **Other networks:** an agent on another network, or on none, appears in
+  the peer list under its plain name with Beacon's relay URL. Agents call
+  `holly` the same way in both cases, and Beacon carries the call when
+  there is no direct path. Every agent accepts callers from every network,
+  because a relayed caller arrives with its own token. The access policy
+  (`reach.callers`) still decides who may call.
 - **Tokens:** pairwise and derived, `HMAC(BEACON_A2A_SECRET, "caller>target")`.
   Beacon keeps one secret, not N² tokens. A host that leaks its tokens
   exposes only calls into itself. An agent pulls with its own derived token,
@@ -369,9 +374,13 @@ mailbox entry when the direct call fails.
   timeout after the agent may have started on the message, is returned as
   an error instead. Retrying either could deliver the message twice.
 - **Messages expire after 72 hours.** The sender then gets a notice.
-- **Scope:** delivery works between agents on the same network, because
-  only same-network peers accept each other's tokens. Relaying across
-  networks is C1 on the roadmap.
+- **Across networks:** the same endpoint relays between networks. It is
+  the plain-name peer entry for agents on another network. The caller must
+  reach Beacon at `BEACON_PUBLIC_URL`, and Beacon must reach the target.
+- **Limit:** voicemail delivery means Beacon calls the recipient. An agent
+  that Beacon cannot reach can still send through the relay and get
+  immediate answers. But it cannot receive held messages, or replies that
+  arrive later, until Beacon can reach it.
 
 The messages live in the operational store, `state/beacon.db` (SQLite;
 `BEACON_STATE_DIR` changes the directory). In Docker it is the `./state`

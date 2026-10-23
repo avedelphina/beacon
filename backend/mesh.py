@@ -85,7 +85,11 @@ def config(agent_id: str) -> dict:
     agent = store.get_agent(agent_id)
     if agent.reach is None:
         raise ValueError(f"agent {agent_id!r} has no reach block; it is not in the mesh")
-    direct = peers(agent, store.list_agents())
+    fleet = store.list_agents()
+    direct = peers(agent, fleet)
+    direct_ids = {p.id for p in direct}
+    # Everyone else with a reach block: on another network, or on none.
+    relayed = [a for a in fleet if a.id != agent.id and a.reach is not None and a.id not in direct_ids]
     endpoint = urlsplit(agent.reach.endpoint)
     listen = urlsplit(f"//{agent.reach.bind}") if agent.reach.bind else endpoint
     loopback = listen.hostname in ("127.0.0.1", "localhost", "::1")
@@ -101,6 +105,12 @@ def config(agent_id: str) -> dict:
             # peer still sees who wrote (backend/mailbox.py).
             outbound.append({"name": f"{p.id}-mailbox", "url": f"{beacon_url}/a2a/{p.id}",
                              "token": token(agent.id, p.id), "capabilities": [*p.reach.capabilities, "mailbox"]})
+    if beacon_url:
+        # No direct path to these: one entry under the plain name, through
+        # Beacon's relay. Agents call `holly` either way; Beacon carries it.
+        for p in (p for p in relayed if may_call(agent.id, p)):
+            outbound.append({"name": p.id, "url": f"{beacon_url}/a2a/{p.id}", "token": token(agent.id, p.id),
+                             "capabilities": [*p.reach.capabilities, "relay"]})
     return {
         "agent": agent.id,
         # Where to pull from next time: lets Beacon move hosts without anyone
@@ -110,8 +120,10 @@ def config(agent_id: str) -> dict:
             "port": listen.port or (443 if listen.scheme == "https" else 80),
             "host": None if loopback else listen.hostname,
         },
+        # Callers from every network: a relayed caller arrives through Beacon
+        # with its own token. The access policy still decides who.
         "inbound": {name: token(name, agent.id)
-                    for name in (BEACON_PEER, *(p.id for p in direct if may_call(p.id, agent)))},
+                    for name in (BEACON_PEER, *(p.id for p in [*direct, *relayed] if may_call(p.id, agent)))},
         "outbound": outbound,
         # The agent signs in to the board with its pull token, which it has.
         "board": {"url": f"{beacon_url}/board/mcp"} if agent.reach.board and beacon_url else None,

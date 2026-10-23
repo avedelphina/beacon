@@ -8,6 +8,16 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+### Added
+
+- **Relay across networks (C1).** An agent on another network, or on
+  none, appears in each peer list under its plain name, pointing at
+  Beacon's relay (`/a2a/{agent}`). Agents call peers by name whether the
+  path is direct or relayed. Every agent now accepts callers from every
+  network, because they arrive through Beacon with their own token. The
+  access policy still decides who. Limit: voicemail delivery needs Beacon
+  to reach the recipient.
+
 ## [0.13.0] — 2026-10-23
 
 ### Added

@@ -67,7 +67,10 @@ def test_config_lists_listen_inbound_and_outbound(two_agents):
 
     assert cfg["agent"] == "alpha"
     assert cfg["listen"] == {"port": 9900, "host": "100.1.1.1"}
-    assert cfg["inbound"] == {"beacon": mesh.token("beacon", "alpha"), "bravo": mesh.token("bravo", "alpha")}
+    # lan-only is on another network: it can't dial alpha directly, but it can
+    # be relayed through Beacon with its own token, so alpha accepts it.
+    assert cfg["inbound"] == {"beacon": mesh.token("beacon", "alpha"), "bravo": mesh.token("bravo", "alpha"),
+                              "lan-only": mesh.token("lan-only", "alpha")}
     assert cfg["outbound"] == [{"name": "bravo", "url": "http://bravo.test:9900",
                                 "token": mesh.token("alpha", "bravo"), "capabilities": ["chat"]}]
 
