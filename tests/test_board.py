@@ -3,6 +3,7 @@ reach it over MCP at /board/mcp with their own token; assignment notifies
 through the mailbox; the host sync wires the MCP server only for agents
 with reach.board."""
 
+import types
 import json
 
 import pytest
@@ -150,7 +151,7 @@ def test_sync_wires_the_board_server_and_restarts_once(fleet_agents, tmp_path, m
     spec.loader.exec_module(sync)
     calls = []
     # sync.subprocess is the global module: patch through monkeypatch so it is restored.
-    monkeypatch.setattr(sync.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setattr(sync.subprocess, "run", lambda cmd, **kw: calls.append(cmd) or types.SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(sync, "restart", lambda cfg, state: calls.append(["RESTART"]))
 
     beacon_dir = tmp_path / "beacon" / "mesh"

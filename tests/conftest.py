@@ -10,6 +10,9 @@ for catching bugs like a too-short timeout or a wrong command string is the
 command Beacon builds, not a real round trip.
 """
 
+import tempfile
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -17,6 +20,15 @@ from backend import store
 from backend.app import app
 from backend.schemas import Agent, Host, SSHConfig
 from backend.ssh import SSHResult
+
+# The operational store must never be the real one, for any test. A test that
+# leaves a thread running (board assignment notices deliver in one) can write
+# after its fixtures are undone, and "undone" used to mean the real state/
+# directory. Pointing the default somewhere disposable, once, for the whole
+# session closes that.
+from backend import opstore as _opstore  # noqa: E402
+
+_opstore.STATE_DIR = Path(tempfile.mkdtemp(prefix="beacon-test-state-"))
 
 
 @pytest.fixture

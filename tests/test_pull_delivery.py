@@ -3,6 +3,7 @@ agent's own sync, which delivers them on its host and reports back — so
 Beacon never needs to reach the agent. Older syncs (no version header) keep
 the Beacon-calls-the-agent path."""
 
+import types
 import importlib.util
 import json
 import threading
@@ -148,7 +149,7 @@ def host(tmp_path, monkeypatch):
     sync = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(sync)
     restarts = []
-    monkeypatch.setattr(sync.subprocess, "run", lambda cmd, **kw: None)
+    monkeypatch.setattr(sync.subprocess, "run", lambda cmd, **kw: types.SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(sync, "restart", lambda cfg, state: restarts.append(1))
     config = {"agent": "alpha", "beacon": None, "listen": {"port": 9900, "host": None}, "inbound": {},
               "outbound": [], "board": None,

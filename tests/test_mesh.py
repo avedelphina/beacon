@@ -178,7 +178,8 @@ def test_install_script_bootstraps_without_scheduling(two_agents, host, monkeypa
 
     dotenv = (host["profile"] / ".env").read_text()
     assert "OPENAI_API_KEY=keep-me" in dotenv
-    assert "A2A_TOKEN_GONE" not in dotenv and "A2A_PORT=1\n" not in dotenv
+    # A fresh install adopts nothing: a token Beacon never wrote is not Beacon's to remove.
+    assert "A2A_TOKEN_GONE=stale" in dotenv and "A2A_PORT=1\n" not in dotenv
     assert f"A2A_TOKEN_BRAVO={mesh.token('alpha', 'bravo')}" in dotenv
     assert "A2A_HOST=100.1.1.1" in dotenv
 
@@ -244,7 +245,8 @@ def test_new_outbound_peer_applies_without_restart(synced, host):
     sync.sync(state)
 
     assert "A2A_TOKEN_CHARLIE=t-charlie" in (host["profile"] / ".env").read_text()
-    assert "config set --force a2a_agents" in _argv(host) and '"charlie"' in _argv(host)
+    assert "config set --force a2a_agents.charlie" in _argv(host) and "charlie.test:9900" in _argv(host)
+    assert "a2a_agents.bravo" not in _argv(host)  # only what changed is written
     assert not _wait_for_restart(host, timeout=0.5)
 
 
@@ -380,7 +382,7 @@ def test_docker_install_runs_on_the_host_and_restarts_the_container(two_agents, 
     log = calls.read_text()
     assert "restart -t 120 echo-hermes" in log
     assert "gateway restart" not in log
-    assert "exec -u hermes echo-hermes hermes -p alpha config set --force a2a_agents" in log
+    assert "exec -u hermes echo-hermes hermes -p alpha config set --force a2a_agents." in log
     assert mesh.token("alpha", "bravo") not in log
 
 

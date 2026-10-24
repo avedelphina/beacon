@@ -2,6 +2,7 @@
 the host sync writes the ones that changed — only valid names, only intact
 content, never a deletion."""
 
+import types
 import hashlib
 import importlib.util
 import json
@@ -92,7 +93,7 @@ def test_install_never_deletes(sync, tmp_path):
 
 
 def test_a_full_sync_installs_skills_beside_the_env_file(sync, tmp_path, monkeypatch):
-    monkeypatch.setattr(sync.subprocess, "run", lambda cmd, **kw: None)
+    monkeypatch.setattr(sync.subprocess, "run", lambda cmd, **kw: types.SimpleNamespace(returncode=0, stdout="", stderr=""))
     beacon = tmp_path / "beacon" / "mesh"
     beacon.mkdir(parents=True)
     home = tmp_path / "hermes-home"
