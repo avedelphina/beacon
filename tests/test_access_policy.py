@@ -43,11 +43,13 @@ def fleet3(fleet, monkeypatch):
     return seen
 
 
-def test_may_call_rule():
+def test_may_call_rule(fleet):
     open_agent, closed = _agent("alpha"), _agent("bravo", callers=["charlie"])
-    assert mesh.may_call("anyone", open_agent)
-    assert mesh.may_call("charlie", closed) and not mesh.may_call("alpha", closed)
+    fleet = [open_agent, closed, _agent("charlie")]
+    assert mesh.may_call("charlie", open_agent, fleet)
+    assert mesh.may_call("charlie", closed, fleet) and not mesh.may_call("alpha", closed, fleet)
     assert mesh.may_call(mesh.BEACON_PEER, closed)  # operators are never locked out
+    assert not mesh.may_call("stranger", open_agent, fleet)  # not in the fleet: no tags, no id to match
 
 
 def test_policy_shapes_inbound_and_outbound(fleet3):

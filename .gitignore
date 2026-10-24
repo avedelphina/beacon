@@ -15,6 +15,7 @@ fleet/agents/*.yaml
 fleet/templates/*.yaml
 fleet/cron_jobs/*.yaml
 fleet/decommissioned/
+fleet/policy.yaml
 
 # real Zitadel config + session secret — see .env.example
 .env

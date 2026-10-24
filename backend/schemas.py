@@ -74,8 +74,9 @@ class Host(BaseModel):
 # `board` gives the agent the fleet board's MCP tools (backend/board_mcp.py).
 # Opt-in: Hermes offers an MCP server on every chat platform, so an agent
 # whose chat is open to strangers would let them write to the board.
-# `callers` limits which agents may call this one (backend/mesh.may_call);
-# unset means any agent on its network. Beacon itself is always allowed.
+# `callers` further limits which agents may call this one, on top of the
+# fleet policy (backend/policy.py, backend/mesh.may_call). Beacon itself is
+# always allowed.
 # Tokens are derived, never stored.
 class AgentReach(BaseModel):
     transport: str = "a2a"
@@ -158,9 +159,20 @@ class Agent(BaseModel):
     desired: dict = Field(default_factory=dict)
     owner: str | None = None
     notes: str | None = None
+    # Groups for the access policy (fleet/policy.yaml, backend/policy.py).
+    # On the agent, not the host: several agents often share one host.
+    tags: list[str] = Field(default_factory=list)
     # Absent means this agent is inventory-only: Beacon can still deploy and
     # observe it, but call_agent refuses it until a reach block exists.
     reach: AgentReach | None = None
+
+    @field_validator("tags")
+    @classmethod
+    def _tag_names(cls, v: list[str]) -> list[str]:
+        for tag in v:
+            if not ID_RE.fullmatch(tag):
+                raise ValueError(f"tag {tag!r} must match {ID_RE.pattern}")
+        return v
 
     @field_validator("id")
     @classmethod

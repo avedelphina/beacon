@@ -1,0 +1,24 @@
+# Who may call whom. Copy to fleet/policy.yaml (gitignored, like the rest of
+# the real inventory). See README, "Access policy".
+#
+# Selectors: an agent id, tag:<name> (the name may use * wildcards), or *.
+# Rules are one-way: `from` may call `to`. A call is allowed when no `deny`
+# rule matches and some `rules` entry does. Beacon itself (operators, MCP
+# clients) is always allowed. With no file at all, only Beacon may call agents.
+
+# Optional: declare the tags in use, so a typo is reported instead of
+# silently matching nothing.
+tags: [family-a, family-b]
+
+rules:
+  # Each family talks within itself ...
+  - {from: [tag:family-a], to: [tag:family-a]}
+  - {from: [tag:family-b], to: [tag:family-b]}
+  # ... and one agent may reach every family.
+  - {from: [coordinator], to: ["tag:family-*"]}
+
+  # To let every agent talk to every other, instead of the above:
+  # - {from: ["*"], to: ["*"]}
+
+# Checked first; always wins.
+deny: []

@@ -12,7 +12,7 @@ from pydantic import BaseModel, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, board, bus, cron_store, mailbox, mesh, scheduler, store, templates
+from . import auth, board, bus, cron_store, mailbox, mesh, policy, scheduler, store, templates
 from .board_mcp import board_app
 from .drivers import for_agent
 from .schemas import Agent, CronJob, Host
@@ -51,6 +51,13 @@ class CallAgentRequest(BaseModel):
 
 logger = logging.getLogger("beacon")
 
+try:
+    _fleet_problems = policy.problems(policy.load(), store.list_agents())
+except Exception as exc:  # an invalid policy file must not stop Beacon from starting
+    _fleet_problems = [f"fleet/policy.yaml is invalid: {exc}"]
+for _problem in _fleet_problems:
+    logger.warning("access policy: %s", _problem)
+
 
 @contextlib.asynccontextmanager
 async def lifespan(_app):
@@ -58,7 +65,7 @@ async def lifespan(_app):
         yield
 
 
-app = FastAPI(title="Beacon", version="0.15.0", lifespan=lifespan)
+app = FastAPI(title="Beacon", version="0.16.0", lifespan=lifespan)
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:
@@ -211,6 +218,21 @@ def list_agents() -> list[Agent]:
     return store.list_agents()
 
 
+@app.get("/api/policy")
+def get_policy() -> dict:
+    """The access policy as it stands: the rules, what looks wrong in them,
+    and the resulting who-may-call-whom table. Edit fleet/policy.yaml to
+    change it (a Git-reviewed file, like the rest of the fleet)."""
+    loaded = policy.load()
+    fleet = store.list_agents()
+    return {
+        "present": loaded is not None,
+        "policy": loaded.model_dump(by_alias=True) if loaded else None,
+        "problems": policy.problems(loaded, fleet),
+        "matrix": policy.matrix(loaded, fleet),
+    }
+
+
 @app.get("/api/agents/registry")
 def agent_registry() -> list[dict]:
     """Who can be called, and as what. Endpoints and key-env names stay off
@@ -223,6 +245,7 @@ def agent_registry() -> list[dict]:
             "capabilities": list(agent.reach.capabilities) if agent.reach else [],
             # Who may call it: a list of agent ids, or null for anyone on its network.
             "callers": agent.reach.callers if agent.reach else None,
+            "tags": agent.tags,
         }
         for agent in store.list_agents()
     ]
@@ -334,7 +357,7 @@ async def a2a_mailbox(id_: str, request: Request):
     except store.NotFound:
         return _a2a_error(req_id, -32001, f"no agent {id_!r}", 404)
     if not mesh.may_call(caller, target):
-        logger.warning("mailbox: refused %s -> %s (not in %s's callers)", caller, id_, id_)
+        logger.warning("mailbox: refused %s -> %s (access policy: no rule allows it)", caller, id_)
         return _a2a_error(req_id, -32052, f"{id_} does not accept calls from {caller}", 403)
     method = req.get("method")
     if method not in A2A_METHODS:

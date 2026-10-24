@@ -205,7 +205,9 @@ Status:
 - **Who-may-call-whom: delivered**, as a per-agent allowlist
   (`reach.callers`). It applies to direct calls, the mailbox, and board
   assignments.
-- **Groups: not yet.** Add them when the per-agent lists get long.
+- **Groups: delivered as tags.** `fleet/policy.yaml` holds Tailscale-style
+  rules over agent ids and tags, with deny rules, wildcards, and a
+  Beacon-only default.
 - **Scoped credentials: in effect.** Agents hold only their own derived
   tokens for `/mesh`, `/a2a`, and `/board`, never the shared MCP bearer.
   The bearer remains the operators' credential until Horizon 5.
