@@ -8,6 +8,13 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`beacon` can no longer be an agent id.** It is the mesh's name for Beacon
+  itself (operators and MCP clients). An agent with that id would have
+  derived Beacon's own tokens and passed every access policy. The schema now
+  refuses it, so the API answers 422.
+
 ## [0.15.0] — 2026-10-23
 
 ### Added
