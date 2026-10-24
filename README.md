@@ -394,6 +394,25 @@ information, and `GET /api/agents/registry` shows each agent's `tags` and
 `callers`. Beacon also logs the problems at startup. An invalid file does not
 stop Beacon; it answers calls as if nothing were allowed, so check the log.
 
+**The Policy tab** edits the file in the browser. **Check** validates the
+text and shows, before anything is saved, what it would do: errors, likely
+mistakes, the new who-may-call-whom table with added paths marked `+` and
+removed ones `−`, and the agents that would restart. **Save** asks for
+confirmation, then writes the text exactly as typed, so comments and layout
+survive. It is a **human-only** action (tier T4): a logged-in browser
+session can save, but the MCP token cannot, so no automated caller can widen
+its own reach. MCP clients may read the policy and preview a change
+(`get_policy`, `preview_policy`).
+
+- A save is refused if the text is invalid (HTTP 422), or if the file changed
+  since the editor loaded it (HTTP 409), so nobody overwrites another edit.
+- The version a save replaces is kept in `fleet/policy-history/`, named with
+  the time and who saved it (the newest 50). Restore one by pasting it into
+  the editor.
+- Beacon is always allowed, so no policy can lock the operators out.
+- The agent form has a **Tags** field. It also keeps an agent's `reach` and
+  any other field it doesn't show when you save (see CHANGELOG).
+
 **A change restarts agents.** A policy change alters who each agent accepts.
 The agents affected restart once, gracefully, on their next sync.
 
@@ -655,6 +674,7 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 | **Restart** | Plain `gateway restart` — the everyday operate action, works regardless of current state. Distinct from Reconcile's problem-triggered fixes. | `POST /api/agents/{id}/restart` |
 | **Update** | `hermes update` on the shared code checkout — affects every profile on that install, not just one agent's record of it. Streamed. | `POST /api/agents/{id}/update` |
 | **Decommission** | Stops and uninstalls the gateway, optionally purges the profile's data (refused for the default profile — that directory is shared with every other profile on the install) and optionally deletes the OS account. Moves the YAML record to `fleet/decommissioned/` rather than deleting it. | `POST /api/agents/{id}/decommission` (streamed) |
+| **Policy** | Edits `fleet/policy.yaml`, who may call whom (see [Access policy](#access-policy)). Check first, then save. Tier T4: a human browser session only, never the MCP token. | `POST /api/policy/preview`, `PUT /api/policy` |
 
 ## Autonomy tiers
 

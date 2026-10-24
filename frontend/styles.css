@@ -351,3 +351,20 @@ tbody td:first-child { color: var(--ink); font-family: var(--font-mono); }
   font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.45rem;
 }
 @media (max-width: 720px) { .board { grid-template-columns: 1fr; } }
+
+/* ---- policy editor ---- */
+.policy-editor {
+  width: 100%; font-family: var(--font-mono); font-size: 0.85rem; line-height: 1.45;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line-soft);
+  padding: 0.7rem; resize: vertical; tab-size: 2;
+}
+.policy-result { margin: 0.8rem 0; }
+.policy-matrix { border-collapse: collapse; font-size: 0.8rem; }
+.policy-matrix th, .policy-matrix td { border: 1px solid var(--line-soft); padding: 0.25rem 0.5rem; text-align: center; }
+.policy-matrix th { text-transform: none; letter-spacing: 0; }
+.policy-matrix thead th { font-family: var(--font-mono); font-weight: 500; }
+.policy-matrix tbody th { text-align: left; font-family: var(--font-mono); font-weight: 500; }
+.policy-matrix .pm-yes { background: color-mix(in srgb, var(--good) 22%, transparent); }
+.policy-matrix .pm-new { background: color-mix(in srgb, var(--good) 45%, transparent); font-weight: 600; }
+.policy-matrix .pm-gone { background: color-mix(in srgb, var(--crit) 28%, transparent); font-weight: 600; }
+.policy-matrix .pm-self { color: var(--slate-2); }

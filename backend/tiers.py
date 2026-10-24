@@ -74,6 +74,12 @@ CAPABILITY_TIERS: dict[str, tuple[Tier, str]] = {
         "Reversible by removing the name; the config it implies still passes through "
         "push_config's own T3 gate before it reaches a host.",
     ),
+    "set_policy": (
+        Tier.T4,
+        "Changes who may call whom across the whole fleet, and restarts every agent whose "
+        "set of allowed callers changes. The MCP token must not be able to widen its own "
+        "reach, so this needs a human browser session.",
+    ),
     "update_agent": (
         Tier.T4,
         "Escalated above deploy/update_plugin's T3: this touches the shared code checkout, "
