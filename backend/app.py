@@ -65,7 +65,7 @@ async def lifespan(_app):
         yield
 
 
-app = FastAPI(title="Beacon", version="0.18.0", lifespan=lifespan)
+app = FastAPI(title="Beacon", version="0.19.0", lifespan=lifespan)
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:
@@ -487,10 +487,27 @@ def get_agent(id_: str) -> dict:
     return agent.model_dump() | {"effective_desired": templates.resolve(agent)}
 
 
+def _access_fields(agent: Agent | None) -> tuple:
+    """What on an agent record decides who may reach what: its tags (policy
+    groups), who may call it, and its board access."""
+    reach = agent.reach if agent else None
+    return (sorted(agent.tags) if agent else [], sorted(reach.callers) if reach and reach.callers is not None else None,
+            bool(reach and reach.board))
+
+
 @app.put("/api/agents/{id_}")
-def put_agent(id_: str, agent: Agent) -> Agent:
+def put_agent(id_: str, agent: Agent, request: Request) -> Agent:
     if agent.id != id_:
         raise HTTPException(400, "body id must match URL id")
+    try:
+        existing = store.get_agent(id_)
+    except store.NotFound:
+        existing = None
+    # Tags, `callers`, and `board` change who may talk to whom, which is what
+    # the human-only policy editor guards. Letting the LLM-facing MCP token
+    # change them would be a way around it.
+    if _access_fields(existing) != _access_fields(agent):
+        _require_human_session(request, "set_agent_access")
     return store.upsert_agent(agent)
 
 

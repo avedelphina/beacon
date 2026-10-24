@@ -8,6 +8,28 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-10-24
+
+### Added
+
+- **Tag management in the app.** The Agents tab has a Tags column, filter chips
+  (one per tag, plus "untagged"), tick boxes, and a **Tag…** action that adds
+  or removes a tag on all selected agents at once. The Policy tab lists every
+  tag with its agents.
+- **The app works on a phone.** Below 720px the tab bar wraps onto its own
+  row that scrolls sideways, tables become one card per row (each cell
+  labelled), dialogs fill the screen, form fields stack, touch targets are
+  larger, and form text is 16px so iOS does not zoom. Before, Policy, Templates
+  and Cron jobs were unreachable on a phone and the action buttons were off
+  the edge of the screen.
+
+### Changed
+
+- **Changing an agent's tags, `reach.callers`, or `reach.board` needs a human
+  browser session** (tier T4, `set_agent_access`). These decide who may call
+  whom, so the MCP token must not be able to change them. Other edits are
+  unchanged.
+
 ## [0.18.0] — 2026-10-24
 
 ### Changed

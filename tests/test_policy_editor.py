@@ -113,3 +113,30 @@ def test_history_keeps_only_the_newest(fleet3, monkeypatch):
 def test_saved_policy_changes_the_peer_lists(client, fleet3):
     client.put("/api/policy", json={"text": FAMILIES, "base_hash": _hash(client), "confirm": True})
     assert {p["name"] for p in mesh.config("a-1")["outbound"] if "-mailbox" not in p["name"]} == {"a-2"}
+
+
+def _record(**changes):
+    base = {"id": "a-1", "type": "hermes", "host": "h1", "desired": {}, "tags": ["family-a"],
+            "reach": {"endpoint": "http://a-1.test:9900", "network": "tailnet", "callers": None, "board": False}}
+    reach = {**base["reach"], **changes.pop("reach", {})}
+    return {**base, **changes, "reach": reach}
+
+
+def test_the_mcp_token_cannot_change_tags_callers_or_board_but_can_edit_the_rest(fleet3, monkeypatch):
+    monkeypatch.setattr(auth, "AUTH_ENABLED", True)
+    monkeypatch.setattr(auth, "MCP_TOKEN", "test-mcp-token")
+    mcp = TestClient(app, headers={"Authorization": "Bearer test-mcp-token"})
+
+    for change in ({"tags": ["family-b"]}, {"tags": []}, {"reach": {"callers": ["a-2"]}}, {"reach": {"board": True}}):
+        refused = mcp.put("/api/agents/a-1", json=_record(**change))
+        assert refused.status_code == 403, change
+        assert "human browser session" in refused.json()["detail"]
+
+    assert mcp.put("/api/agents/a-1", json=_record(owner="someone", notes="edited")).status_code == 200  # not access-related
+    assert store.get_agent("a-1").tags == ["family-a"] and store.get_agent("a-1").owner == "someone"
+    assert mcp.put("/api/agents/new-one", json={**_record(), "id": "new-one"}).status_code == 403  # a new agent arrives with tags
+
+
+def test_a_person_can_change_tags(client, fleet3):
+    response = client.put("/api/agents/a-1", json=_record(tags=["family-a", "extra"]))
+    assert response.status_code == 200 and store.get_agent("a-1").tags == ["family-a", "extra"]

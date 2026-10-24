@@ -31,6 +31,21 @@ from backend import opstore as _opstore  # noqa: E402
 _opstore.STATE_DIR = Path(tempfile.mkdtemp(prefix="beacon-test-state-"))
 
 
+@pytest.fixture(autouse=True)
+def _board_notices_run_inline(monkeypatch):
+    """Assignment notices are delivered from a background thread in production.
+    In tests that thread can outlive the test and run after its patches and
+    environment are gone, where an error becomes a stray warning or, before
+    STATE_DIR was fixed, a write to the real store. Running it inline makes a
+    test's result depend only on what the test did."""
+    import types
+
+    from backend import board
+
+    monkeypatch.setattr(board, "threading", types.SimpleNamespace(
+        Thread=lambda target, args=(), daemon=False: types.SimpleNamespace(start=lambda: target(*args))))
+
+
 @pytest.fixture
 def fleet(tmp_path, monkeypatch):
     """Points backend.store and cron_store at an empty, throwaway fleet/

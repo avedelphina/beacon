@@ -75,6 +75,10 @@ function renderRows(name, items, rowHtml, handlers) {
   const body = document.getElementById(`${name}-body`);
   document.getElementById(`${name}-empty`).hidden = items.length > 0;
   body.innerHTML = items.map((item) => `<tr>${rowHtml(item)}</tr>`).join("");
+  // On a phone each row becomes a card, and a card has no header row: every
+  // cell carries its column's name (see styles.css, max-width 720px).
+  const heads = [...document.querySelectorAll(`#${name}-view thead th`)].map((th) => th.textContent.trim());
+  body.querySelectorAll("tr").forEach((tr) => tr.querySelectorAll("td").forEach((td, i) => { td.dataset.label = heads[i] ?? ""; }));
   bindActions(body, handlers);
 }
 
@@ -192,11 +196,46 @@ async function populateHostSelect() {
   if (hosts.some((h) => h.id === current)) select.value = current;
 }
 
-async function renderAgents() {
-  const agents = await api.list("agents");
-  renderRows("agents", agents, (a) => `
+// ---- agents ----
+let allAgents = [];
+let agentFilter = null;            // null = all, "" = untagged, otherwise one tag
+const agentSelection = new Set();  // ids ticked for bulk tagging; survives the 30 s refresh
+
+const tagsOf = (a) => a.tags ?? [];
+const uniqueTags = (agents) => [...new Set(agents.flatMap(tagsOf))].sort();
+const tagChips = (tags) => (tags.length ? tags.map((t) => `<span class="chip">${esc(t)}</span>`).join(" ") : '<span class="hint">–</span>');
+
+function renderTagBar() {
+  const bar = document.getElementById("agent-tag-bar");
+  const tags = uniqueTags(allAgents);
+  const untagged = allAgents.filter((a) => !tagsOf(a).length).length;
+  if (!tags.length) { bar.innerHTML = ""; return; }
+  const chip = (value, label, count) =>
+    `<button type="button" class="chip chip-btn${agentFilter === value ? " active" : ""}" data-filter="${esc(value ?? "__all__")}">${esc(label)} <span class="hint">${count}</span></button>`;
+  bar.innerHTML = chip(null, "all", allAgents.length)
+    + tags.map((t) => chip(t, t, allAgents.filter((a) => tagsOf(a).includes(t)).length)).join("")
+    + (untagged ? chip("", "untagged", untagged) : "");
+  bar.querySelectorAll("[data-filter]").forEach((b) => b.addEventListener("click", () => {
+    const v = b.getAttribute("data-filter");
+    agentFilter = v === "__all__" ? null : v;
+    renderAgentTable();
+  }));
+}
+
+function updateBulkBar() {
+  const bar = document.getElementById("agent-bulk-bar");
+  bar.hidden = agentSelection.size === 0;
+  document.getElementById("agent-bulk-count").textContent = `${agentSelection.size} selected`;
+}
+
+function renderAgentTable() {
+  renderTagBar();
+  const shown = allAgents.filter((a) => agentFilter === null || (agentFilter === "" ? !tagsOf(a).length : tagsOf(a).includes(agentFilter)));
+  renderRows("agents", shown, (a) => `
+      <td class="sel"><input type="checkbox" data-select="${esc(a.id)}" aria-label="Select ${esc(a.id)}"${agentSelection.has(a.id) ? " checked" : ""}></td>
       <td id="status-${esc(a.id)}">${statusPill("loading")}</td>
       <td>${esc(a.id)}</td>
+      <td>${tagChips(tagsOf(a))}</td>
       <td>${esc(a.type)}</td>
       <td>${esc(a.host)}</td>
       <td>${esc(a.profile ?? "")}</td>
@@ -206,8 +245,48 @@ async function renderAgents() {
         <button class="link-btn" data-edit="${esc(a.id)}">Edit</button>
         <button class="link-btn danger" data-del="${esc(a.id)}">Delete</button>
       </td>`, { inspect: openInspect, edit: editAgent, del: deleteAgent });
-  refreshStatuses(agents);
+  document.querySelectorAll("#agents-body [data-select]").forEach((cb) => cb.addEventListener("change", () => {
+    if (cb.checked) agentSelection.add(cb.dataset.select); else agentSelection.delete(cb.dataset.select);
+    updateBulkBar();
+  }));
+  updateBulkBar();
+  refreshStatuses(shown);
 }
+
+async function renderAgents() {
+  allAgents = await api.list("agents");
+  for (const id of [...agentSelection]) if (!allAgents.some((a) => a.id === id)) agentSelection.delete(id);
+  document.getElementById("tag-names").innerHTML = uniqueTags(allAgents).map((t) => `<option value="${esc(t)}">`).join("");
+  renderAgentTable();
+}
+
+document.getElementById("agent-bulk-clear").addEventListener("click", () => { agentSelection.clear(); renderAgentTable(); });
+document.getElementById("agent-bulk-tag").addEventListener("click", () => {
+  document.getElementById("bulk-tag-targets").textContent = `For: ${[...agentSelection].join(", ")}`;
+  document.getElementById("bulk-tag-form").reset();
+  openModal("bulk-tag-modal");
+});
+document.getElementById("bulk-tag-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const tag = e.target.tag.value.trim();
+  const adding = e.submitter?.value !== "remove";
+  const failures = [];
+  for (const id of agentSelection) {
+    const a = allAgents.find((x) => x.id === id);
+    if (!a) continue;
+    const tags = adding ? [...new Set([...tagsOf(a), tag])] : tagsOf(a).filter((t) => t !== tag);
+    if (tags.length === tagsOf(a).length && tags.every((t) => tagsOf(a).includes(t))) continue;  // already so
+    try {
+      await api.put("agents", id, { ...a, tags });  // the whole record, so nothing else changes
+    } catch (err) {
+      failures.push(`${id}: ${err.message}`);
+    }
+  }
+  closeModal("bulk-tag-modal");
+  agentSelection.clear();
+  await renderAgents();
+  if (failures.length) alert(`Some agents were not changed:\n${failures.join("\n")}`);
+});
 
 async function refreshStatuses(agents) {
   await Promise.all(
@@ -816,7 +895,18 @@ function showPolicyResult(r, extra = "") {
   document.getElementById("policy-matrix-wrap").innerHTML = r.matrix ? policyMatrixHtml(r.matrix, r.added, r.removed) : "";
 }
 
+async function renderPolicyTags() {
+  const el = document.getElementById("policy-tags");
+  const agents = (await api.list("agents")).filter((a) => a.reach);
+  const tags = uniqueTags(agents);
+  const untagged = agents.filter((a) => !tagsOf(a).length);
+  const group = (title, members) => `<div class="tag-group"><span class="chip">${esc(title)}</span> ${members.map((a) => esc(a.id)).join(", ") || "–"}</div>`;
+  el.innerHTML = (tags.map((t) => group(t, agents.filter((a) => tagsOf(a).includes(t)))).join("")
+    + (untagged.length ? group("no tag", untagged) : "")) || '<p class="empty">No agents in the mesh yet.</p>';
+}
+
 async function renderPolicy() {
+  renderPolicyTags().catch(() => {});
   try {
     const p = await json("/api/policy");
     document.getElementById("policy-text").value = p.text;
