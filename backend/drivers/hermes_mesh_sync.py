@@ -7,6 +7,15 @@ A2A_* settings into the profile's .env, the peer list into config.yaml's
 `a2a_agents` via `hermes config set` — token *references* only, so
 config.yaml never holds a secret.
 
+Beacon only touches what it created. A record of its own names, kept in
+managed.json beside this script, says which peers, callers and token
+variables are Beacon's; anything else in the agent's A2A configuration (a peer
+or caller the agent's owner added, a token for an outside service) is left
+exactly as it is. With no managed.json nothing is Beacon's yet, so a fresh
+install adopts nothing and removes nothing. `sync.py <state> --adopt` records
+what Beacon would write right now as managed, without changing anything: use it
+once on an install made before managed.json existed.
+
 Tailscale-style resilience: if Beacon is unreachable nothing changes, and
 the mesh keeps running on the last applied config. Messages the Beacon
 mailbox held for this agent come along with the config (pull delivery): the
@@ -60,16 +69,38 @@ def token_env(peer: str) -> str:
     return "A2A_TOKEN_" + peer.upper().replace("-", "_")
 
 
-def owned(key: str) -> bool:
-    return key in INBOUND_KEYS or key.startswith("A2A_TOKEN_") or key == BOARD_TOKEN_KEY
+def entries(value: str) -> list:
+    return [e for e in value.split(",") if e]
 
 
-def env_settings(mesh: dict, pull_token: str = "") -> dict[str, str]:
+def entry_name(entry: str) -> str:
+    return entry.split(":", 1)[0]
+
+
+def new_token_envs(mesh: dict) -> list:
+    return [token_env(peer["name"]) for peer in mesh["outbound"]]
+
+
+def owned_keys(mesh: dict, managed: dict) -> set:
+    """The .env keys Beacon writes or removes: the fixed A2A settings, the
+    token variables it created before or creates now, and the board token."""
+    return set(INBOUND_KEYS) | set(managed["token_envs"]) | set(new_token_envs(mesh)) | {BOARD_TOKEN_KEY}
+
+
+def env_settings(mesh: dict, pull_token: str, managed: dict, current: dict) -> dict:
+    """The value of every key Beacon owns. The two caller lists are merged:
+    entries Beacon never wrote (not in `managed`, not in this response) are
+    kept as they are, then Beacon's current ones are added."""
+    inbound = mesh["inbound"]
+    mine = set(managed["inbound"]) | set(inbound)
     settings = {
         "A2A_PORT": str(mesh["listen"]["port"]),
         "A2A_AGENT_NAME": mesh["agent"],
-        "A2A_PEER_TOKENS": ",".join(f"{name}:{tok}" for name, tok in mesh["inbound"].items()),
-        "A2A_TRUSTED_PEERS": ",".join(mesh["inbound"]),
+        "A2A_PEER_TOKENS": ",".join(
+            [e for e in entries(current.get("A2A_PEER_TOKENS", "")) if entry_name(e) not in mine]
+            + [f"{name}:{tok}" for name, tok in inbound.items()]),
+        "A2A_TRUSTED_PEERS": ",".join(
+            [e for e in entries(current.get("A2A_TRUSTED_PEERS", "")) if e not in mine] + list(inbound)),
     }
     if mesh["listen"].get("host"):
         settings["A2A_HOST"] = mesh["listen"]["host"]
@@ -78,6 +109,55 @@ def env_settings(mesh: dict, pull_token: str = "") -> dict[str, str]:
     if mesh.get("board") and pull_token:
         settings[BOARD_TOKEN_KEY] = pull_token
     return settings
+
+
+def peer_list(mesh: dict) -> dict:
+    return {
+        peer["name"]: {
+            "url": peer["url"],
+            "auth": {"type": "bearer", "token": "${env:%s}" % token_env(peer["name"])},
+            "capabilities": peer.get("capabilities", []),
+        }
+        for peer in mesh["outbound"]
+    }
+
+
+def digest(entry: dict) -> str:
+    return hashlib.sha256(json.dumps(entry, sort_keys=True).encode()).hexdigest()
+
+
+def load_managed(state: Path) -> dict:
+    path = state / "managed.json"
+    base = {"peers": {}, "inbound": [], "token_envs": []}
+    return {**base, **json.loads(path.read_text())} if path.exists() else base
+
+
+def save_managed(state: Path, managed: dict) -> None:
+    (state / "managed.json").write_text(json.dumps(managed, indent=2, sort_keys=True))
+
+
+def run_hermes(cfg: dict, args: list, tolerate: str = "") -> None:
+    """Run `hermes <args>`. `tolerate` is text in the output that means the
+    thing is already as wanted (removing a key that is already gone)."""
+    result = subprocess.run(cfg["hermes"] + args, capture_output=True, text=True)
+    if result.returncode != 0 and not (tolerate and tolerate in (result.stdout + result.stderr)):
+        raise subprocess.CalledProcessError(result.returncode, args, result.stdout, result.stderr)
+
+
+def apply_peers(cfg: dict, state: Path, mesh: dict, managed: dict) -> None:
+    """Make Beacon's peers in `a2a_agents` match the response, one entry at a
+    time, so entries Beacon never wrote stay. The record is saved after each
+    step: a run that stops halfway picks up where it left off."""
+    peers = peer_list(mesh)
+    for name, entry in peers.items():
+        if managed["peers"].get(name) != digest(entry):
+            run_hermes(cfg, ["config", "set", "--force", f"a2a_agents.{name}", json.dumps(entry)])
+            managed["peers"][name] = digest(entry)
+            save_managed(state, managed)
+    for name in [n for n in managed["peers"] if n not in peers]:
+        run_hermes(cfg, ["config", "unset", f"a2a_agents.{name}"], tolerate="not set")
+        del managed["peers"][name]
+        save_managed(state, managed)
 
 
 def board_server(mesh: dict) -> dict | None:
@@ -190,12 +270,12 @@ def install_skills(skills: list, skills_dir: Path) -> list:
     return changed
 
 
-def read_env(path: Path) -> tuple[list[str], dict[str, str]]:
+def read_env(path: Path, owned: set) -> tuple[list[str], dict[str, str]]:
     """(lines this script doesn't own, current values of the ones it does)."""
     kept, current = [], {}
     for line in path.read_text().splitlines() if path.exists() else []:
         key, sep, value = line.partition("=")
-        if sep and owned(key):
+        if sep and key in owned:
             current[key] = value
         else:
             kept.append(line)
@@ -296,21 +376,20 @@ def sync(state: Path) -> int:
             cfg["beacon"] = mesh["beacon"]
             (state / "sync.json").write_text(json.dumps(cfg, indent=2))
 
+        managed = load_managed(state)
         env_path = Path(cfg["env_file"])
-        kept, current = read_env(env_path)
-        settings = env_settings(mesh, pull_token)
+        kept, current = read_env(env_path, owned_keys(mesh, managed))
+        settings = env_settings(mesh, pull_token, managed, current)
         if settings != current:
             write_env(env_path, kept, settings)
             log(f"wrote {len(settings)} A2A settings to {env_path}")
 
-        peers = peer_list(mesh)
-        digest = hashlib.sha256(json.dumps(peers, sort_keys=True).encode()).hexdigest()
-        stamp = state / "peers.sha256"
-        if not stamp.exists() or stamp.read_text() != digest:
-            subprocess.run(cfg["hermes"] + ["config", "set", "--force", "a2a_agents", json.dumps(peers)],
-                           check=True, capture_output=True)
-            stamp.write_text(digest)
-            log(f"peer list: {', '.join(peers) or '(none)'}")
+        before = dict(managed["peers"])
+        apply_peers(cfg, state, mesh, managed)
+        if managed["peers"] != before:
+            log(f"peer list: {', '.join(managed['peers']) or '(none)'}")
+        managed["inbound"], managed["token_envs"] = list(mesh["inbound"]), new_token_envs(mesh)
+        save_managed(state, managed)
 
         # Hermes connects MCP servers when the gateway starts: a change to the
         # board server needs a restart, like an inbound change does.
@@ -346,5 +425,26 @@ def sync(state: Path) -> int:
     return 0
 
 
+def adopt(state: Path) -> int:
+    """Record what Beacon would write right now as Beacon's, changing nothing.
+    For an install made before managed.json existed: its current A2A config is
+    Beacon's, so the next sync may update and remove it."""
+    cfg = json.loads((state / "sync.json").read_text())
+    pull_token = (state / "token").read_text().strip()
+    request = urllib.request.Request(f"{cfg['beacon']}/mesh/{cfg['agent']}",
+                                     headers={"Authorization": f"Bearer {pull_token}"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        mesh = json.load(response)
+    # Digests stay empty on purpose: adopt cannot see what the agent has, so
+    # the next sync writes each peer once more. Harmless, and a peer the agent
+    # was still missing is not skipped.
+    managed = {"peers": {n: "" for n in peer_list(mesh)},
+               "inbound": list(mesh["inbound"]), "token_envs": new_token_envs(mesh)}
+    save_managed(state, managed)
+    log(f"adopted as Beacon's: {len(managed['peers'])} peers, {len(managed['inbound'])} callers")
+    return 0
+
+
 if __name__ == "__main__":
-    sys.exit(sync(Path(sys.argv[1])))
+    state_dir = Path(sys.argv[1])
+    sys.exit(adopt(state_dir) if "--adopt" in sys.argv[2:] else sync(state_dir))

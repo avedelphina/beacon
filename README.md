@@ -265,13 +265,39 @@ The script does these things on the host:
 4. It prints a cron line. **Add the schedule yourself:** the script does
    not install a cron job, a systemd timer, or a launchd agent on its own.
 
+**Updating the sync on an existing agent.** An agent installed before
+`managed.json` existed treats Beacon's current entries as the owner's, so a
+revoked peer would never be removed. Adopt first, then switch scripts. Put the
+new script next to the old one, run it with `--adopt`, and move it into place:
+
+```bash
+python3 sync.new.py <state-dir> --adopt && mv sync.new.py sync.py
+```
+
+`--adopt` changes nothing on the agent. It records what Beacon would write now
+as Beacon's, and the next sync writes each peer once more.
+
 **Each sync** (`beacon-mesh/sync.py`, stdlib only):
 
 - It writes `A2A_PORT`, `A2A_HOST`, `A2A_AGENT_NAME`, `A2A_PEER_TOKENS`,
   `A2A_TRUSTED_PEERS`, and one `A2A_TOKEN_<PEER>` per peer into the profile
   `.env`. Tokens go into `.env` directly, never into argv.
-- It replaces `a2a_agents` in `config.yaml` with `hermes config set --force`.
-  Tokens appear there only as `${env:A2A_TOKEN_<PEER>}` references.
+- It adds, updates, and removes Beacon's peers in `a2a_agents` one entry at
+  a time (`hermes config set --force a2a_agents.<peer>` and `hermes config
+  unset`). Tokens appear there only as `${env:A2A_TOKEN_<PEER>}` references.
+- **It only touches what Beacon created.** A record of Beacon's own names, in
+  `managed.json` beside `sync.py`, says which peers, callers, and token
+  variables are Beacon's. Anything else in the agent's A2A configuration
+  stays exactly as it is: a peer the agent's owner added, a caller in
+  `A2A_PEER_TOKENS`/`A2A_TRUSTED_PEERS`, a token variable for an outside
+  service. The caller lists are merged, with the owner's entries first. If an
+  owner's entry has the same name as one of Beacon's, Beacon's wins. A fresh
+  install has no `managed.json`, so it adopts nothing and removes nothing.
+  `A2A_PORT`, `A2A_HOST`, and `A2A_AGENT_NAME` are always Beacon's, because
+  they follow the agent's `reach` block.
+- **This does not make outside peers go through the policy.** The policy governs
+  what Beacon manages. An agent's owner can still add a peer by hand, as on any
+  host they control. Beacon neither blocks nor removes it.
 - Outbound changes take effect on the agent's next turn, with no restart.
   Inbound changes (who may call in) need a restart, because Hermes reads
   them at startup. For those, the sync asks for a graceful

@@ -155,6 +155,9 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
   Beacon is always allowed; no policy file means Beacon only). Any new path by which one
   agent reaches or hands work to another must check it, as direct calls,
   the mailbox and board assignment do.
+- **The host sync only touches what Beacon created** (`managed.json` beside
+  it). Never write code that replaces an agent's `a2a_agents` or caller lists
+  wholesale: an agent's owner may have added their own entries.
 - **Templates deep-merge** into an agent's `desired` in listed order, agent
   wins; the merge happens on read, never rewrites the file.
 - **Config pushes are validated** against

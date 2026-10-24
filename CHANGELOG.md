@@ -8,6 +8,28 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-10-24
+
+### Changed
+
+- **The host sync no longer replaces an agent's whole A2A configuration.** It
+  used to overwrite `a2a_agents`, `A2A_PEER_TOKENS`, `A2A_TRUSTED_PEERS`, and
+  every `A2A_TOKEN_*` variable on each run, which would have erased any peer,
+  caller, or token an agent's owner added. It now touches only the names it
+  created, tracked in `managed.json`, and leaves everything else alone. The
+  caller lists are merged; peers are written and removed one entry at a time
+  (`config set a2a_agents.<peer>`, `config unset`). A fresh install adopts
+  nothing. **An install made before this version must run
+  `sync.py <state> --adopt` before the new script takes over**, or a peer that
+  Beacon later revokes stays; see the README.
+
+### Fixed
+
+- **Tests could write to the real operational store.** A background thread
+  from a board-notice test outlived its fixtures and wrote into the real
+  `state/beacon.db`, which flipped a delivered message back to queued. The
+  suite now uses a disposable state directory for the whole session.
+
 ## [0.17.0] — 2026-10-24
 
 ### Added
