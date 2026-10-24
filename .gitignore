@@ -22,3 +22,4 @@ fleet/policy.yaml
 
 # Operational store (mailbox, ...): runtime state, never committed.
 state/
+fleet/policy-history/

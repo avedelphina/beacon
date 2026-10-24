@@ -21,7 +21,11 @@ allowed (backend/mailbox.py delivers late ones as Beacon).
 """
 
 import fnmatch
+import hashlib
+import os
 import re
+import tempfile
+import time
 from pathlib import Path
 
 import yaml
@@ -31,6 +35,9 @@ from . import store
 from .schemas import ID_RE, Agent
 
 POLICY_FILE = store.FLEET_DIR / "policy.yaml"
+# Every saved-over version is kept here (gitignored), newest 50.
+HISTORY_DIR = store.FLEET_DIR / "policy-history"
+HISTORY_KEEP = 50
 _SELECTOR_RE = re.compile(r"^(\*|tag:[a-z0-9*][a-z0-9*-]*|[a-z0-9][a-z0-9-]*)$")
 
 
@@ -141,3 +148,89 @@ def matrix(policy: Policy | None, fleet: list[Agent]) -> dict[str, list[str]]:
     """caller id -> the agent ids it may call, among agents with a reach block."""
     reachable = [a for a in fleet if a.reach is not None]
     return {c.id: [t.id for t in reachable if t.id != c.id and allows(policy, c, t)] for c in reachable}
+
+
+# ---------------------------------------------------------------------------
+# Editing: check a new text, show what it would change, save it with history.
+# ---------------------------------------------------------------------------
+
+
+def read_text() -> str:
+    path = Path(POLICY_FILE)
+    return path.read_text() if path.exists() else ""
+
+
+def text_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def parse(text: str) -> Policy:
+    """A policy from editor text. ValueError carries a message a person can act on."""
+    try:
+        data = yaml.safe_load(text) if text.strip() else {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"not valid YAML: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("the policy must be a mapping with `rules`, `deny`, and optionally `tags`")
+    try:
+        return Policy.model_validate(data)
+    except ValueError as exc:  # pydantic's ValidationError: one line per problem
+        lines = [f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()]  # type: ignore[attr-defined]
+        raise ValueError("; ".join(lines)) from exc
+
+
+def inbound(grid: dict[str, list[str]]) -> dict[str, set[str]]:
+    """target id -> the agents allowed to call it, from a matrix()."""
+    result: dict[str, set[str]] = {caller: set() for caller in grid}
+    for caller, targets in grid.items():
+        for target in targets:
+            result.setdefault(target, set()).add(caller)
+    return result
+
+
+def preview(text: str, fleet: list[Agent]) -> dict:
+    """What saving `text` would do, without saving: validation errors, likely
+    mistakes, the new who-may-call-whom table, which calls it adds and removes,
+    and which agents restart (Hermes reads who may call in only at startup, so
+    an agent whose set of allowed callers changes restarts on its next sync)."""
+    current = load()
+    old = matrix(current, fleet)
+    result: dict = {"errors": [], "problems": [], "matrix": None, "added": [], "removed": [], "restarts": []}
+    try:
+        new_policy = parse(text)
+    except ValueError as exc:
+        result["errors"].append(str(exc))
+        return result
+    new = matrix(new_policy, fleet)
+    result["matrix"] = new
+    result["problems"] = problems(new_policy, fleet)
+    pairs = lambda grid: {(c, t) for c, ts in grid.items() for t in ts}  # noqa: E731
+    result["added"] = sorted(pairs(new) - pairs(old))
+    result["removed"] = sorted(pairs(old) - pairs(new))
+    before, after = inbound(old), inbound(new)
+    result["restarts"] = sorted(a for a in after if after[a] != before.get(a, set()))
+    return result
+
+
+def save(text: str, author: str) -> None:
+    """Write `text` as the policy, keeping the version it replaces in
+    fleet/policy-history/. The text is written exactly as given, so comments
+    and layout survive. Atomic: a reader never sees half a file. Raises
+    ValueError if it doesn't parse."""
+    parse(text)
+    path = Path(POLICY_FILE)
+    if path.exists():
+        history = Path(HISTORY_DIR)
+        history.mkdir(parents=True, exist_ok=True)
+        who = re.sub(r"[^a-z0-9]+", "-", author.lower()).strip("-") or "unknown"
+        (history / f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{who}.yaml").write_text(path.read_text())
+        for old in sorted(history.glob("*.yaml"))[:-HISTORY_KEEP]:
+            old.unlink()
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".policy-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise

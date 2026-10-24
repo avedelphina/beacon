@@ -47,7 +47,8 @@ backend/
   templates.py    config template load/validate/deep-merge under `desired`
   tiers.py        capability -> T0–T5 autonomy tier registry
   bus.py          agent bus: one A2A v1.0 SendMessage to an agent's reach.endpoint
-  policy.py       fleet/policy.yaml: tag rules (Tailscale-style) behind may_call
+  policy.py       fleet/policy.yaml: tag rules (Tailscale-style) behind may_call;
+                  preview/save for the Policy tab (T4, history in fleet/policy-history/)
   mailbox.py      relay + voicemail behind POST /a2a/{agent}; delivers on the
                   recipient's /mesh pull (no scheduler)
   opstore.py      operational store: SQLite at state/beacon.db (runtime state,

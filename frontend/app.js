@@ -639,7 +639,11 @@ async function fillAgentForm(a) {
   f.host.value = a?.host ?? f.host.value;
   f.owner.value = a?.owner ?? "";
   f.notes.value = a?.notes ?? "";
+  f.tags.value = (a?.tags ?? []).join(", ");
   f.templates.value = (a?.templates ?? []).join(", ");
+  // The record as loaded: saving must keep what the form doesn't show
+  // (reach, and whatever fields come later), not rebuild the agent from scratch.
+  f.dataset.original = JSON.stringify(a ?? {});
   f.desired.value = JSON.stringify(
     a?.desired ?? { install_mode: "simple", os_user: "", service: "", log_path: "", config: {}, env_keys: [] },
     null, 2
@@ -677,12 +681,14 @@ document.getElementById("agent-form").addEventListener("submit", async (e) => {
     return;
   }
   const body = {
+    ...JSON.parse(f.dataset.original || "{}"),
     id: f.id.value,
     type: f.type.value,
     host: f.host.value,
     profile: f.profile.value || null,
     owner: f.owner.value || null,
     notes: f.notes.value || null,
+    tags: splitList(f.tags.value),
     templates: splitList(f.templates.value),
     desired,
   };
@@ -779,6 +785,72 @@ document.getElementById("card-create-form").addEventListener("submit", async (e)
     alert(err.message);
   }
 });
+
+// ---- policy ----
+let policyHash = "";
+
+function policyMatrixHtml(grid, added = [], removed = []) {
+  const ids = Object.keys(grid).sort();
+  if (!ids.length) return '<p class="empty">No agents with a reach block.</p>';
+  const isAdded = (c, t) => added.some(([a, b]) => a === c && b === t);
+  const wasRemoved = (c, t) => removed.some(([a, b]) => a === c && b === t);
+  const cell = (c, t) => {
+    if (c === t) return '<td class="pm-self">·</td>';
+    if (grid[c].includes(t)) return `<td class="pm-yes${isAdded(c, t) ? " pm-new" : ""}">${isAdded(c, t) ? "+" : "yes"}</td>`;
+    return `<td class="pm-no${wasRemoved(c, t) ? " pm-gone" : ""}">${wasRemoved(c, t) ? "−" : ""}</td>`;
+  };
+  return `<table class="policy-matrix"><thead><tr><th>caller ↓ / target →</th>${ids.map((i) => `<th>${esc(i)}</th>`).join("")}</tr></thead><tbody>${
+    ids.map((c) => `<tr><th>${esc(c)}</th>${ids.map((t) => cell(c, t)).join("")}</tr>`).join("")}</tbody></table>`;
+}
+
+function showPolicyResult(r, extra = "") {
+  const out = document.getElementById("policy-result");
+  const parts = [];
+  r.errors.forEach((e) => parts.push(`<div class="finding critical"><span class="sev"></span><span class="summary">${esc(e)}</span></div>`));
+  r.problems.forEach((p) => parts.push(`<div class="finding warn"><span class="sev"></span><span class="summary">${esc(p)}</span></div>`));
+  if (!r.errors.length) {
+    const restarts = r.restarts.length ? `Restarts on next sync: ${r.restarts.map(esc).join(", ")}.` : "No agent restarts.";
+    parts.push(`<p>${r.added.length} call path(s) added (+), ${r.removed.length} removed (−). ${restarts}${extra}</p>`);
+  }
+  out.innerHTML = parts.join("");
+  document.getElementById("policy-matrix-wrap").innerHTML = r.matrix ? policyMatrixHtml(r.matrix, r.added, r.removed) : "";
+}
+
+async function renderPolicy() {
+  try {
+    const p = await json("/api/policy");
+    document.getElementById("policy-text").value = p.text;
+    policyHash = p.hash;
+    showPolicyResult({ errors: [], problems: p.problems, matrix: p.matrix, added: [], removed: [], restarts: [] });
+  } catch (err) {
+    document.getElementById("policy-result").textContent = `Could not load the policy: ${err.message}`;
+  }
+}
+
+document.getElementById("policy-check").addEventListener("click", async () => {
+  try {
+    showPolicyResult(await json("/api/policy/preview", "POST", { text: document.getElementById("policy-text").value }));
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+document.getElementById("policy-save").addEventListener("click", async () => {
+  const text = document.getElementById("policy-text").value;
+  try {
+    const first = await json("/api/policy", "PUT", { text, base_hash: policyHash, confirm: false });
+    showPolicyResult({ errors: [], problems: first.problems, matrix: (await json("/api/policy/preview", "POST", { text })).matrix,
+                       added: first.added, removed: first.removed, restarts: first.restarts });
+    if (!confirm(`${first.detail}\n\nSave this policy?`)) return;
+    const done = await json("/api/policy", "PUT", { text, base_hash: policyHash, confirm: true });
+    policyHash = done.hash;
+    showPolicyResult(done, " Saved.");
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+document.querySelector('[data-tab="policy"]').addEventListener("click", renderPolicy);
 
 renderHosts();
 renderAgents();

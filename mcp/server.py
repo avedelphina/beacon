@@ -135,6 +135,21 @@ async def mailbox(limit: int = 20) -> object:
 
 
 @mcp.tool(annotations=READ_ONLY)
+async def get_policy() -> object:
+    """The access policy: the file's text, its problems, and the who-may-call-whom
+    table. Changing it is not an MCP action: an operator edits it in the Policy tab."""
+    return await _get("/api/policy")
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def preview_policy(text: str) -> object:
+    """Check a proposed fleet/policy.yaml without saving it: validation errors,
+    likely mistakes, the new table, which calls it adds or removes, and which
+    agents would restart. Read-only; saving needs a human in the browser."""
+    return await _post("/api/policy/preview", json={"text": text})
+
+
+@mcp.tool(annotations=READ_ONLY)
 async def get_agent(agent_id: str) -> object:
     """Get one agent's full record, including its desired.config/env_keys."""
     return await _get(f"/api/agents/{_agent_path_id(agent_id)}")

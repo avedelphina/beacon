@@ -8,6 +8,30 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-10-24
+
+### Added
+
+- **Policy editor.** A **Policy** tab edits `fleet/policy.yaml`. **Check**
+  shows validation errors, likely mistakes, the new who-may-call-whom table
+  with the added and removed paths marked, and which agents would restart.
+  **Save** asks for confirmation and writes the text as typed, so comments
+  survive. It is a human-only action (new tier T4, `set_policy`); the MCP
+  token cannot save. A stale editor is refused (409) and invalid text too
+  (422). Each replaced version is kept in `fleet/policy-history/` (newest
+  50, named by time and author). `POST /api/policy/preview` and
+  `PUT /api/policy` are the API; MCP gains read-only `get_policy` and
+  `preview_policy`.
+- The agent form has a **Tags** field.
+
+### Fixed
+
+- **Saving an agent in the UI dropped its `reach` block** (endpoint, network,
+  board, callers, capabilities), because the form rebuilt the record from
+  only the fields it shows. It now keeps the loaded record underneath the
+  edits. Anyone who edited an agent in the UI since 0.10 should check that
+  agent's `reach`.
+
 ## [0.16.0] — 2026-10-24
 
 ### Changed

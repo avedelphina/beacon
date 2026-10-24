@@ -65,7 +65,7 @@ async def lifespan(_app):
         yield
 
 
-app = FastAPI(title="Beacon", version="0.16.0", lifespan=lifespan)
+app = FastAPI(title="Beacon", version="0.17.0", lifespan=lifespan)
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:
@@ -218,19 +218,60 @@ def list_agents() -> list[Agent]:
     return store.list_agents()
 
 
+class PolicyText(BaseModel):
+    text: str
+
+
+class PolicySave(BaseModel):
+    text: str
+    # The hash of the text the editor loaded. If the file changed since, the
+    # save is refused rather than overwriting someone else's edit.
+    base_hash: str
+    confirm: bool = False
+
+
 @app.get("/api/policy")
 def get_policy() -> dict:
-    """The access policy as it stands: the rules, what looks wrong in them,
-    and the resulting who-may-call-whom table. Edit fleet/policy.yaml to
-    change it (a Git-reviewed file, like the rest of the fleet)."""
+    """The access policy as it stands: the file's text (for the editor), the
+    rules, what looks wrong in them, and the resulting who-may-call-whom table."""
     loaded = policy.load()
     fleet = store.list_agents()
+    text = policy.read_text()
     return {
         "present": loaded is not None,
+        "text": text,
+        "hash": policy.text_hash(text),
         "policy": loaded.model_dump(by_alias=True) if loaded else None,
         "problems": policy.problems(loaded, fleet),
         "matrix": policy.matrix(loaded, fleet),
     }
+
+
+@app.post("/api/policy/preview")
+def preview_policy(body: PolicyText) -> dict:
+    """What saving this text would do, without saving it. Read-only."""
+    return policy.preview(body.text, store.list_agents())
+
+
+@app.put("/api/policy")
+def put_policy(body: PolicySave, request: Request):
+    """Replace fleet/policy.yaml with the edited text. A human browser session
+    only (T4), asks for confirmation first, refuses invalid text and a file
+    that changed since the editor loaded it, and keeps the old version in
+    fleet/policy-history/."""
+    _require_human_session(request, "set_policy")
+    checked = policy.preview(body.text, store.list_agents())
+    if checked["errors"]:
+        raise HTTPException(422, "; ".join(checked["errors"]))
+    if policy.text_hash(policy.read_text()) != body.base_hash:
+        raise HTTPException(409, "fleet/policy.yaml changed since you opened it; reload the editor and redo your edit")
+    summary = (f"replace the access policy: {len(checked['added'])} call path(s) added, "
+               f"{len(checked['removed'])} removed; restarts {', '.join(checked['restarts']) or 'no agents'}")
+    if (gate := _confirm_gate("set_policy", body.confirm, summary)) is not None:
+        return {**gate, **{k: checked[k] for k in ("added", "removed", "restarts", "problems")}}
+    policy.save(body.text, _board_author(request))
+    logger.warning("access policy replaced by %s: %s", _board_author(request), summary)
+    return {"saved": True, **checked, "hash": policy.text_hash(body.text)}
 
 
 @app.get("/api/agents/registry")

@@ -16,6 +16,7 @@
     <button class="tab active" data-tab="hosts">Hosts</button>
     <button class="tab" data-tab="agents">Agents</button>
     <button class="tab" data-tab="board">Board</button>
+    <button class="tab" data-tab="policy">Policy</button>
     <button class="tab" data-tab="templates">Templates</button>
     <button class="tab" data-tab="cron-jobs">Cron jobs</button>
   </nav>
@@ -78,6 +79,20 @@
     <div class="board" id="board-columns"></div>
   </section>
 
+  <section id="policy-view" class="view">
+    <div class="view-head">
+      <h1>Policy</h1>
+      <div>
+        <button class="btn" id="policy-check">Check</button>
+        <button class="btn primary" id="policy-save">Save</button>
+      </div>
+    </div>
+    <p class="hint" style="margin:-0.6rem 0 1rem">Who may call whom, in <code>fleet/policy.yaml</code>. Rules are one-way; <code>deny</code> wins; no file means Beacon only. Agents are grouped by the <code>tags</code> on their records. <em>Check</em> shows what a change would do before anything is saved. Saving restarts the agents whose allowed callers change.</p>
+    <textarea id="policy-text" class="policy-editor" spellcheck="false" rows="22"></textarea>
+    <div id="policy-result" class="policy-result"></div>
+    <div class="table-wrap" id="policy-matrix-wrap"></div>
+  </section>
+
   <section id="cron-jobs-view" class="view">
     <div class="view-head">
       <h1>Cron jobs</h1>
@@ -126,6 +141,9 @@
       <label>Profile <input name="profile" placeholder="primary"></label>
     </div>
     <label>Host <select name="host" id="agent-host-select" required></select></label>
+    <label>Tags <span class="hint">(comma separated; groups for the access policy)</span>
+      <input name="tags" placeholder="family-a">
+    </label>
     <label>Owner <input name="owner" placeholder="tom"></label>
     <label>Notes <input name="notes"></label>
     <label>Templates <span class="hint">(comma separated, names from fleet/templates/)</span>
