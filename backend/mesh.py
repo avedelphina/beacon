@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import store
+from . import policy, store
 from .drivers import get_driver
 from .schemas import ID_RE, Agent
 
@@ -80,15 +80,21 @@ def skills() -> list[dict]:
     return found
 
 
-def may_call(caller: str, target: Agent) -> bool:
+def may_call(caller: str, target: Agent, fleet: list[Agent] | None = None) -> bool:
     """The access policy, in one place: Beacon (operators) always; otherwise
-    the target's `reach.callers` if it has one, else anyone on its network.
-    Applied to direct calls (the target's inbound tokens), the mailbox, and
-    board assignments, so no path routes around it."""
+    fleet/policy.yaml must allow it (backend/policy.py; no file means Beacon
+    only), and the target's own `reach.callers`, if set, must include the
+    caller too. Applied to direct calls (the target's inbound tokens), the
+    mailbox, and board assignments, so no path routes around it. Pass `fleet`
+    when asking in a loop, to avoid reading the records again each time."""
     if caller == BEACON_PEER:
         return True
     callers = target.reach.callers if target.reach else None
-    return callers is None or caller in callers
+    if callers is not None and caller not in callers:
+        return False
+    agents = fleet if fleet is not None else store.list_agents()
+    source = next((a for a in agents if a.id == caller), None)
+    return source is not None and policy.allows(policy.load(), source, target)
 
 
 def peers(agent: Agent, fleet: list[Agent]) -> list[Agent]:
@@ -118,7 +124,7 @@ def config(agent_id: str) -> dict:
     outbound = []
     # Only peers that will accept this agent: no peer-list entries that can
     # only ever be refused.
-    for p in (p for p in direct if may_call(agent.id, p)):
+    for p in (p for p in direct if may_call(agent.id, p, fleet)):
         outbound.append({"name": p.id, "url": p.reach.endpoint, "token": token(agent.id, p.id),
                          "capabilities": p.reach.capabilities})
         if beacon_url:
@@ -129,7 +135,7 @@ def config(agent_id: str) -> dict:
     if beacon_url:
         # No direct path to these: one entry under the plain name, through
         # Beacon's relay. Agents call a peer by its id either way; Beacon carries it.
-        for p in (p for p in relayed if may_call(agent.id, p)):
+        for p in (p for p in relayed if may_call(agent.id, p, fleet)):
             outbound.append({"name": p.id, "url": f"{beacon_url}/a2a/{p.id}", "token": token(agent.id, p.id),
                              "capabilities": [*p.reach.capabilities, "relay"]})
     return {
@@ -146,7 +152,7 @@ def config(agent_id: str) -> dict:
         # Callers from every network: a relayed caller arrives through Beacon
         # with its own token. The access policy still decides who.
         "inbound": {name: token(name, agent.id)
-                    for name in (BEACON_PEER, *(p.id for p in [*direct, *relayed] if may_call(p.id, agent)))},
+                    for name in (BEACON_PEER, *(p.id for p in [*direct, *relayed] if may_call(p.id, agent, fleet)))},
         "outbound": outbound,
         # The agent signs in to the board with its pull token, which it has.
         "board": {"url": f"{beacon_url}/board/mcp"} if agent.reach.board and beacon_url else None,
@@ -170,14 +176,40 @@ def install_script(agent_id: str, docker: str | None = None, docker_user: str = 
     return driver.mesh_install_script(agent, beacon_url, pull_token)
 
 
+def print_policy() -> int:
+    """The whole who-can-call-whom picture in one table, for checking a policy
+    before it is applied. Exit 1 when something looks wrong."""
+    try:
+        loaded = policy.load()
+    except ValueError as exc:  # pydantic validation errors are ValueErrors
+        print(f"error: fleet/policy.yaml is invalid:\n{exc}", file=sys.stderr)
+        return 1
+    fleet = store.list_agents()
+    found = policy.problems(loaded, fleet)
+    grid = policy.matrix(loaded, fleet)
+    ids = sorted(grid)
+    if ids:
+        width = max(len(i) for i in ids)
+        print(f"{'caller -> target':<{width}}  " + " ".join(f"{i[:6]:<6}" for i in ids))
+        for caller in ids:
+            print(f"{caller:<{width}}  " + " ".join(f"{'yes' if t in grid[caller] else '.':<6}" for t in ids))
+        print("\nBeacon (operators, MCP clients) may call everyone. Replies are always allowed.")
+    for line in found:
+        print(f"WARNING: {line}")
+    return 1 if found else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m backend.mesh", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("policy", help="print who may call whom, and anything in fleet/policy.yaml that looks wrong")
     install = sub.add_parser("install", help="print the one-time host bootstrap script for one agent")
     install.add_argument("agent_id")
     install.add_argument("--docker", metavar="CONTAINER", help="agent runs in this container; script runs on its host as root")
     install.add_argument("--docker-user", default="hermes", help="user Hermes runs as in the container (default: hermes)")
     args = parser.parse_args(argv)
+    if args.cmd == "policy":
+        return print_policy()
     try:
         sys.stdout.write(install_script(args.agent_id, args.docker, args.docker_user))
     except (store.NotFound, ValueError, MissingSecret) as exc:

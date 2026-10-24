@@ -37,12 +37,16 @@ def fleet(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "DECOMMISSIONED_DIR", tmp_path / "decommissioned")
     monkeypatch.setattr(cron_store, "CRON_DIR", cron_dir)
 
-    from backend import opstore, templates
+    from backend import opstore, policy, templates
 
     monkeypatch.setattr(templates, "TEMPLATES_DIR", templates_dir)
     # The operational store (mailbox, ...) is runtime state; keep it out of
     # the real state/ dir too.
     monkeypatch.setattr(opstore, "STATE_DIR", tmp_path / "state")
+    # Tests start from "everyone may call everyone"; the default with no file
+    # is Beacon-only, and the policy tests delete this file to check that.
+    monkeypatch.setattr(policy, "POLICY_FILE", tmp_path / "policy.yaml")
+    (tmp_path / "policy.yaml").write_text('rules:\n  - {from: ["*"], to: ["*"]}\n')
     return tmp_path
 
 

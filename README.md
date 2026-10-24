@@ -328,11 +328,50 @@ password, copy the script to the host and run it there with `sudo bash`.
 
 ### Access policy
 
-`reach.callers` lists the agents that may call an agent. If it is not
-set, any agent on the same network may call it. Beacon itself, which
-means operators and MCP clients, is always allowed, so nobody locks
-themselves out. A single rule, `mesh.may_call`, applies on every path, so
-no path routes around it:
+Who may call whom is decided by one file, `fleet/policy.yaml`, written in
+the style of Tailscale's ACLs. Agents carry **tags** in their own record, and
+rules connect agents and tags. The file is plain YAML, so it is reviewed in
+Git like the rest of the fleet. `fleet/policy.yaml.example` has a starting
+point.
+
+```yaml
+# fleet/policy.yaml
+tags: [family-a, family-b]        # optional: declared, so a typo is an error
+rules:
+  - {from: [tag:family-a], to: [tag:family-a]}
+  - {from: [tag:family-b], to: [tag:family-b]}
+  - {from: [coordinator], to: ["tag:family-*"]}   # one agent reaches every family
+deny:                                       # checked first; always wins
+  - {from: [tag:family-b], to: [tag:family-a]}
+```
+
+```yaml
+# fleet/agents/<id>.yaml
+tags: [family-a]       # adding another bot to a family is this one line
+```
+
+- **Selectors:** an agent id, `tag:<name>` (the name may contain `*`
+  wildcards), or `*` for every agent.
+- **Rules are one-way:** `from` may call `to`. Add a rule the other way if
+  both should be able to start a conversation.
+- **Allowed means** no `deny` rule matches and some `rules` entry does.
+- **No file means Beacon only.** Without `fleet/policy.yaml`, no agent may
+  call another. To let everyone talk to everyone, write it down:
+  `rules: [{from: ["*"], to: ["*"]}]`.
+- **Beacon itself** (operators and MCP clients) is always allowed and is
+  not part of any rule, so nobody locks themselves out.
+- **Replies are never blocked.** The answer to a call that was allowed is
+  allowed, whether it comes straight back or later through the mailbox. A
+  late reply arrives from Beacon, which every agent trusts, because a
+  one-way rule would otherwise make the caller refuse it.
+- **Tags belong on the agent, not the host.** Several agents often share one
+  host.
+- **Routing is separate.** `reach.network` still decides *how* a peer is
+  reached (direct, or through Beacon's relay). The policy decides *whether*.
+- **`reach.callers`** remains as an extra, per-agent limit on top of the
+  policy: both must allow the call.
+
+One rule, `mesh.may_call`, applies on every path, so no path routes around it:
 
 - **Direct calls:** the target's `A2A_PEER_TOKENS` holds only allowed
   callers, so Hermes refuses anyone else. The host sync distributes the
@@ -347,7 +386,16 @@ no path routes around it:
 - **Peer lists:** an agent's list includes only peers that accept it, so
   it is never offered a call that can only fail.
 
-`GET /api/agents/registry` shows each agent's `callers`.
+**Check a policy before you apply it.** `python -m backend.mesh policy`
+prints the full who-may-call-whom table and lists anything that looks wrong:
+a tag that is not declared, a tag or id that matches no agent, or a missing
+file. It exits 1 if it finds something. `GET /api/policy` returns the same
+information, and `GET /api/agents/registry` shows each agent's `tags` and
+`callers`. Beacon also logs the problems at startup. An invalid file does not
+stop Beacon; it answers calls as if nothing were allowed, so check the log.
+
+**A change restarts agents.** A policy change alters who each agent accepts.
+The agents affected restart once, gracefully, on their next sync.
 
 **Names.** An agent is identified by its fleet **id** (the file name in
 `fleet/agents/`), never by a display name. Two agents may share a persona or
@@ -356,9 +404,6 @@ display name, as long as their ids differ (for example `team-a-helper` and
 authors all use the id. An id is unique within a Beacon, and `beacon` is
 reserved. Renaming an agent means a new id, with new tokens; cards and held
 messages keep the old id as text.
-
-A change to `callers` changes who the target accepts. Its gateway therefore
-restarts once, gracefully, on the next sync.
 
 ### Mailbox: relay and voicemail
 

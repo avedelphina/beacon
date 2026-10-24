@@ -89,7 +89,7 @@ def deliver_pending(recipient_id: str) -> None:
             continue
         try:
             view = bus.call(agent, _framed(row), row["context_id"] if row["kind"] == "message" else None,
-                            token=mesh.token(row["sender"], recipient_id))
+                            token=_delivery_token(row, recipient_id))
         except bus.Unreachable as exc:
             _finish(row["id"], "queued" if exc.transient else "failed", str(exc))
             if exc.transient:
@@ -115,7 +115,7 @@ def claim_for_pull(recipient_id: str, limit: int = 10) -> list[dict]:
     items = []
     while len(items) < limit and (row := _claim(recipient_id)) is not None:
         if _allowed(row, agent):
-            items.append({"id": row["id"], "text": _framed(row), "token": mesh.token(row["sender"], recipient_id),
+            items.append({"id": row["id"], "text": _framed(row), "token": _delivery_token(row, recipient_id),
                           "context_id": row["context_id"] if row["kind"] == "message" else None})
     return items
 
@@ -135,9 +135,18 @@ def report(recipient_id: str, message_id: int, ok: bool, reply: str = "", transi
     return _delivered(row, reply or "(no text)")
 
 
+def _delivery_token(row, recipient_id: str) -> str:
+    """A message arrives as its sender. A reply or notice arrives from Beacon,
+    which every agent trusts: the policy is one-way, and answering a call that
+    was allowed must not need the answerer to be allowed to call back."""
+    sender = row["sender"] if row["kind"] == "message" else mesh.BEACON_PEER
+    return mesh.token(sender, recipient_id)
+
+
 def _allowed(row, agent) -> bool:
-    # Checked again at delivery: the policy may have changed while it waited.
-    if mesh.may_call(row["sender"], agent):
+    # Replies and notices answer something already allowed; only a message is
+    # checked, and checked again at delivery: the policy may have changed.
+    if row["kind"] != "message" or mesh.may_call(row["sender"], agent):
         return True
     _finish(row["id"], "failed", f"{agent.id} does not accept calls from {row['sender']}")
     return False

@@ -8,6 +8,28 @@ and [ROADMAP.md](ROADMAP.md) for what's planned.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-10-24
+
+### Changed
+
+- **Access is now decided by `fleet/policy.yaml`, and the default is Beacon
+  only.** Before, any agent on the same network could call any other. Now no
+  agent may call another unless a rule allows it. **To keep today's behavior,
+  create `fleet/policy.yaml` with `rules: [{from: ["*"], to: ["*"]}]` before you
+  deploy this version**, or every agent loses its peers. See "Access policy"
+  in the README.
+
+### Added
+
+- **Tag policy.** Agents carry `tags`; `fleet/policy.yaml` holds
+  Tailscale-style rules (`from`/`to` selectors: agent id, `tag:name` with `*`
+  wildcards, or `*`) and `deny` rules that always win. Rules are one-way;
+  replies are always allowed, and late replies arrive from Beacon so a
+  one-way rule does not block them. `reach.callers` remains as an extra
+  per-agent limit. `python -m backend.mesh policy` prints the full
+  who-may-call-whom table and lists likely mistakes; `GET /api/policy` returns
+  it; Beacon logs problems at startup. The registry shows each agent's tags.
+
 ### Fixed
 
 - **`beacon` can no longer be an agent id.** It is the mesh's name for Beacon

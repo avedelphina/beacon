@@ -79,7 +79,7 @@ def test_registry_hides_endpoint_and_network(client, reachable):
     body = client.get("/api/agents/registry").json()
 
     by_id = {row["id"]: row for row in body}
-    assert by_id["a1"] == {"id": "a1", "callable": True, "capabilities": ["calendar"], "callers": None}
+    assert by_id["a1"] == {"id": "a1", "callable": True, "capabilities": ["calendar"], "callers": None, "tags": []}
     assert by_id["idle"]["callable"] is False
     assert "endpoint" not in json.dumps(body)
     assert "tailnet" not in json.dumps(body)

@@ -106,8 +106,9 @@ def test_offline_target_gets_voicemail_and_the_reply_comes_back(client, net):
     assert delivered["to"] == "bravo" and delivered["auth"] == f"Bearer {mesh.token('alpha', 'bravo')}"
     assert "Delivered by the Beacon mailbox: alpha sent this" in delivered["text"]
     assert delivered["text"].endswith("are you there?") and delivered["context"] == "ctx-1"
-    # The reply reaches alpha as a new message *from bravo*.
-    assert reply["to"] == "alpha" and reply["auth"] == f"Bearer {mesh.token('bravo', 'alpha')}"
+    # The reply reaches alpha as a new message about bravo, delivered by Beacon:
+    # the policy is one-way, so alpha need not trust bravo to hear its answer.
+    assert reply["to"] == "alpha" and reply["auth"] == f"Bearer {mesh.token('beacon', 'alpha')}"
     assert "Reply from bravo via the Beacon mailbox" in reply["text"] and reply["text"].endswith("bravo got it")
     assert [(r["kind"], r["state"]) for r in _rows()] == [("message", "delivered"), ("reply", "delivered")]
 

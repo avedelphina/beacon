@@ -47,6 +47,7 @@ backend/
   templates.py    config template load/validate/deep-merge under `desired`
   tiers.py        capability -> T0–T5 autonomy tier registry
   bus.py          agent bus: one A2A v1.0 SendMessage to an agent's reach.endpoint
+  policy.py       fleet/policy.yaml: tag rules (Tailscale-style) behind may_call
   mailbox.py      relay + voicemail behind POST /a2a/{agent}; delivers on the
                   recipient's /mesh pull (no scheduler)
   opstore.py      operational store: SQLite at state/beacon.db (runtime state,
@@ -149,7 +150,8 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 - **Live state is never stored in YAML.** `status()` and `config_diff()` poll
   the host fresh; fleet records hold only intent (`desired`).
 - **Agent access policy is one rule**, `mesh.may_call(caller, target)`
-  (`reach.callers`; Beacon is always allowed). Any new path by which one
+  (`fleet/policy.yaml` tag rules via `backend/policy.py`, plus `reach.callers`;
+  Beacon is always allowed; no policy file means Beacon only). Any new path by which one
   agent reaches or hands work to another must check it, as direct calls,
   the mailbox and board assignment do.
 - **Templates deep-merge** into an agent's `desired` in listed order, agent
