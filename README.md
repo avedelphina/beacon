@@ -349,6 +349,14 @@ no path routes around it:
 
 `GET /api/agents/registry` shows each agent's `callers`.
 
+**Names.** An agent is identified by its fleet **id** (the file name in
+`fleet/agents/`), never by a display name. Two agents may share a persona or
+display name, as long as their ids differ (for example `team-a-helper` and
+`team-b-helper`). Tokens, peer lists, `callers`, mailbox senders, and board
+authors all use the id. An id is unique within a Beacon, and `beacon` is
+reserved. Renaming an agent means a new id, with new tokens; cards and held
+messages keep the old id as text.
+
 A change to `callers` changes who the target accepts. Its gateway therefore
 restarts once, gracefully, on the next sync.
 

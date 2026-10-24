@@ -141,6 +141,10 @@ class AgentReach(BaseModel):
         return v
 
 
+# Names the mesh uses for itself; no agent may take one (see Agent.id).
+RESERVED_AGENT_IDS = frozenset({"beacon"})
+
+
 class Agent(BaseModel):
     id: str
     type: str
@@ -157,6 +161,16 @@ class Agent(BaseModel):
     # Absent means this agent is inventory-only: Beacon can still deploy and
     # observe it, but call_agent refuses it until a reach block exists.
     reach: AgentReach | None = None
+
+    @field_validator("id")
+    @classmethod
+    def _not_a_reserved_name(cls, v: str) -> str:
+        # why: "beacon" is the mesh name for Beacon itself, meaning operators
+        # and MCP clients. An agent with that id would derive Beacon's own
+        # tokens and pass every access policy (backend/mesh.py).
+        if v in RESERVED_AGENT_IDS:
+            raise ValueError(f"{v!r} is reserved for Beacon itself; pick another agent id")
+        return v
 
 
 # ---------------------------------------------------------------------------

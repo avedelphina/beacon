@@ -100,3 +100,16 @@ def test_board_assignment_respects_the_policy(fleet3):
 def test_callers_must_be_agent_ids():
     with pytest.raises(ValueError):
         _agent("x", callers=["Not An Id"])
+
+
+def test_an_agent_cannot_take_the_name_beacon(client):
+    """"beacon" is the mesh's name for operators; an agent with that id would
+    derive Beacon's own tokens and pass every access policy."""
+    with pytest.raises(ValueError, match="reserved"):
+        Agent.model_validate({"id": "beacon", "type": "hermes", "host": "h1"})
+
+    client.put("/api/hosts/h1", json={"id": "h1", "address": "10.0.0.1",
+                                      "ssh": {"user": "u", "key": "/k", "port": 22}, "tags": []})
+    response = client.put("/api/agents/beacon", json={"id": "beacon", "type": "hermes", "host": "h1", "desired": {}})
+    assert response.status_code == 422
+    assert "reserved" in response.text
