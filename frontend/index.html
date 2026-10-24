@@ -47,9 +47,15 @@
       <h1>Agents</h1>
       <button class="btn primary" id="add-agent">+ Add agent</button>
     </div>
+    <div class="tag-bar" id="agent-tag-bar"></div>
+    <div class="bulk-bar" id="agent-bulk-bar" hidden>
+      <span id="agent-bulk-count"></span>
+      <button class="btn" id="agent-bulk-tag" type="button">Tag…</button>
+      <button class="link-btn" id="agent-bulk-clear" type="button">Clear selection</button>
+    </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Status</th><th>ID</th><th>Type</th><th>Host</th><th>Profile</th><th>Owner</th><th></th></tr></thead>
+        <thead><tr><th class="sel"></th><th>Status</th><th>ID</th><th>Tags</th><th>Type</th><th>Host</th><th>Profile</th><th>Owner</th><th></th></tr></thead>
         <tbody id="agents-body"></tbody>
       </table>
     </div>
@@ -91,6 +97,9 @@
     <textarea id="policy-text" class="policy-editor" spellcheck="false" rows="22"></textarea>
     <div id="policy-result" class="policy-result"></div>
     <div class="table-wrap" id="policy-matrix-wrap"></div>
+    <h2 class="subhead">Tags in use</h2>
+    <p class="hint">Agents are grouped by their tags. Tag agents on the Agents tab (select some, then <em>Tag…</em>).</p>
+    <div id="policy-tags" class="tag-groups"></div>
   </section>
 
   <section id="cron-jobs-view" class="view">
@@ -296,6 +305,23 @@
 </div>
 
 <datalist id="agent-ids"></datalist>
+<datalist id="tag-names"></datalist>
+
+<div class="modal-backdrop" id="bulk-tag-modal">
+  <form class="modal" id="bulk-tag-form">
+    <h2>Tag agents</h2>
+    <p class="hint" id="bulk-tag-targets"></p>
+    <label>Tag <span class="hint">(lowercase letters, digits, dashes)</span>
+      <input name="tag" required list="tag-names" pattern="[a-z0-9][a-z0-9\-]*" autocomplete="off">
+    </label>
+    <p class="hint">Tags decide who may call whom. Check the Policy tab first: agents whose allowed callers change restart on their next sync.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn" value="remove">Remove tag</button>
+      <button type="submit" class="btn primary" value="add">Add tag</button>
+    </div>
+  </form>
+</div>
 
 <div class="modal-backdrop" id="card-create-modal">
   <form class="modal" id="card-create-form">

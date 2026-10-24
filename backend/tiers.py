@@ -80,6 +80,12 @@ CAPABILITY_TIERS: dict[str, tuple[Tier, str]] = {
         "set of allowed callers changes. The MCP token must not be able to widen its own "
         "reach, so this needs a human browser session.",
     ),
+    "set_agent_access": (
+        Tier.T4,
+        "Tags, `reach.callers`, and `reach.board` decide who may call whom and who may use "
+        "the board, so changing them is a policy change by another route. Human browser "
+        "session only, like the policy editor.",
+    ),
     "update_agent": (
         Tier.T4,
         "Escalated above deploy/update_plugin's T3: this touches the shared code checkout, "

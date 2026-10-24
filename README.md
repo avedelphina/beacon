@@ -21,7 +21,8 @@ only one it's meant to ever support.
   A second agent type means writing a second driver module, not touching
   the core.
 - **Frontend**: a single static page ([frontend/](frontend/)) — vanilla
-  HTML/CSS/JS, no build step, no framework.
+  HTML/CSS/JS, no build step, no framework. It works on a phone: the tab bar
+  scrolls sideways, and tables turn into one card per row.
 - **Transport**: the system `ssh` binary, either with a static key or an
   `ssh_config` file (see [Teleport / tbot](#teleport--tbot) below) — never a
   Python SSH library, so anything that works from your terminal works here.
@@ -419,6 +420,17 @@ file. It exits 1 if it finds something. `GET /api/policy` returns the same
 information, and `GET /api/agents/registry` shows each agent's `tags` and
 `callers`. Beacon also logs the problems at startup. An invalid file does not
 stop Beacon; it answers calls as if nothing were allowed, so check the log.
+
+**Tags in the app.** The **Agents** tab has a Tags column, filter chips
+above the list (one per tag, plus "untagged"), and tick boxes. Tick one or more
+agents and use **Tag…** to add or remove a tag on all of them at once. The
+**Policy** tab lists every tag with its agents under the editor. Tags can also
+be set in an agent's edit form or in its YAML. Tag changes change who may call
+whom, so check the Policy tab first.
+
+**Changing tags, `reach.callers`, or `reach.board` is a human-only action
+(tier T4).** The MCP token cannot do it, so it cannot regroup agents to get
+around the policy editor.
 
 **The Policy tab** edits the file in the browser. **Check** validates the
 text and shows, before anything is saved, what it would do: errors, likely
