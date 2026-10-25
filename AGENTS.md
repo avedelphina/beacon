@@ -199,8 +199,9 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
   `confirm: bool = False` and describe instead of act without it, on top of
   `destructiveHint` annotations — two independent gates.
 - **Cron jobs execute no arbitrary shell**: only the fixed actions `restart`,
-  `push_config`, `status`, and they skip the `confirm` gate because the YAML
-  record itself is the pre-authorization.
+  `status`, and the workflow-gated `push_config` action are recognized. Scheduled
+  `push_config` is currently fail-closed and cannot execute until scheduler-side
+  workflow integration exists; the YAML record is not an approval bypass.
 - Only run one tbot at a time against a given `tbot/storage` — Teleport locks
   the bot identity if two processes renew from the same stored credential.
 

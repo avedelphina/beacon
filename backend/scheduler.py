@@ -84,8 +84,7 @@ def _run_action(agent_id: str, action: str) -> dict:
     if action == "status":
         return driver.status(agent, host)
     if action == "push_config":
-        lines = list(driver.push_config(agent, host))
-        return {"ok": True, "output": "\n".join(lines)}
+        raise ValueError("scheduled push_config is disabled: create an approved workflow and execute it through the push_config API")
     raise ValueError(f"unsupported action {action!r}")
 
 

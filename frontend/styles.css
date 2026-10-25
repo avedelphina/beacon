@@ -331,6 +331,18 @@ tbody td:first-child { color: var(--ink); font-family: var(--font-mono); }
   margin: 0;
 }
 
+.workflow-list { display: flex; flex-direction: column; gap: 0.7rem; }
+.workflow-item { border: 1px solid var(--line-soft); background: var(--surface); padding: 0.85rem 1rem; }
+.workflow-item p { color: var(--slate); margin: 0.55rem 0; }
+.workflow-item-head { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
+.workflow-meta { display: flex; flex-wrap: wrap; gap: 0.45rem 1rem; color: var(--slate-2); font-family: var(--font-mono); font-size: 0.75rem; }
+.workflow-binding { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.65rem; overflow-wrap: anywhere; }
+.workflow-binding code { color: var(--slate); font-size: 0.75rem; }
+.workflow-option { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.65rem; color: var(--slate); font-size: 0.85rem; }
+.workflow-option select { font: inherit; border: 1px solid var(--line-soft); background: var(--paper); color: var(--ink); padding: 0.3rem; }
+.workflow-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.75rem; }
+.btn.danger { color: var(--crit); }
+
 /* ---- board ---- */
 .board { display: grid; grid-template-columns: repeat(5, minmax(180px, 1fr)); gap: 0.8rem; overflow-x: auto; }
 .board-col {

@@ -1,7 +1,7 @@
 import contextlib
 import datetime
+import hashlib
 import logging
-import itertools
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -12,7 +12,7 @@ from pydantic import BaseModel, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, board, bus, cron_store, mailbox, mesh, policy, scheduler, store, templates
+from . import auth, board, bus, cron_store, mailbox, mesh, opstore, policy, scheduler, store, templates, workflow
 from .board_mcp import board_app
 from .drivers import for_agent
 from .schemas import Agent, CronJob, Host
@@ -147,19 +147,32 @@ def _error_handler(status_code: int):
 # message instead of falling through to a bare, undetailed 500.
 for _exc, _status in ((store.NotFound, 404), (store.InvalidId, 400), (ValueError, 400), (RuntimeError, 502), (bus.Unreachable, 502)):
     app.add_exception_handler(_exc, _error_handler(_status))
+app.add_exception_handler(workflow.UnauthorizedResponder, _error_handler(403))
+app.add_exception_handler(workflow.UnauthorizedWorkflowAccess, _error_handler(403))
+app.add_exception_handler(workflow.HumanApprovalRequired, _error_handler(403))
+app.add_exception_handler(workflow.StalePlan, _error_handler(409))
 
 
 def _started(lines: Iterator[str]) -> Iterator[str]:
-    """Pull the first chunk here, outside the StreamingResponse body, so a
-    driver's validation error (e.g. bad install_mode, purge on the default
-    profile) raises synchronously and comes back as a clean 400 instead of
-    surfacing mid-stream after a 200 already went out.
-    """
+    """Pull the first chunk synchronously while preserving close propagation."""
     try:
         first = next(lines)
     except StopIteration:
+        close = getattr(lines, "close", None)
+        if close is not None:
+            close()
         return iter(())
-    return itertools.chain([first], lines)
+
+    def started():
+        try:
+            yield first
+            yield from lines
+        finally:
+            close = getattr(lines, "close", None)
+            if close is not None:
+                close()
+
+    return started()
 
 
 def _split_exit_marker(lines: Iterator[str]) -> tuple[Iterator[str], Callable[[], str | None]]:
@@ -172,18 +185,78 @@ def _split_exit_marker(lines: Iterator[str]) -> tuple[Iterator[str], Callable[[]
 
     def filtered() -> Iterator[str]:
         nonlocal code
-        for line in lines:
-            if line.startswith("__BEACON_EXIT__"):
-                code = line.removeprefix("__BEACON_EXIT__")
-            else:
-                yield line
+        try:
+            for line in lines:
+                if line.startswith("__BEACON_EXIT__"):
+                    code = line.removeprefix("__BEACON_EXIT__")
+                else:
+                    yield line
+        finally:
+            close = getattr(lines, "close", None)
+            if close is not None:
+                close()
 
     return filtered(), lambda: code
 
 
 def _stream(lines: Iterator[str]) -> StreamingResponse:
     filtered, _ = _split_exit_marker(_started(lines))
-    return StreamingResponse((line + "\n" for line in filtered), media_type="text/plain")
+
+    def body_stream():
+        try:
+            yield from (line + "\n" for line in filtered)
+        finally:
+            close = getattr(filtered, "close", None)
+            if close is not None:
+                close()
+
+    return StreamingResponse(body_stream(), media_type="text/plain")
+
+
+def _workflow_stream(lines: Iterator[str], request_id: int, actor: str) -> StreamingResponse:
+    """Record the outcome only after the driver stream ends.
+
+    A nonzero exit is a failed operation; an interrupted or marker-less stream
+    is execution-uncertain because the remote side may have applied part of it.
+    Both outcomes consume the approval and require a fresh review.
+    """
+    try:
+        started = _started(lines)
+    except Exception:
+        close = getattr(lines, "close", None)
+        if close is not None:
+            close()
+        # Pull the first driver result before starting the HTTP response so a
+        # connection/setup failure still gets a normal error status.
+        workflow.mark_execution_outcome(request_id, actor, "execution_uncertain")
+        raise
+
+    def body_stream():
+        filtered = None
+        try:
+            filtered, exit_code = _split_exit_marker(started)
+            for line in filtered:
+                yield line + "\n"
+            code = exit_code()
+            if code == "0":
+                workflow.mark_executed(request_id, actor)
+            else:
+                workflow.mark_execution_outcome(request_id, actor, "failed" if code is not None else "execution_uncertain")
+        except GeneratorExit:
+            workflow.mark_execution_outcome(request_id, actor, "execution_uncertain")
+            raise
+        except Exception as exc:
+            workflow.mark_execution_outcome(request_id, actor, "execution_uncertain")
+            yield f"[beacon] execution uncertain: {exc}\n"
+        finally:
+            close = getattr(filtered, "close", None)
+            if close is not None:
+                close()
+            close = getattr(started, "close", None)
+            if close is not None:
+                close()
+
+    return StreamingResponse(body_stream(), media_type="text/plain")
 
 
 def _used_by(name: str, agents: list[Agent]) -> list[str]:
@@ -330,6 +403,117 @@ class CardComment(BaseModel):
     context_id: str | None = None
 
 
+class WorkflowCreateRequest(BaseModel):
+    kind: str
+    eligible_responder: str
+    capability: str
+    tier: int
+    title: str
+    summary: str
+    options: list[str] = []
+    target: dict = {}
+    plan_revision: str
+    plan_hash: str
+    expires_at: float | None = None
+
+
+class WorkflowResponseRequest(BaseModel):
+    action: str
+    response: object = None
+    plan_revision: str
+    plan_hash: str
+
+
+def _workflow_human(request: Request) -> bool:
+    """Only an authenticated browser session counts as a human approver."""
+    return (
+        not getattr(request.state, "auth_via_mcp", False)
+        and not getattr(request.state, "workflow_agent", None)
+        and bool(request.session.get("user"))
+    )
+
+
+def _workflow_actor(request: Request) -> str:
+    return getattr(request.state, "workflow_agent", None) or _board_author(request)
+
+
+def _workflow_view_actor(request: Request) -> str:
+    if getattr(request.state, "workflow_agent", None):
+        return request.state.workflow_agent
+    if getattr(request.state, "auth_via_mcp", False):
+        return mesh.BEACON_PEER
+    user = request.session.get("user") if "session" in request.scope else None
+    return (user or {}).get("email") or mesh.BEACON_PEER
+
+
+def _workflow_response_actor(request: Request) -> str:
+    if getattr(request.state, "workflow_agent", None):
+        return request.state.workflow_agent
+    user = request.session.get("user") if "session" in request.scope else None
+    return (user or {}).get("email") or mesh.BEACON_PEER
+def _ssh_config_binding(config_file: str | None) -> dict[str, str | None]:
+    """Bind config-file contents when SSH delegates routing/auth to that file."""
+    if not config_file:
+        return {"config_file": None, "config_file_sha256": None}
+    try:
+        content = Path(config_file).expanduser().read_bytes()
+    except OSError as exc:
+        raise workflow.WorkflowError(f"SSH config file {config_file!r} is not readable: {exc}") from exc
+    return {
+        "config_file": config_file,
+        "config_file_sha256": hashlib.sha256(content).hexdigest(),
+    }
+
+
+def _workflow_plan_for_push(agent_id: str, agent, host, driver) -> tuple[dict, dict[str, str]]:
+    # Bind every value the driver receives. Agent ids alone are insufficient:
+    # reassignment, credentials, profile selection, type, or driver changes
+    # must invalidate an earlier review.
+    target = {
+        "agent_id": agent_id,
+        "agent_profile": agent.profile,
+        "agent_type": agent.type,
+        "driver": getattr(driver, "__name__", repr(driver)),
+        "host_id": host.id,
+        "host_address": host.address,
+        "ssh": host.ssh.model_dump() | _ssh_config_binding(host.ssh.config_file),
+        "agent": agent.model_dump(),
+        "host": host.model_dump(),
+    }
+    binding = workflow.plan_binding({"capability": "push_config", "target": target})
+    return target, binding
+
+
+def _validate_workflow_kind(kind: str, tier: int) -> None:
+    workflow.validate_kind_for_tier(kind, tier)
+
+
+def _create_workflow(card_id: int, body: WorkflowCreateRequest, request: Request) -> dict:
+    _validate_workflow_kind(body.kind, body.tier)
+    try:
+        expected_tier, _ = tier_for(body.capability)
+    except KeyError:
+        expected_tier = None
+    if expected_tier is not None and int(expected_tier) != body.tier:
+        raise workflow.WorkflowError(f"capability {body.capability!r} is tier {expected_tier.name}, not T{body.tier}")
+    actor = _workflow_actor(request)
+    return workflow.create(
+        card_id=card_id, kind=body.kind, requester=actor,
+        eligible_responder=body.eligible_responder, capability=body.capability,
+        tier=body.tier, title=body.title, summary=body.summary, options=body.options,
+        target=body.target, plan_revision=body.plan_revision, plan_hash=body.plan_hash,
+        expires_at=body.expires_at,
+    )
+
+
+def _respond_workflow(request_id: int, body: WorkflowResponseRequest, request: Request) -> dict:
+    return workflow.respond(
+        request_id, actor=_workflow_response_actor(request), human=_workflow_human(request),
+        action=body.action, response=body.response,
+        plan_revision=body.plan_revision, plan_hash=body.plan_hash,
+    )
+
+
 def _board_author(request: Request) -> str:
     """Who is changing the board from the UI or REST: the logged-in person,
     else "beacon" (MCP bearer, or open mode). Agents use /board/mcp."""
@@ -361,6 +545,34 @@ def board_update(card_id: int, body: CardUpdate, request: Request) -> dict:
 @app.post("/api/board/cards/{card_id}/comments")
 def board_comment(card_id: int, body: CardComment, request: Request) -> dict:
     return board.comment(_board_author(request), card_id, body.text, body.context_id)
+
+
+@app.get("/api/board/cards/{card_id}/workflows")
+def card_workflows(card_id: int, request: Request, state: str | None = None) -> list[dict]:
+    board.get_card(card_id)
+    return workflow.list_requests(card_id=card_id, state=state, actor=_workflow_view_actor(request), human=_workflow_human(request))
+
+
+@app.post("/api/board/cards/{card_id}/workflows")
+def create_card_workflow(card_id: int, body: WorkflowCreateRequest, request: Request) -> dict:
+    return _create_workflow(card_id, body, request)
+
+
+@app.get("/api/workflows")
+def workflows_list(request: Request, card_id: int | None = None, state: str | None = None,
+                   include_done: bool = True) -> list[dict]:
+    return workflow.list_requests(card_id=card_id, state=state, include_done=include_done,
+                                  actor=_workflow_view_actor(request), human=_workflow_human(request))
+
+
+@app.get("/api/workflows/{request_id}")
+def workflow_get(request_id: int, request: Request) -> dict:
+    return workflow.get(request_id, actor=_workflow_view_actor(request), human=_workflow_human(request))
+
+
+@app.post("/api/workflows/{request_id}/respond")
+def workflow_respond(request_id: int, body: WorkflowResponseRequest, request: Request) -> dict:
+    return _respond_workflow(request_id, body, request)
 
 
 @app.get("/api/mailbox")
@@ -611,15 +823,33 @@ def apply_fix(id_: str, body: FixRequest) -> dict:
 @app.get("/api/agents/{id_}/config-diff")
 def get_config_diff(id_: str) -> dict:
     agent, host, driver = for_agent(id_, resolved=True)
-    return driver.config_diff(agent, host)
+    target, binding = _workflow_plan_for_push(id_, agent, host, driver)
+    return driver.config_diff(agent, host) | {"workflow": {"capability": "push_config", "tier": "T3", "target": target, **binding}}
 
 
 @app.post("/api/agents/{id_}/config-diff")
-def push_config(id_: str, confirm: bool = False) -> StreamingResponse:
+def push_config(id_: str, request: Request, confirm: bool = False,
+                workflow_request_id: int | None = None,
+                plan_revision: str | None = None, plan_hash: str | None = None) -> StreamingResponse:
     if (gate := _confirm_gate("push_config", confirm, f"push desired.config to {id_!r} and restart its gateway if active")) is not None:
         return JSONResponse(gate)
     agent, host, driver = for_agent(id_, resolved=True)
-    return _stream(driver.push_config(agent, host))
+    target, binding = _workflow_plan_for_push(id_, agent, host, driver)
+    if plan_revision is not None or plan_hash is not None:
+        if plan_revision is None or plan_hash is None:
+            raise HTTPException(400, "plan_revision and plan_hash must be supplied together")
+        if plan_revision != binding["plan_revision"] or plan_hash != binding["plan_hash"]:
+            if workflow_request_id is not None:
+                workflow.mark_stale(workflow_request_id, _workflow_actor(request), "submitted plan binding differs from live plan")
+            raise workflow.StalePlan("submitted plan binding does not match the current resolved push plan")
+    workflow.authorize(
+        request_id=workflow_request_id, capability="push_config", tier=int(tier_for("push_config")[0]),
+        actor=_workflow_actor(request), human=_workflow_human(request), target=target,
+        plan_revision=binding["plan_revision"], plan_hash=binding["plan_hash"],
+    )
+    if workflow_request_id is None:
+        raise workflow.WorkflowError("approved workflow request id is required for tier T3 push_config")
+    return _workflow_stream(driver.push_config(agent, host), workflow_request_id, _workflow_actor(request))
 
 
 @app.post("/api/agents/{id_}/decommission")

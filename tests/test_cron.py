@@ -130,6 +130,21 @@ def test_tick_runs_due_job(fleet, fake_ssh):
     assert persisted.last_run_output is not None
 
 
+def test_cron_push_config_fails_closed(fleet, fake_ssh):
+    from backend import store as fleet_store
+    fleet_store.upsert_host(make_host())
+    fleet_store.upsert_agent(make_agent(desired={"config": {"agent": {"max_turns": 42}}}))
+
+    job = CronJob(id="j1", schedule="* * * * *", command={"action": "push_config"}, target_agent_ids=["a1"])
+    cron_store.upsert_cron_job(job)
+
+    results = scheduler.tick(now=datetime.datetime(2026, 1, 1, 12, 0, 0))
+    assert results[0]["status"] == "failed"
+    output = cron_store.get_cron_job("j1").last_run_output or ""
+    assert "scheduled push_config is disabled" in output
+    assert fake_ssh.calls == []
+
+
 def test_tick_skips_not_due_job(fleet, fake_ssh):
     from backend import store as fleet_store
     fleet_store.upsert_host(make_host())
@@ -140,7 +155,6 @@ def test_tick_skips_not_due_job(fleet, fake_ssh):
 
     now = datetime.datetime(2026, 1, 1, 12, 31, 0)
     results = scheduler.tick(now=now)
-
     assert results[0]["due"] is False
     assert fake_ssh.calls == []
 

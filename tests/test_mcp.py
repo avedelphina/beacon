@@ -73,6 +73,53 @@ def test_mcp_path_identifiers_allow_valid_ids_and_use_encoded_segments(mcp_serve
     ]
 
 
-def test_mcp_bearer_helper_is_the_constant_time_auth_helper(mcp_server):
+def test_mcp_workflow_tools_forward_requests(mcp_server, monkeypatch):
+    calls = []
+
+    async def record_get(path, **params):
+        calls.append(("get", path, params))
+        return []
+
+    async def record_post(path, **kwargs):
+        calls.append(("post", path, kwargs))
+        return {"ok": True}
+
+    monkeypatch.setattr(mcp_server, "_get", record_get)
+    monkeypatch.setattr(mcp_server, "_post", record_post)
+    assert asyncio.run(mcp_server.list_workflows()) == []
+    assert asyncio.run(mcp_server.get_workflow(7)) == []
+    assert asyncio.run(mcp_server.respond_workflow(7, "approved", "desired:x", "hash")) == {"ok": True}
+    assert asyncio.run(mcp_server.create_workflow(
+        3, "review", "human", "push_config", 3, "Review", "Exact plan", "desired:x", "hash",
+    )) == {"ok": True}
+    assert calls == [
+        ("get", "/api/workflows", {"include_done": "false"}),
+        ("get", "/api/workflows/7", {}),
+        ("post", "/api/workflows/7/respond", {"json": {
+            "action": "approved", "response": None, "plan_revision": "desired:x", "plan_hash": "hash",
+        }}),
+        ("post", "/api/board/cards/3/workflows", {"json": {
+            "kind": "review", "eligible_responder": "human", "capability": "push_config", "tier": 3,
+            "title": "Review", "summary": "Exact plan", "plan_revision": "desired:x", "plan_hash": "hash",
+        }}),
+    ]
+
+
+def test_mcp_push_config_forwards_workflow_binding(mcp_server, monkeypatch):
+    calls = []
+
+    async def record_post(path, **kwargs):
+        calls.append((path, kwargs))
+        return "ok"
+
+    monkeypatch.setattr(mcp_server, "_post", record_post)
+    result = asyncio.run(mcp_server.push_config("agent-1", confirm=True, workflow_request_id=7,
+                                                plan_revision="desired:abc", plan_hash="abc123"))
+    assert result == "ok"
+    assert calls == [(
+        "/api/agents/agent-1/config-diff?confirm=true&workflow_request_id=7&plan_revision=desired%3Aabc&plan_hash=abc123",
+        {},
+    )]
+
     assert mcp_server.is_valid_bearer("Bearer token", "token")
     assert not mcp_server.is_valid_bearer("Bearer other", "token")

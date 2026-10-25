@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from mcp.server.mcpserver import Context, MCPServer
 from starlette.responses import JSONResponse
 
-from . import auth, board, mesh, store
+from . import auth, board, mesh, store, workflow
 
 INSTRUCTIONS = """The Beacon fleet board: shared cards for work that spans agents, hosts, or days.
 Use it to hand work to another agent, to record progress where others can see it, and to find
@@ -94,8 +94,40 @@ def build() -> MCPServer:
         """Add progress or a question to a card's history. context_id links an A2A thread."""
         return board.comment(_author(ctx), card_id, text, context_id)
 
-    return server
+    @server.tool()
+    def workflow_list(ctx: Context, card_id: int | None = None, state: str | None = None) -> list[dict]:
+        """List typed decision, review, and approval requests visible to this caller."""
+        return workflow.list_requests(card_id=card_id, state=state, actor=_author(ctx))
 
+    @server.tool()
+    def workflow_get(ctx: Context, request_id: int) -> dict:
+        """Get one visible workflow request with its response and event history."""
+        return workflow.get(request_id, actor=_author(ctx))
+
+    @server.tool()
+    def workflow_respond(ctx: Context, request_id: int, action: str, plan_revision: str,
+                         plan_hash: str, response: object = None) -> dict:
+        """Respond to an eligible workflow request. T4/T5 responses always need a human browser session."""
+        return workflow.respond(
+            request_id, actor=_author(ctx), human=False, action=action, response=response,
+            plan_revision=plan_revision, plan_hash=plan_hash,
+        )
+
+    @server.tool()
+    def workflow_create(ctx: Context, card_id: int, kind: str, eligible_responder: str,
+                        capability: str, tier: int, title: str, summary: str,
+                        plan_revision: str, plan_hash: str, options: list[str] | None = None,
+                        target: dict | None = None, expires_at: float | None = None) -> dict:
+        """Create a pending typed workflow request attached to a board card."""
+        workflow.validate_kind_for_tier(kind, tier)
+        workflow.validate_participants(_author(ctx), eligible_responder)
+        return workflow.create(
+            card_id=card_id, kind=kind, requester=_author(ctx), eligible_responder=eligible_responder,
+            capability=capability, tier=tier, title=title, summary=summary, options=options,
+            target=target, plan_revision=plan_revision, plan_hash=plan_hash, expires_at=expires_at,
+        )
+
+    return server
 
 class BoardApp:
     """ASGI app mounted at /board: checks the caller, then hands over to the

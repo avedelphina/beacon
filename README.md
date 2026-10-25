@@ -913,6 +913,12 @@ like any other YAML. They are limited to a fixed set of v1 actions
   not safe for two people editing the fleet at once.
 - **One driver.** Hermes is the only agent type implemented. The driver
   interface is designed to support others; nothing has exercised that yet.
+- **Workflow governance is scoped to the web-first request layer.** Typed
+  decision/review/approval requests and their response history are stored in
+  the operational SQLite database. T3 `push_config` requires an approved
+  review bound to the exact plan revision/hash; T4/T5 workflow responses still
+  require a human browser session. This is not a complete audit ledger for all
+  Beacon operations.
 - **No audit trail.** Every logged-in user has full deploy/config/
   decommission power, and no record persists of who did what.
 - **Pull-based only.** Status and Reconcile run when requested — nothing

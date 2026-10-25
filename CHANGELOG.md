@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Web governance workflows.** Board cards can now carry durable decision,
+  review, and approval requests in SQLite, with explicit lifecycle states,
+  response history, expiry, and exact plan revision/hash binding.
+- **Workflow inbox.** The web UI has a Workflows tab for listing pending
+  requests and responding to eligible decisions, reviews, and approvals.
+- **T-level enforcement.** T3 `push_config` requires an approved review;
+  T4/T5 workflow responses require a human browser session. Agent workflow
+  access is constrained by board opt-in and the existing mesh access policy.
+- **Human workflow sentinel hardening.** The `human` responder slot is reserved
+  for signed browser sessions and cannot be claimed or satisfied as an agent id.
+- **Execution outcome tracking.** Approved config pushes become `executed`,
+  `failed`, or `execution_uncertain`, so failed or interrupted streams consume
+  their approval rather than leaving it reusable.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) once there's
 an API worth being stable about — pre-1.0, breaking changes can land in a

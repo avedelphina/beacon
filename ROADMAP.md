@@ -450,6 +450,13 @@ state.
 
 ## Horizon 3 — Govern changes with typed plans
 
+**Current slice:** Beacon now has the first web-first typed workflow layer. Decision,
+review, and approval requests are durable SQLite records attached to board cards,
+with response history, expiry, and exact plan revision/hash binding. T3
+`push_config` requires an approved review; T4/T5 responses require a human browser
+session and MCP/bearer identity cannot satisfy that gate. This slice does not yet
+provide a complete action ledger, backup evidence chain, or verification receipt.
+
 **Goal:** replace direct mutation calls with inspectable, replay-safe plans.
 
 The change workflow becomes:
