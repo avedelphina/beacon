@@ -188,8 +188,8 @@ def parts_text(obj) -> str:
 def deliver_locally(url: str, token: str, text: str, context_id: str | None) -> dict:
     """One A2A SendMessage to the agent on this host. Returns the report for
     Beacon: ok + reply, or the error and whether retrying later is safe. Only
-    "never got there" is transient; a refusal, or a timeout while the agent
-    may already be working on it, is not — retrying could deliver it twice."""
+    "never got there" is transient; a refusal is definite failure; a timeout
+    after the request may have arrived is explicitly uncertain."""
     message = {"role": "ROLE_USER", "parts": [{"text": text}], "messageId": uuid.uuid4().hex}
     if context_id:
         message["contextId"] = context_id
@@ -211,7 +211,8 @@ def deliver_locally(url: str, token: str, text: str, context_id: str | None) -> 
     except urllib.error.URLError as exc:  # no connection: it never got the message
         return {"ok": False, "transient": True, "error": str(exc.reason)}
     except (socket.timeout, OSError) as exc:  # waiting for the answer: it may be working on it
-        return {"ok": False, "transient": False, "error": f"no answer: {exc}"}
+        return {"ok": False, "transient": False, "uncertain": True,
+                "error": f"delivery uncertain: no answer: {exc}"}
     if not isinstance(payload, dict) or isinstance(payload.get("error"), dict):
         error = payload.get("error", {}).get("message") if isinstance(payload, dict) else "unreadable answer"
         return {"ok": False, "transient": False, "error": str(error)}
@@ -421,7 +422,8 @@ def sync(state: Path) -> int:
                 report = deliver_locally(mesh["endpoint"], item["token"], item["text"], item.get("context_id"))
             post_report(cfg, pull_token, item["id"], report)
             log(f"held message {item['id']}: " + ("delivered" if report["ok"] else
-                ("handed back" if report["transient"] else "failed") + f" ({report['error']})"))
+                ("handed back" if report["transient"] else
+                 "uncertain" if report.get("uncertain") else "failed") + f" ({report['error']})"))
     return 0
 
 

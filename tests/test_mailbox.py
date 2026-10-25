@@ -172,6 +172,41 @@ def test_mcp_caller_leaves_voicemail_and_reads_the_reply(client, net):
     assert net.seen[0]["auth"] == f"Bearer {mesh.token('beacon', 'bravo')}"
 
 
+def test_mailbox_task_can_be_polled_and_subscribed(client, net):
+    net.down.add("bravo")
+    response = _send(client, "alpha", "bravo", "status?")
+    task_id = response.json()["result"]["task"]["id"]
+
+    get_body = {"jsonrpc": "2.0", "id": "get-1", "method": "GetTask",
+                "params": {"taskId": task_id}}
+    get_response = client.post("/a2a/bravo", json=get_body,
+                               headers={"Authorization": f"Bearer {mesh.token('alpha', 'bravo')}"})
+    assert get_response.status_code == 200
+    assert get_response.json()["result"]["status"]["state"] == "TASK_STATE_SUBMITTED"
+    rest_task = client.get(f"/api/mailbox/tasks/{task_id}")
+    assert rest_task.status_code == 200 and rest_task.json()["id"] == task_id
+    assert rest_task.json()["mailbox"]["state"] == "queued"
+
+    subscribe_body = {"jsonrpc": "2.0", "id": "sub-1", "method": "tasks/subscribe",
+                      "params": {"taskId": task_id}}
+    subscribe = client.post("/a2a/bravo", json=subscribe_body,
+                            headers={"Authorization": f"Bearer {mesh.token('alpha', 'bravo')}"})
+    assert subscribe.status_code == 200 and "text/event-stream" in subscribe.headers["content-type"]
+    assert "TASK_STATE_SUBMITTED" in subscribe.text and ": done" in subscribe.text
+
+    # The original sender can poll; a different target route cannot use the id.
+    wrong_target = client.post("/a2a/charlie", json=get_body,
+                               headers={"Authorization": f"Bearer {mesh.token('alpha', 'charlie')}"})
+    assert wrong_target.json()["error"]["code"] == -32001
+
+    net.down.discard("bravo")
+    _pull(client, "bravo")
+    completed = client.post("/a2a/bravo", json=get_body,
+                            headers={"Authorization": f"Bearer {mesh.token('alpha', 'bravo')}"})
+    assert completed.json()["result"]["status"]["state"] == "TASK_STATE_COMPLETED"
+    assert completed.json()["result"]["status"]["message"]["parts"][0]["text"] == "bravo got it"
+
+
 def test_a_claimed_message_is_delivered_once(client, net):
     net.down.add("bravo")
     _send(client, "alpha", "bravo", "once")

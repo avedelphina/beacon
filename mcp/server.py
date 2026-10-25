@@ -135,6 +135,13 @@ async def mailbox(limit: int = 20) -> object:
 
 
 @mcp.tool(annotations=READ_ONLY)
+async def mailbox_task(task_id: str) -> object:
+    """Get a durable mailbox task by id, such as ``mbx-12``. Returns the
+    A2A state plus Beacon delivery details and any late reply."""
+    return await _get(f"/api/mailbox/tasks/{_path_identifier(task_id, re.compile(r'^mbx-[0-9]+$'), 'task id')}")
+
+
+@mcp.tool(annotations=READ_ONLY)
 async def get_policy() -> object:
     """The access policy: the file's text, its problems, and the who-may-call-whom
     table. Changing it is not an MCP action: an operator edits it in the Policy tab."""

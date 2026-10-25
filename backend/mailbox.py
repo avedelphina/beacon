@@ -27,6 +27,13 @@ TTL_SECONDS = 72 * 3600
 STALE_DELIVERY_SECONDS = 15 * 60
 SNIPPET = 200
 
+# A mailbox task is durable even when the target is offline. These are the
+# wire states used by A2A tasks/get and tasks/subscribe.
+STATE_SUBMITTED = "TASK_STATE_SUBMITTED"
+STATE_WORKING = "TASK_STATE_WORKING"
+STATE_COMPLETED = "TASK_STATE_COMPLETED"
+STATE_FAILED = "TASK_STATE_FAILED"
+
 
 def caller_for(target_id: str, authorization: str | None) -> str | None:
     """Which fleet agent presented its token for `target_id`, if any."""
@@ -73,6 +80,66 @@ def recent(limit: int = 50) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def task_view(task_id: str, *, requester: str | None = None, target: str | None = None) -> dict:
+    """Return an A2A Task-shaped snapshot for a durable mailbox task.
+
+    ``mbx-N`` identifies the original message. A completed reply is stored as
+    a separate mailbox row linked by ``reply_to``; it is folded into the task
+    snapshot so callers can poll without knowing Beacon's internal schema.
+    A2A callers are restricted to the original sender and target.
+    """
+    if not isinstance(task_id, str) or not task_id.startswith("mbx-"):
+        raise store.NotFound(f"task {task_id!r} not found")
+    try:
+        message_id = int(task_id.removeprefix("mbx-"))
+    except ValueError as exc:
+        raise store.NotFound(f"task {task_id!r} not found") from exc
+    with opstore.connect() as db:
+        row = db.execute("SELECT * FROM mailbox WHERE id = ? AND kind = 'message'", (message_id,)).fetchone()
+        if row is None:
+            raise store.NotFound(f"task {task_id!r} not found")
+        if requester is not None and requester not in {row["sender"], row["recipient"]}:
+            raise store.NotFound(f"task {task_id!r} not found")
+        if target is not None and row["recipient"] != target:
+            raise store.NotFound(f"task {task_id!r} not found")
+        reply = db.execute(
+            "SELECT * FROM mailbox WHERE reply_to = ? AND kind = 'reply' ORDER BY id DESC LIMIT 1",
+            (message_id,),
+        ).fetchone()
+    state = _task_state(row["state"], bool(reply))
+    text = (reply["body"] if reply else "") or _task_message(row["state"], row["recipient"])
+    return {
+        "id": task_id,
+        "contextId": row["context_id"] or f"mbx-ctx-{row['id']}",
+        "status": {"state": state, "message": {"role": "ROLE_AGENT", "parts": [{"text": text}]}},
+        "mailbox": {"message_id": row["id"], "state": row["state"], "attempts": row["attempts"],
+                    "last_error": row["last_error"], "updated_at": row["updated_at"],
+                    "expires_at": row["expires_at"], "reply_id": reply["id"] if reply else None},
+    }
+
+
+def _task_state(mailbox_state: str, has_reply: bool) -> str:
+    if has_reply:
+        return STATE_COMPLETED
+    if mailbox_state in {"failed", "expired"}:
+        return STATE_FAILED
+    if mailbox_state in {"delivering", "delivered"}:
+        return STATE_WORKING
+    return STATE_SUBMITTED
+
+
+def _task_message(mailbox_state: str, recipient: str) -> str:
+    if mailbox_state == "uncertain":
+        return f"Delivery to {recipient} is uncertain; Beacon will not retry automatically."
+    if mailbox_state == "failed":
+        return f"Delivery to {recipient} failed."
+    if mailbox_state == "expired":
+        return f"Delivery to {recipient} expired before it was delivered."
+    if mailbox_state == "delivering":
+        return f"Beacon is delivering the message to {recipient}."
+    return f"Beacon is holding the message for {recipient}."
+
+
 def deliver_pending(recipient_id: str) -> None:
     """Deliver everything waiting for `recipient_id`, oldest first, by calling
     it. Used when its host's sync can't deliver locally (an older sync), and
@@ -91,9 +158,10 @@ def deliver_pending(recipient_id: str) -> None:
             view = bus.call(agent, _framed(row), row["context_id"] if row["kind"] == "message" else None,
                             token=_delivery_token(row, recipient_id))
         except bus.Unreachable as exc:
-            _finish(row["id"], "queued" if exc.transient else "failed", str(exc))
-            if exc.transient:
-                break  # gone again; the next pull retries
+            state = "queued" if exc.transient else ("uncertain" if exc.uncertain else "failed")
+            _finish(row["id"], state, str(exc))
+            if exc.transient or exc.uncertain:
+                break  # retry only known-not-arrived work; uncertain delivery must not duplicate
             continue
         if sender := _delivered(row, view["reply"] or f"(no text; task state {view['state']})"):
             senders_with_replies.add(sender)
@@ -121,7 +189,7 @@ def claim_for_pull(recipient_id: str, limit: int = 10) -> list[dict]:
 
 
 def report(recipient_id: str, message_id: int, ok: bool, reply: str = "", transient: bool = False,
-           error: str = "") -> str | None:
+           error: str = "", *, uncertain: bool = False) -> str | None:
     """The sync's result for one claimed item. Returns an original sender
     whose reply should now be delivered (call deliver_pending for it)."""
     with opstore.connect() as db:
@@ -130,7 +198,8 @@ def report(recipient_id: str, message_id: int, ok: bool, reply: str = "", transi
     if row is None:
         raise store.NotFound(f"no delivery in progress for message {message_id} to {recipient_id}")
     if not ok:
-        _finish(row["id"], "queued" if transient else "failed", error[:500] or "local delivery failed")
+        state = "queued" if transient else "uncertain" if uncertain else "failed"
+        _finish(row["id"], state, error[:500] or "local delivery failed")
         return None
     return _delivered(row, reply or "(no text)")
 

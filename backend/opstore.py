@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS mailbox (
     body        TEXT NOT NULL,
     context_id  TEXT,
     reply_to    INTEGER,
-    state       TEXT NOT NULL,     -- queued | delivering | delivered | failed | expired
+    state       TEXT NOT NULL,     -- queued | delivering | delivered | failed | uncertain | expired
     attempts    INTEGER NOT NULL DEFAULT 0,
     last_error  TEXT,
     created_at  REAL NOT NULL,
@@ -50,9 +50,10 @@ CREATE TABLE IF NOT EXISTS card_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     card_id     INTEGER NOT NULL REFERENCES cards (id),
     author      TEXT NOT NULL,
-    kind        TEXT NOT NULL,     -- created | comment | state | assign | edit
+    kind        TEXT NOT NULL,     -- created | comment | state | assign | edit | assign_notice
     body        TEXT NOT NULL,
     context_id  TEXT,
+    notice_id   INTEGER REFERENCES mailbox (id),  -- assign_notice: the mailbox row carrying the notice
     created_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS card_events_by_card ON card_events (card_id);
@@ -108,7 +109,17 @@ def connect() -> Iterator[sqlite3.Connection]:
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
+        _migrate(conn)
         with conn:
             yield conn
     finally:
         conn.close()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Additive, idempotent column backfills for tables that predate them.
+    `CREATE TABLE IF NOT EXISTS` above never touches an existing table, so a
+    new nullable column needs its own guarded `ALTER TABLE` here."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(card_events)")}
+    if "notice_id" not in columns:
+        conn.execute("ALTER TABLE card_events ADD COLUMN notice_id INTEGER REFERENCES mailbox (id)")

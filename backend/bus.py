@@ -29,13 +29,15 @@ class Unreachable(Exception):
 
     `transient` means the agent itself never got the message (no connection,
     or a gateway in front of it answered 502/503/504), so holding it for later
-    is safe. A refusal, or a read timeout after the agent may already be
-    working on it, is not transient: retrying could deliver it twice.
+    is safe. `uncertain` means the request may have reached the agent but no
+    response was observed (for example, a read timeout), so retrying could
+    deliver it twice. A refusal is a definite failure.
     """
 
-    def __init__(self, message: str, transient: bool = False):
+    def __init__(self, message: str, transient: bool = False, uncertain: bool = False):
         super().__init__(message)
         self.transient = transient
+        self.uncertain = uncertain
 
 
 def call(agent: Agent, message: str, context_id: str | None = None, *, token: str | None = None,
@@ -71,7 +73,9 @@ def _rpc(agent: Agent, method: str, params: dict, token: str | None, client: htt
         response = client.post(reach.endpoint, json=body, headers=headers)
     except httpx.HTTPError as exc:
         never_arrived = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout))
-        raise Unreachable(f"agent {agent.id!r} did not answer: {exc}", transient=never_arrived) from exc
+        may_have_arrived = isinstance(exc, (httpx.ReadTimeout, httpx.WriteTimeout))
+        raise Unreachable(f"agent {agent.id!r} did not answer: {exc}",
+                          transient=never_arrived, uncertain=may_have_arrived) from exc
     finally:
         if owns_client:
             client.close()

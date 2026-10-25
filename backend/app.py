@@ -1,6 +1,7 @@
 import contextlib
 import datetime
 import hashlib
+import json
 import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -583,12 +584,35 @@ def mailbox_recent(limit: int = 50) -> list[dict]:
     return mailbox.recent(min(max(limit, 1), 500))
 
 
+@app.get("/api/mailbox/tasks/{task_id}")
+def mailbox_task(task_id: str) -> dict:
+    """Current A2A-shaped status for a durable Beacon mailbox task (``mbx-N``)."""
+    try:
+        return mailbox.task_view(task_id)
+    except store.NotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 A2A_METHODS = {"SendMessage": True, "message/send": False}  # name -> answers in the v1.0 {"task": ...} wrapper
+TASK_GET_METHODS = {"GetTask", "tasks/get"}
+TASK_SUBSCRIBE_METHODS = {"SubscribeToTask", "tasks/subscribe"}
+
+
+def _a2a_task(task_id: str, caller: str, target: str) -> dict:
+    return mailbox.task_view(task_id, requester=caller, target=target)
 
 
 def _a2a_error(req_id, code: int, message: str, status: int) -> JSONResponse:
     return JSONResponse({"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}},
                         status_code=status)
+
+
+def _a2a_subscription(task: dict, req_id) -> StreamingResponse:
+    status = task.get("status") or {}
+    event = {"statusUpdate": {"taskId": task["id"], "contextId": task["contextId"], "status": status}}
+    payload = f"data: {json.dumps({'jsonrpc': '2.0', 'id': req_id, 'result': event})}\n\n: done\n\n"
+    return StreamingResponse(iter((payload,)), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
 
 
 @app.post("/a2a/{id_}")
@@ -613,6 +637,19 @@ async def a2a_mailbox(id_: str, request: Request):
         logger.warning("mailbox: refused %s -> %s (access policy: no rule allows it)", caller, id_)
         return _a2a_error(req_id, -32052, f"{id_} does not accept calls from {caller}", 403)
     method = req.get("method")
+    if method in TASK_GET_METHODS or method in TASK_SUBSCRIBE_METHODS:
+        params = req.get("params") or {}
+        task_id = str(params.get("taskId") or params.get("id") or "")
+        try:
+            task = _a2a_task(task_id, caller, id_)
+        except store.NotFound as exc:
+            return _a2a_error(req_id, -32001, str(exc), 200)
+        # Beacon's mailbox is pull-driven, so subscription is a durable
+        # snapshot rather than an open SSE stream. The next call observes the
+        # same task after delivery or a late reply is recorded.
+        if method in TASK_SUBSCRIBE_METHODS:
+            return _a2a_subscription(task, req_id)
+        return {"jsonrpc": "2.0", "id": req_id, "result": task}
     if method not in A2A_METHODS:
         return _a2a_error(req_id, -32601, f"method not found: {method}", 200)
     message = (req.get("params") or {}).get("message") or {}
@@ -654,6 +691,7 @@ class InboxReport(BaseModel):
     ok: bool
     reply: str = ""
     transient: bool = False
+    uncertain: bool = False
     error: str = ""
 
 
@@ -686,7 +724,8 @@ def mesh_inbox_report(id_: str, message_id: int, body: InboxReport, background: 
     """The sync's result for one held message it delivered locally."""
     if not mesh.may_pull(id_, authorization):
         raise HTTPException(401, "not authorized for this agent's mesh config")
-    if sender := mailbox.report(id_, message_id, body.ok, body.reply, body.transient, body.error):
+    if sender := mailbox.report(id_, message_id, body.ok, body.reply, body.transient, body.error,
+                                uncertain=body.uncertain):
         background.add_task(mailbox.deliver_pending, sender)
     return {"ok": True}
 

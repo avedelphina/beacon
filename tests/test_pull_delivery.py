@@ -73,13 +73,16 @@ def test_a_delivered_report_passes_the_reply_back(client, pair):
     assert pair == ["alpha"]  # Beacon tries alpha at once; else alpha's own pull
 
 
-@pytest.mark.parametrize("transient, expected", [(True, "queued"), (False, "failed")])
-def test_a_failed_report_requeues_only_when_safe(client, pair, transient, expected):
+@pytest.mark.parametrize("payload, expected", [
+    ({"ok": False, "transient": True, "error": "boom"}, "queued"),
+    ({"ok": False, "error": "boom"}, "failed"),
+    ({"ok": False, "uncertain": True, "error": "delivery uncertain: read timeout"}, "uncertain"),
+])
+def test_a_failed_report_preserves_delivery_semantics(client, pair, payload, expected):
     message_id = mailbox.enqueue("alpha", "bravo", "message", "x")
     client.get("/mesh/bravo", headers={**_auth("bravo"), **V2})
 
-    client.post(f"/mesh/bravo/inbox/{message_id}", headers=_auth("bravo"),
-                json={"ok": False, "transient": transient, "error": "boom"})
+    client.post(f"/mesh/bravo/inbox/{message_id}", headers=_auth("bravo"), json=payload)
 
     assert _state(message_id) == expected
 
@@ -189,6 +192,19 @@ def test_an_agent_that_is_down_gets_it_handed_back(host):
 
     (message_id, report), = net.reports
     assert message_id == 7 and report["ok"] is False and report["transient"] is True
+
+
+def test_a_timeout_is_reported_as_uncertain(host, monkeypatch):
+    sync, state, net, restarts = host
+    monkeypatch.setattr(sync, "deliver_locally", lambda *args: {
+        "ok": False, "transient": False, "uncertain": True,
+        "error": "delivery uncertain: no answer: timed out",
+    })
+
+    sync.sync(state)
+
+    assert net.reports == [(7, {"ok": False, "transient": False, "uncertain": True,
+                              "error": "delivery uncertain: no answer: timed out"})]
 
 
 def test_a_restarting_agent_gets_nothing_this_run(host):

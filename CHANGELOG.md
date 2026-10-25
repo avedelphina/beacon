@@ -4,6 +4,20 @@
 
 ### Added
 
+- **Mailbox task status.** A held message returns a durable `mbx-N` task id.
+  `GET /api/mailbox/tasks/{task_id}` exposes its A2A-shaped status and mailbox
+  receipt, while the mailbox A2A endpoint accepts `GetTask`/`tasks/get` and
+  returns a one-snapshot `SubscribeToTask`/`tasks/subscribe` SSE response.
+  Assignment notices expose the same task id in their card event, so card
+  assignment remains locally acknowledged while delivery and late replies are
+  tracked separately. The assignment itself still commits immediately
+  regardless of mailbox delivery speed; the resulting `assign_notice` card
+  event carries the mailbox row id, so `GET /api/board/cards/{id}` (and the
+  matching MCP tools) can show that notice's own delivery state (`queued` |
+  `delivering` | `delivered` | `failed` | `uncertain` | `expired`, with
+  attempts and the last error) separately from the assignment's own success.
+  Reassigning to the same agent with no other change still never sends a
+  second notice.
 - **Web governance workflows.** Board cards can now carry durable decision,
   review, and approval requests in SQLite, with explicit lifecycle states,
   response history, expiry, and exact plan revision/hash binding.
