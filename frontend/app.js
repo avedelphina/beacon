@@ -39,10 +39,16 @@ const api = {
   reconcile: (id) => json(`/api/agents/${id}/reconcile`),
   applyFix: (id, fix) => json(`/api/agents/${id}/reconcile`, "POST", { fix, confirm: true }),
   configDiff: (id) => json(`/api/agents/${id}/config-diff`),
+  pushConfig: (id, workflow) => {
+    const params = new URLSearchParams({ confirm: "true", workflow_request_id: String(workflow.workflow_request_id), plan_revision: workflow.plan_revision, plan_hash: workflow.plan_hash });
+    return `/api/agents/${id}/config-diff?${params}`;
+  },
   restart: (id) => json(`/api/agents/${id}/restart?confirm=true`, "POST"),
   listPlugins: (id) => json(`/api/agents/${id}/plugins`),
   updatePlugin: (id, plugin) => json(`/api/agents/${id}/plugins/${plugin}/update?confirm=true`, "POST"),
   applyTemplate: (name, agentIds) => json(`/api/templates/${name}/apply`, "POST", { agent_ids: agentIds, confirm: true }),
+  listWorkflows: () => json("/api/workflows?include_done=false"),
+  respondWorkflow: (id, body) => json(`/api/workflows/${id}/respond`, "POST", body),
   runCronJob: (id) => json(`/api/cron-jobs/${id}/run`, "POST"),
   dryRunCronJob: (id) => json(`/api/cron-jobs/${id}/dry-run`, "POST"),
 };
@@ -299,9 +305,11 @@ async function refreshStatuses(agents) {
 }
 
 let currentInspectId = null;
+let currentConfigWorkflow = null;
 
 async function openInspect(id) {
   currentInspectId = id;
+  currentConfigWorkflow = null;
   document.getElementById("inspect-title").textContent = id;
   document.getElementById("inspect-logs").textContent = "—";
   document.getElementById("inspect-status").textContent = "loading…";
@@ -351,6 +359,7 @@ document.getElementById("inspect-load-logs").addEventListener("click", async () 
 const CONFIG_SEVERITY = { match: "ok", "missing-live": "warn", drift: "warn", present: "ok", missing: "warn" };
 
 function renderConfigFindings(result) {
+  currentConfigWorkflow = result.workflow || null;
   const el = document.getElementById("inspect-config-results");
   if (!result.reachable) {
     el.innerHTML = finding("critical", esc(result.detail));
@@ -371,8 +380,19 @@ function renderConfigFindings(result) {
   el.innerHTML = rows.length ? rows.join("") : finding("info", "nothing declared in desired.config / env_keys");
 }
 
+async function loadConfigDiff(id) {
+  const result = await api.configDiff(id);
+  const requests = await api.listWorkflows();
+  const approved = requests.find((w) => w.state === "approved"
+    && w.capability === "push_config"
+    && w.plan_revision === result.workflow?.plan_revision
+    && w.plan_hash === result.workflow?.plan_hash);
+  if (approved) result.workflow = { ...result.workflow, workflow_request_id: approved.id };
+  return result;
+}
+
 function runConfigCheck() {
-  return loadInto("inspect-config-results", "checking…", api.configDiff, renderConfigFindings);
+  return loadInto("inspect-config-results", "checking…", loadConfigDiff, renderConfigFindings);
 }
 
 document.getElementById("inspect-config-diff").addEventListener("click", runConfigCheck);
@@ -380,7 +400,11 @@ document.getElementById("inspect-config-diff").addEventListener("click", runConf
 document.getElementById("inspect-config-push").addEventListener("click", async (e) => {
   if (!currentInspectId) return;
   if (!confirm(`Push desired config to ${currentInspectId}? Runs "hermes config set" for every declared key, then restarts the gateway if it's active.`)) return;
-  await streamInto(document.getElementById("inspect-config-push-output"), e.target, `/api/agents/${currentInspectId}/config-diff?confirm=true`);
+  if (!currentConfigWorkflow?.workflow_request_id) {
+    alert("Approve the exact push plan in Workflows before pushing config.");
+    return;
+  }
+  await streamInto(document.getElementById("inspect-config-push-output"), e.target, api.pushConfig(currentInspectId, currentConfigWorkflow));
   runConfigCheck();
 });
 
@@ -864,6 +888,76 @@ document.getElementById("card-create-form").addEventListener("submit", async (e)
     alert(err.message);
   }
 });
+
+// ---- workflows ----
+function workflowWhen(t) {
+  return t ? new Date(t * 1000).toLocaleString() : "-";
+}
+
+function workflowActionLabel(action) {
+  return { approved: "Approve", rejected: "Reject", changes_requested: "Request changes", choose_option: "Choose option" }[action] || action;
+}
+
+function renderWorkflowItems(items) {
+  const list = document.getElementById("workflow-list");
+  document.getElementById("workflows-empty").hidden = items.length > 0;
+  list.innerHTML = items.map((w) => {
+    const buttons = w.state === "pending" ? [
+      `<button class="btn primary" data-workflow-action="${w.kind === "decision" ? "choose_option" : "approved"}" data-workflow-id="${esc(w.id)}">${w.kind === "decision" ? "Choose option" : "Approve"}</button>`,
+      `<button class="btn" data-workflow-action="changes_requested" data-workflow-id="${esc(w.id)}">Request changes</button>`,
+      `<button class="btn danger" data-workflow-action="rejected" data-workflow-id="${esc(w.id)}">Reject</button>`,
+    ].join("") : "";
+    const options = w.kind === "decision" && w.state === "pending"
+      ? `<label class="workflow-option">Option <select data-workflow-option="${esc(w.id)}">${w.options.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select></label>` : "";
+    return `<article class="workflow-item">
+      <div class="workflow-item-head"><strong>${esc(w.title)}</strong><span class="chip">${esc(w.state)}</span></div>
+      <p>${esc(w.summary)}</p>
+      <div class="workflow-meta"><span>${esc(w.kind)} / T${esc(w.tier)}</span><span>card #${esc(w.card_id)}</span><span>responder: ${esc(w.eligible_responder)}</span><span>expires: ${esc(workflowWhen(w.expires_at))}</span></div>
+      <div class="workflow-binding"><code>${esc(w.plan_revision)}</code><code>${esc(w.plan_hash)}</code></div>
+      <details class="workflow-plan"><summary>Bound execution plan</summary><pre>${esc(JSON.stringify(w.target, null, 2))}</pre></details>
+      ${options}<div class="workflow-actions">${buttons}</div>
+    </article>`;
+  }).join("");
+  list.querySelectorAll("[data-workflow-action]").forEach((button) => button.addEventListener("click", () => respondWorkflow(button)));
+}
+
+async function renderWorkflows() {
+  const list = document.getElementById("workflow-list");
+  list.innerHTML = '<p class="hint">Loading…</p>';
+  try {
+    renderWorkflowItems(await api.listWorkflows());
+  } catch (err) {
+    list.innerHTML = `<p class="finding critical"><span class="sev"></span><span class="summary">${esc(err.message)}</span></p>`;
+  }
+}
+
+async function respondWorkflow(button) {
+  const id = button.dataset.workflowId;
+  const item = (await api.listWorkflows()).find((w) => String(w.id) === String(id));
+  if (!item) return;
+  const action = button.dataset.workflowAction;
+  let response = {};
+  if (action === "changes_requested") response = { note: prompt("What needs to change?", "") || "" };
+  if (action === "rejected" && !confirm(`Reject “${item.title}”?`)) return;
+  if (action === "approved" || action === "choose_option") {
+    if (!confirm(`${action === "choose_option" ? "Choose an option for" : "Approve"} “${item.title}”?`)) return;
+  }
+  if (action === "choose_option" && item.kind === "decision") {
+    const option = document.querySelector(`[data-workflow-option="${CSS.escape(id)}"]`);
+    response.option = option?.value;
+  }
+  button.disabled = true;
+  try {
+    await api.respondWorkflow(id, { action, response, plan_revision: item.plan_revision, plan_hash: item.plan_hash });
+    await renderWorkflows();
+  } catch (err) {
+    alert(err.message);
+    button.disabled = false;
+  }
+}
+
+document.getElementById("workflows-refresh").addEventListener("click", renderWorkflows);
+document.querySelector('[data-tab="workflows"]').addEventListener("click", renderWorkflows);
 
 // ---- policy ----
 let policyHash = "";

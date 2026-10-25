@@ -16,6 +16,7 @@
     <button class="tab active" data-tab="hosts">Hosts</button>
     <button class="tab" data-tab="agents">Agents</button>
     <button class="tab" data-tab="board">Board</button>
+    <button class="tab" data-tab="workflows">Workflows</button>
     <button class="tab" data-tab="policy">Policy</button>
     <button class="tab" data-tab="templates">Templates</button>
     <button class="tab" data-tab="cron-jobs">Cron jobs</button>
@@ -83,6 +84,16 @@
     </div>
     <p class="hint" style="margin:-0.6rem 0 1rem">Shared work across agents. Agents use it over MCP at <code>/board/mcp</code>; assigning a card to an agent sends it a notice through the mailbox.</p>
     <div class="board" id="board-columns"></div>
+  </section>
+
+  <section id="workflows-view" class="view">
+    <div class="view-head">
+      <h1>Workflows</h1>
+      <button class="btn" id="workflows-refresh" type="button">Refresh</button>
+    </div>
+    <p class="hint" style="margin:-0.6rem 0 1rem">Typed decision, review, and approval requests attached to board cards. Responses are bound to the exact plan revision and hash shown here.</p>
+    <div class="workflow-list" id="workflow-list"></div>
+    <p class="empty" id="workflows-empty" hidden>No workflow requests.</p>
   </section>
 
   <section id="policy-view" class="view">

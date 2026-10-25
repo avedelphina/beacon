@@ -183,6 +183,50 @@ async def config_diff(agent_id: str) -> object:
 
 
 @mcp.tool(annotations=READ_ONLY)
+async def list_workflows(include_done: bool = False) -> object:
+    """List decision, review, and approval requests visible to this MCP caller."""
+    return await _get("/api/workflows", include_done=str(include_done).lower())
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def get_workflow(request_id: int) -> object:
+    """Get one workflow request, including its plan binding and event history."""
+    return await _get(f"/api/workflows/{request_id}")
+
+
+@mcp.tool(annotations=DESTRUCTIVE)
+async def respond_workflow(request_id: int, action: str, plan_revision: str,
+                          plan_hash: str, response: object = None) -> object:
+    """Respond to an eligible workflow request. Human-only T4/T5 responses
+    remain restricted to the authenticated browser UI.
+    """
+    return await _post(f"/api/workflows/{request_id}/respond", json={
+        "action": action, "response": response, "plan_revision": plan_revision, "plan_hash": plan_hash,
+    })
+
+
+@mcp.tool()
+async def create_workflow(card_id: int, kind: str, eligible_responder: str,
+                          capability: str, tier: int, title: str, summary: str,
+                          plan_revision: str, plan_hash: str, options: list[str] | None = None,
+                          target: dict | None = None, expires_at: float | None = None) -> object:
+    """Create a pending decision, review, or approval request on a board card.
+    The request is attributed to Beacon's MCP service identity; participants and
+    tier rules are enforced by the Beacon API.
+    """
+    body = {"kind": kind, "eligible_responder": eligible_responder, "capability": capability,
+            "tier": tier, "title": title, "summary": summary, "plan_revision": plan_revision,
+            "plan_hash": plan_hash}
+    if options is not None:
+        body["options"] = options
+    if target is not None:
+        body["target"] = target
+    if expires_at is not None:
+        body["expires_at"] = expires_at
+    return await _post(f"/api/board/cards/{card_id}/workflows", json=body)
+
+
+@mcp.tool(annotations=READ_ONLY)
 async def list_templates() -> object:
     """Config templates (fleet/templates/*.yaml) — shared `config`/`env_keys`
     fragments merged under many agents' `desired`. Each entry lists the agent
@@ -233,12 +277,22 @@ async def apply_fix(agent_id: str, fix: str, confirm: bool = False) -> object:
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
-async def push_config(agent_id: str, confirm: bool = False) -> str:
-    """Push every key declared in desired.config to the host via `hermes config set`,
-    then restart the gateway if it's active. Requires confirm=true."""
+async def push_config(agent_id: str, confirm: bool = False,
+                      workflow_request_id: int | None = None,
+                      plan_revision: str | None = None,
+                      plan_hash: str | None = None) -> str:
+    """Push the exact approved config plan to the host. Requires confirm=true
+    plus the workflow request id and plan binding returned by config_diff."""
     if not confirm:
-        return f"Would push desired.config to {agent_id!r} and restart its gateway if active. Call again with confirm=true to actually run it."
-    return await _post(f"/api/agents/{_agent_path_id(agent_id)}/config-diff?confirm=true")
+        return f"Would push desired.config to {agent_id!r} and restart its gateway if active. Call again with confirm=true and workflow_request_id/plan_revision/plan_hash to actually run it."
+    params = {
+        "confirm": "true",
+        "workflow_request_id": workflow_request_id,
+        "plan_revision": plan_revision,
+        "plan_hash": plan_hash,
+    }
+    query = "&".join(f"{key}={quote(str(value), safe='')}" for key, value in params.items() if value is not None)
+    return await _post(f"/api/agents/{_agent_path_id(agent_id)}/config-diff?{query}")
 
 
 @mcp.tool(annotations=DESTRUCTIVE)

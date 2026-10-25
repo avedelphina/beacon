@@ -6,6 +6,7 @@ pre-auth local-dev workflow.
 
 import base64
 import hashlib
+import hmac
 import os
 import secrets
 from functools import lru_cache
@@ -39,12 +40,27 @@ def is_allowed_email(email: object) -> bool:
 MCP_TOKEN = os.environ.get("BEACON_MCP_TOKEN")
 
 
-def is_mcp_authorization(authorization: object) -> bool:
+def is_mcp_authorization(authorization: str | None) -> bool:
     return (
         isinstance(authorization, str)
         and MCP_TOKEN is not None
         and secrets.compare_digest(authorization, f"Bearer {MCP_TOKEN}")
     )
+
+
+def agent_for_authorization(authorization: str | None) -> str | None:
+    """Resolve an agent's own derived mesh token without widening bearer auth."""
+    if not isinstance(authorization, str) or not authorization.startswith("Bearer "):
+        return None
+    from . import mesh, store
+    presented = authorization.removeprefix("Bearer ")
+    try:
+        for agent in store.list_agents():
+            if agent.reach and hmac.compare_digest(presented, mesh.token(agent.id, mesh.BEACON_PEER)):
+                return agent.id
+    except mesh.MissingSecret:
+        return None
+    return None
 
 
 SESSION_SECRET = os.environ.get("BEACON_SESSION_SECRET")
@@ -205,6 +221,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # Keep the service credential distinct from a browser-session
             # operator so T4/T5 endpoints can require a real human session.
             request.state.auth_via_mcp = True
+            return await call_next(request)
+        agent = agent_for_authorization(request.headers.get("authorization"))
+        if agent and (
+            request.url.path.startswith("/api/workflows")
+            or (request.url.path.startswith("/api/board/cards/") and request.url.path.endswith("/workflows"))
+        ):
+            from . import store
+            record = store.get_agent(agent)
+            if not record.reach or not record.reach.board:
+                return JSONResponse({"detail": "agent is not authorized for workflow board access"}, status_code=403)
+            request.state.workflow_agent = agent
             return await call_next(request)
         if not AUTH_ENABLED:
             return await call_next(request)

@@ -142,8 +142,9 @@ class AgentReach(BaseModel):
         return v
 
 
-# Names the mesh uses for itself; no agent may take one (see Agent.id).
-RESERVED_AGENT_IDS = frozenset({"beacon"})
+# Names the mesh uses for itself or as workflow eligibility sentinels; no
+# agent may take one (see Agent.id).
+RESERVED_AGENT_IDS = frozenset({"beacon", "human"})
 
 
 class Agent(BaseModel):
@@ -177,11 +178,11 @@ class Agent(BaseModel):
     @field_validator("id")
     @classmethod
     def _not_a_reserved_name(cls, v: str) -> str:
-        # why: "beacon" is the mesh name for Beacon itself, meaning operators
-        # and MCP clients. An agent with that id would derive Beacon's own
-        # tokens and pass every access policy (backend/mesh.py).
+        # why: "beacon" is the mesh name for Beacon itself, and "human" is
+        # the workflow sentinel for a signed browser operator. An agent with
+        # either id would collide with a privileged identity/eligibility path.
         if v in RESERVED_AGENT_IDS:
-            raise ValueError(f"{v!r} is reserved for Beacon itself; pick another agent id")
+            raise ValueError(f"{v!r} is reserved for Beacon; pick another agent id")
         return v
 
 

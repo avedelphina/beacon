@@ -10,11 +10,14 @@ for catching bugs like a too-short timeout or a wrong command string is the
 command Beacon builds, not a real round trip.
 """
 
+import base64
+import json
 import tempfile
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from itsdangerous import TimestampSigner
 
 from backend import store
 from backend.app import app
@@ -95,6 +98,7 @@ class FakeSSH:
         self.calls: list[str] = []
         self.result: SSHResult = SSHResult(ok=True, stdout="", stderr="", returncode=0)
         self.stream_lines: list[str] = []
+        self.stream_error: Exception | None = None
 
     def run(self, host, command: str, timeout: int = 10) -> SSHResult:
         self.calls.append(command)
@@ -102,6 +106,8 @@ class FakeSSH:
 
     def stream_script(self, host, script: str, timeout: int = 900):
         self.calls.append(script)
+        if self.stream_error is not None:
+            raise self.stream_error
         yield from self.stream_lines
 
     @property
@@ -121,6 +127,18 @@ def fake_ssh(monkeypatch):
 @pytest.fixture
 def client(fleet, fake_ssh):
     return TestClient(app)
+
+
+@pytest.fixture
+def human_client(fleet, fake_ssh):
+    """A separate TestClient carrying a real signed browser session."""
+    from backend import auth
+
+    payload = base64.b64encode(json.dumps({"user": {"email": "tom@example.com"}}).encode()).decode()
+    cookie = TimestampSigner(auth.SESSION_SECRET).sign(payload.encode()).decode()
+    human = TestClient(app)
+    human.cookies.set("session", cookie)
+    return human
 
 
 @pytest.fixture

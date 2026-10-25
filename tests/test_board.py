@@ -114,7 +114,10 @@ def test_agent_writes_to_the_board_as_itself(fleet_agents):
         assert card["created_by"] == "alpha"
         tools = _mcp(c, "tools/list", token=token).json()["result"]["tools"]
 
-    assert sorted(t["name"] for t in tools) == ["board_card", "board_list", "card_comment", "card_create", "card_update"]
+        assert sorted(t["name"] for t in tools) == [
+            "board_card", "board_list", "card_comment", "card_create", "card_update",
+            "workflow_create", "workflow_get", "workflow_list", "workflow_respond",
+        ]
     notice, = _notices()
     assert notice["sender"] == "alpha" and notice["recipient"] == "bravo"
 
