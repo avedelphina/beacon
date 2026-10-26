@@ -13,7 +13,7 @@ from pydantic import BaseModel, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, board, bus, cron_store, mailbox, mesh, opstore, policy, scheduler, store, templates, workflow
+from . import auth, availability, board, bus, cron_store, mailbox, mesh, opstore, policy, scheduler, store, templates, workflow
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, CronJob, Host
@@ -68,7 +68,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.22.0"
+VERSION = "0.23.0"
 app = FastAPI(title="Beacon", version=VERSION, lifespan=lifespan)
 
 
@@ -303,6 +303,13 @@ def list_agents() -> list[dict]:
     # none, null when its sync never reported. Open withholds the board.
     exposure = mesh.open_chats()
     return [a.model_dump() | {"chat_open": exposure.get(a.id)} for a in store.list_agents()]
+
+
+@app.get("/api/availability")
+def get_availability() -> dict[str, dict]:
+    """Every agent's availability over A2A (backend/availability.py), in one
+    call: the Agents tab polls this instead of one SSH call per agent."""
+    return availability.check_all(store.list_agents())
 
 
 class PolicyText(BaseModel):
@@ -709,6 +716,7 @@ def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None
     """
     if not mesh.may_pull(id_, authorization):
         raise HTTPException(401, "not authorized for this agent's mesh config")
+    availability.record_pull(id_)
     if x_beacon_open_chat is not None:
         mesh.record_open_chat(id_, x_beacon_open_chat)
     config = mesh.config(id_)

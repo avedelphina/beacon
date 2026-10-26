@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-10-26
+
+### Changed
+
+- **Availability reflects A2A, not SSH.** The status pill in the Agents tab
+  now says whether the agent answers over A2A, from a new
+  `GET /api/availability` (one call for the whole fleet, probed in
+  parallel). `online`: its A2A server answered `/health`. `sync-only`:
+  Beacon cannot reach it, but its host synced within 15 minutes, so the
+  host is up. `offline`: neither. `no-a2a`: no reach block. A host without
+  SSH settings, or one Beacon has no route to, no longer shows
+  "unreachable" because of SSH. The systemd service state over SSH stays in
+  the Inspect view, labelled as such.
+
+### Added
+
+- Beacon records every mesh pull per agent (`agent_seen` in the operational
+  store), the heartbeat behind `sync-only`.
+
 ## [0.22.0] — 2026-10-26
 
 Finishes the agent-communication track (C4 chat exposure, C5 TLS).
