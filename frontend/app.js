@@ -34,6 +34,7 @@ const api = {
   get: (kind, id) => json(`/api/${kind}/${id}`),
   put: (kind, id, body) => json(`/api/${kind}/${id}`, "PUT", body),
   del: (kind, id) => json(`/api/${kind}/${id}`, "DELETE"),
+  availability: () => json("/api/availability"),
   agentStatus: (id) => json(`/api/agents/${id}/status`).catch((err) => ({ state: "unreachable", detail: err.message })),
   agentLogs: async (id, lines = 200) => (await json(`/api/agents/${id}/logs?lines=${lines}`)).text,
   reconcile: (id) => json(`/api/agents/${id}/reconcile`),
@@ -56,11 +57,12 @@ const api = {
 
 const splitList = (value) => value.split(",").map((t) => t.trim()).filter(Boolean);
 
-function statusPill(state) {
-  const labels = { "not-installed": "not installed", crashlooping: "crash-looping" };
-  const safeState = ["loading", "active", "inactive", "failed", "unreachable", "not-installed", "crashlooping", "starting", "stopping"].includes(state) ? state : "unknown";
+function statusPill(state, title = "") {
+  const labels = { "not-installed": "not installed", crashlooping: "crash-looping", "sync-only": "sync only", "no-a2a": "no A2A" };
+  const safeState = ["loading", "active", "inactive", "failed", "unreachable", "not-installed", "crashlooping", "starting", "stopping",
+    "online", "sync-only", "offline", "no-a2a"].includes(state) ? state : "unknown";
   const label = labels[safeState] || safeState;
-  return `<span class="status-pill ${safeState}"><span class="dot"></span>${esc(label)}</span>`;
+  return `<span class="status-pill ${safeState}"${title ? ` title="${esc(title)}"` : ""}><span class="dot"></span>${esc(label)}</span>`;
 }
 
 // One finding row. `summary` and `extra` are markup — escape before passing.
@@ -304,14 +306,20 @@ document.getElementById("bulk-tag-form").addEventListener("submit", async (e) =>
   if (failures.length) alert(`Some agents were not changed:\n${failures.join("\n")}`);
 });
 
+// The pill is whether the agent answers over A2A (or its host still syncs),
+// not whether Beacon can SSH in: one call for the whole fleet.
 async function refreshStatuses(agents) {
-  await Promise.all(
-    agents.map(async (a) => {
-      const cell = document.getElementById(`status-${a.id}`);
-      const s = await api.agentStatus(a.id);
-      if (cell) cell.innerHTML = statusPill(s.state);
-    })
-  );
+  let all = {};
+  try {
+    all = await api.availability();
+  } catch (err) {
+    all = {};
+  }
+  for (const a of agents) {
+    const cell = document.getElementById(`status-${a.id}`);
+    const s = all[a.id];
+    if (cell) cell.innerHTML = s ? statusPill(s.state, s.detail) : statusPill("unknown", "availability could not be loaded");
+  }
 }
 
 let currentInspectId = null;
@@ -332,9 +340,10 @@ async function openInspect(id) {
     document.getElementById(`inspect-${panel}-results`).innerHTML = "";
   }
   openModal("inspect-modal");
-  const s = await api.agentStatus(id);
+  const [s, avail] = await Promise.all([api.agentStatus(id), api.availability().then((all) => all[id]).catch(() => null)]);
   document.getElementById("inspect-status").textContent = [
-    `state       ${s.state}`,
+    avail ? `A2A         ${avail.state}${avail.detail ? ` (${avail.detail})` : ""}` : null,
+    `service     ${s.state} (over SSH)`,
     s.active_state ? `active      ${s.active_state} / ${s.sub_state ?? ""}` : null,
     s.pid ? `pid         ${s.pid}` : null,
     s.since ? `since       ${s.since}` : null,

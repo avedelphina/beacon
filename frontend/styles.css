@@ -261,6 +261,10 @@ tbody td:first-child { color: var(--ink); font-family: var(--font-mono); }
 .status-pill.inactive .dot { background: var(--slate-2); }
 .status-pill.failed .dot { background: var(--crit); }
 .status-pill.unreachable .dot { background: var(--warn); }
+.status-pill.online .dot { background: var(--good); }
+.status-pill.sync-only .dot { background: var(--warn); }
+.status-pill.offline .dot { background: var(--crit); }
+.status-pill.no-a2a .dot { background: var(--slate-2); }
 .status-pill.not-installed .dot { background: var(--slate-2); }
 .status-pill.loading .dot { background: var(--line-soft); }
 .status-pill.starting .dot, .status-pill.stopping .dot { background: var(--warn); }

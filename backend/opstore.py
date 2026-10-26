@@ -99,6 +99,11 @@ CREATE TABLE IF NOT EXISTS chat_exposure (
     open_json   TEXT NOT NULL,     -- names of the settings that open its chat to anyone; [] for none
     reported_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS agent_seen (
+    agent       TEXT PRIMARY KEY,
+    last_pull   REAL NOT NULL      -- the agent's host sync last pulled /mesh/{agent}
+);
 """
 
 
