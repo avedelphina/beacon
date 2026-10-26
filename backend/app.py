@@ -15,7 +15,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import auth, board, bus, cron_store, mailbox, mesh, opstore, policy, scheduler, store, templates, workflow
 from .board_mcp import board_app
-from .drivers import for_agent
+from .drivers import NoSSH, for_agent
 from .schemas import Agent, CronJob, Host
 from .tiers import TIER_LABELS, CAPABILITY_TIERS, requires_confirm, tier_for
 
@@ -160,6 +160,7 @@ app.add_exception_handler(workflow.UnauthorizedResponder, _error_handler(403))
 app.add_exception_handler(workflow.UnauthorizedWorkflowAccess, _error_handler(403))
 app.add_exception_handler(workflow.HumanApprovalRequired, _error_handler(403))
 app.add_exception_handler(workflow.StalePlan, _error_handler(409))
+app.add_exception_handler(NoSSH, _error_handler(409))
 
 
 def _started(lines: Iterator[str]) -> Iterator[str]:
@@ -823,7 +824,11 @@ def apply_template(name: str, body: TemplateApplyRequest) -> dict:
 
 @app.get("/api/agents/{id_}/status")
 def get_agent_status(id_: str) -> dict:
-    agent, host, driver = for_agent(id_)
+    try:
+        agent, host, driver = for_agent(id_)
+    except NoSSH as exc:
+        # Not a failure: Beacon just has no way to look. The UI polls this.
+        return {"state": "unknown", "detail": str(exc)}
     return driver.status(agent, host)
 
 

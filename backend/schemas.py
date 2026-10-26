@@ -53,7 +53,11 @@ class SSHConfig(BaseModel):
 class Host(BaseModel):
     id: str
     address: str
-    ssh: SSHConfig
+    # None: Beacon never logs in here and only talks to the host's agents
+    # over A2A (an agent on a machine Beacon has no account on, or one that
+    # isn't Hermes). Driver actions then refuse (drivers.NoSSH); the mesh,
+    # mailbox and board work as for any agent.
+    ssh: SSHConfig | None = None
     tags: list[str] = Field(default_factory=list)
 
     @field_validator("address")
