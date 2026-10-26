@@ -187,15 +187,17 @@ open, same as every other route. The call does not take `confirm=true`: it
 changes no host, and the only thing it spends is one turn on the target.
 The same two operations are MCP tools, `agent_registry` and `call_agent`.
 
-If the agent is offline, the call fails with 502. Add
-`"queue_if_offline": true` to leave the message in the
-[mailbox](#mailbox-relay-and-voicemail) instead. The response then has
-`state: TASK_STATE_SUBMITTED` and a `queued` message ID. The reply turns
-up later in `GET /api/mailbox` (MCP tool: `mailbox`) with recipient
-`beacon`.
+If the agent is offline, the call fails with 502, and a call that the
+agent takes longer than 330 seconds to answer fails too. Add
+`"queue_if_offline": true` to go through the
+[mailbox](#mailbox-relay-and-voicemail) instead. An answer within 90
+seconds comes back at once. Otherwise the response has a task id (`mbx-N`)
+and `state: TASK_STATE_SUBMITTED` (the agent is offline) or
+`TASK_STATE_WORKING` (it is still working). Read the answer later with
+`GET /api/mailbox/tasks/{task_id}` (MCP tool: `mailbox_task`), or in
+`GET /api/mailbox` (MCP tool: `mailbox`) with recipient `beacon`.
 
-Not yet built: relaying between different networks, streaming and push
-notifications, and any check that a caller may reach a particular agent. See ROADMAP.md, "Priority track — agent
+Not yet built: streaming. See ROADMAP.md, "Priority track — agent
 communication".
 
 ### A2A mesh
@@ -467,10 +469,11 @@ messages keep the old id as text.
 `POST /a2a/{agent}` is an A2A endpoint that Beacon serves for each agent.
 Every agent's peer list has two entries per peer: `<peer>`, which is
 direct, and `<peer>-mailbox`, which goes through Beacon. An agent uses the
-mailbox entry when the direct call fails.
+mailbox entry when the direct call fails, and for any work that can take
+longer than a minute or two (see **Long work** below).
 
-- **The target answers:** Beacon forwards the call and returns the reply
-  (relay).
+- **The target answers within 90 seconds:** Beacon forwards the call and
+  returns the reply (relay). Beacon keeps nothing.
 - **The target cannot be reached:** Beacon keeps the message and answers
   `TASK_STATE_SUBMITTED` (voicemail). The message travels with the target's
   next mesh-config pull, which is within 5 minutes of the agent coming
@@ -489,16 +492,58 @@ mailbox entry when the direct call fails.
   token, so the target sees the real sender. Beacon never accepts its own
   token from an agent, so no agent can pose as Beacon.
 - **Only messages that never arrived are queued:** no connection, or HTTP
-  502/503/504 from a proxy in front of the agent. A refusal, or a read
-  timeout after the agent may have started on the message, is returned as
-  an error instead. Retrying either could deliver the message twice.
-- **Messages expire after 72 hours.** The sender then gets a notice.
+  502/503/504 from a proxy in front of the agent. A refusal is returned as
+  an error. A message that arrived is never sent again, so nothing is done
+  twice.
+- **Undelivered messages expire after 72 hours.** The sender then gets a
+  notice.
 - **Across networks:** the same endpoint relays between networks. It is
   the plain-name peer entry for agents on another network. The caller must
   reach Beacon at `BEACON_PUBLIC_URL`, and Beacon must reach the target.
 - **Agents that Beacon cannot reach** still get held messages and late
   replies, through their own sync (pull delivery). They need only to reach
   Beacon.
+
+**Long work.** Hermes has two time limits that used to lose every answer
+that took longer than a short exchange. The caller's `a2a_call` gives up
+after 120 seconds. The target drops an answer that it finds after
+`A2A_REPLY_TIMEOUT`, which is 300 seconds by default. The mailbox works
+around both:
+
+1. Beacon waits at most 90 seconds for an answer. That is less than the
+   caller's limit, so the caller is never cut off.
+2. If the answer is not ready, the caller immediately gets the state
+   `TASK_STATE_WORKING` and a task id `mbx-N`. The target keeps working.
+3. Every delivery tells the target where to send the finished task: an A2A
+   push notification to `{BEACON_PUBLIC_URL}/a2a/{agent}/push/{N}?k=<key>`.
+   The key is derived for that agent and message, so nobody else can settle
+   it.
+4. When the push arrives, Beacon stores the answer and delivers it to the
+   caller as a new message, like a voicemail reply. A push carries at most
+   2000 characters, so Beacon fetches a longer answer with `GetTask`.
+5. The host sync sets each agent's `A2A_REPLY_TIMEOUT` to 4 hours, so the
+   agent keeps the answer for that long. Hermes reads this value at
+   startup, so the first sync after an upgrade restarts each gateway once.
+
+The same applies when Beacon delivers held messages, and when the host sync
+delivers them locally: the sync waits 60 seconds, then leaves the answer to
+the push. If no answer arrives within 4 hours and 15 minutes, the task
+expires and the caller gets a notice. Without `BEACON_PUBLIC_URL` there is
+nowhere to push to. A message that gets no answer in time is then marked
+`uncertain`, which is final, and it is not sent again.
+
+A direct call (`<peer>`, not `<peer>-mailbox`) still ends after 120 seconds
+for the caller. The target finishes the work, but its answer never reaches
+the caller. Use the mailbox entry, or a board card, for long work.
+
+**Task status.** `GET /api/mailbox/tasks/{task_id}` and the MCP tool
+`mailbox_task` return a mailbox task as an A2A task, with the delivery
+details. The state is `SUBMITTED` while the message is held, `WORKING`
+while it is being delivered or worked on, `COMPLETED` with the answer, or
+`FAILED` (failed, uncertain, or expired). The sender and the target can also
+use A2A `GetTask` on `/a2a/{agent}`. The mailbox does not stream, so
+`SubscribeToTask` is refused. Board assignment notices have task ids too,
+shown on the card.
 
 The messages live in the operational store, `state/beacon.db` (SQLite;
 `BEACON_STATE_DIR` changes the directory). In Docker it is the `./state`

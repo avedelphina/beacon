@@ -119,7 +119,7 @@ def test_failed_delivery_is_distinguishable_from_assignment_success(net, monkeyp
     """A refusal (bus.Unreachable, transient=False) marks the notice failed
     without touching the card or its assign event — the API must be able to
     tell "card assignment succeeded" apart from "notice delivery failed"."""
-    def refuse(agent, message, context_id=None, *, token=None, client=None):
+    def refuse(agent, message, context_id=None, **kwargs):
         raise bus.Unreachable("agent refused: untrusted peer", transient=False)
 
     monkeypatch.setattr(bus, "call", refuse)
@@ -132,19 +132,21 @@ def test_failed_delivery_is_distinguishable_from_assignment_success(net, monkeyp
     assert "refused" in notice["last_error"]
 
 
-def test_uncertain_delivery_is_not_reported_as_failed_or_retried(net, monkeypatch):
-    """A read timeout may mean the remote task was accepted. Preserve that
-    ambiguity and stop retrying rather than creating a duplicate assignment."""
-    def timeout(agent, message, context_id=None, *, token=None, client=None):
-        raise bus.Unreachable("delivery uncertain: read timeout", uncertain=True)
+def test_a_notice_without_an_answer_in_time_counts_as_delivered_and_is_not_resent(net, monkeypatch):
+    """A read timeout means the agent has the notice and is busy with it. A
+    notice needs no answer, so it is delivered; sending it again would hand
+    the agent the same assignment twice."""
+    def timeout(agent, message, context_id=None, **kwargs):
+        raise bus.Unreachable("no answer: read timeout", uncertain=True)
 
     monkeypatch.setattr(bus, "call", timeout)
     card = board.create_card("beacon", "ship it", assignee="bravo")
+    mailbox.deliver_pending("bravo")
 
     notice = _notice_event(board.get_card(card["id"]))["notice"]
-    assert notice["state"] == "uncertain"
-    assert "uncertain" in notice["last_error"]
-    assert notice["attempts"] == 1
+    assert notice["state"] == "delivered" and notice["attempts"] == 1
+    assert "read timeout" in notice["last_error"]
+    assert mailbox.task_view(notice["task_id"])["status"]["state"] == "TASK_STATE_COMPLETED"
 
 
 def test_transient_failure_leaves_the_notice_queued_for_retry(net):

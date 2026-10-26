@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS mailbox (
     body        TEXT NOT NULL,
     context_id  TEXT,
     reply_to    INTEGER,
-    state       TEXT NOT NULL,     -- queued | delivering | delivered | failed | uncertain | expired
+    state       TEXT NOT NULL,     -- queued | delivering | relaying | working | delivered | failed | uncertain | expired
     attempts    INTEGER NOT NULL DEFAULT 0,
     last_error  TEXT,
     created_at  REAL NOT NULL,

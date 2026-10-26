@@ -50,7 +50,8 @@ backend/
   policy.py       fleet/policy.yaml: tag rules (Tailscale-style) behind may_call;
                   preview/save for the Policy tab (T4, history in fleet/policy-history/)
   mailbox.py      relay + voicemail behind POST /a2a/{agent}; delivers on the
-                  recipient's /mesh pull (no scheduler)
+                  recipient's /mesh pull (no scheduler); slow answers come back
+                  by A2A push to /a2a/{agent}/push/{id} (long work)
   opstore.py      operational store: SQLite at state/beacon.db (runtime state,
                   never fleet YAML)
   skills/         skills Beacon hands every agent via the mesh config; the host

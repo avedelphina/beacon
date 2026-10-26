@@ -4,20 +4,28 @@
 
 ### Added
 
-- **Mailbox task status.** A held message returns a durable `mbx-N` task id.
-  `GET /api/mailbox/tasks/{task_id}` exposes its A2A-shaped status and mailbox
-  receipt, while the mailbox A2A endpoint accepts `GetTask`/`tasks/get` and
-  returns a one-snapshot `SubscribeToTask`/`tasks/subscribe` SSE response.
-  Assignment notices expose the same task id in their card event, so card
-  assignment remains locally acknowledged while delivery and late replies are
-  tracked separately. The assignment itself still commits immediately
-  regardless of mailbox delivery speed; the resulting `assign_notice` card
-  event carries the mailbox row id, so `GET /api/board/cards/{id}` (and the
-  matching MCP tools) can show that notice's own delivery state (`queued` |
-  `delivering` | `delivered` | `failed` | `uncertain` | `expired`, with
-  attempts and the last error) separately from the assignment's own success.
-  Reassigning to the same agent with no other change still never sends a
-  second notice.
+- **Long work through the mailbox.** Work that took longer than a short
+  exchange never came back: a Hermes caller gives up after 120 s, and a Hermes
+  agent dropped any answer it found after its 300 s `A2A_REPLY_TIMEOUT`. The
+  mailbox now waits at most 90 s. A slower answer is handed off: the caller
+  gets `TASK_STATE_WORKING` and a durable task id `mbx-N` at once, the agent
+  POSTs the finished task to Beacon (A2A push notification, to a per-message
+  URL with a derived key), and the answer reaches the caller as a new message.
+  This applies to live relays, to held messages that Beacon delivers, and to
+  held messages that the host sync delivers locally. The sync waits 60 s
+  instead of 330 s, so one long task no longer holds it. The host sync sets each
+  agent's `A2A_REPLY_TIMEOUT` to 4 hours, which restarts each gateway once.
+  A handed-off task with no answer after 4 h 15 min expires with a notice to
+  the caller. `POST /api/agents/{id}/call` with `queue_if_offline` (MCP
+  `call_agent`) goes through the same path.
+- **Mailbox task status.** `GET /api/mailbox/tasks/{task_id}`, the MCP tool
+  `mailbox_task`, and A2A `GetTask` on `/a2a/{agent}` (sender and target only)
+  show a mailbox task as an A2A task with its delivery details. `uncertain` and
+  `expired` count as `FAILED`. The mailbox does not stream, so
+  `SubscribeToTask` returns an unsupported-operation error. Board assignment
+  notices record their own mailbox task on the card (`assign_notice` events),
+  separate from the assignment, and their task ids can be looked up. A notice
+  that gets no answer in time counts as delivered and is not sent again.
 - **Web governance workflows.** Board cards can now carry durable decision,
   review, and approval requests in SQLite, with explicit lifecycle states,
   response history, expiry, and exact plan revision/hash binding.

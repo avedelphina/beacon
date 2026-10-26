@@ -161,7 +161,7 @@ def test_mcp_caller_leaves_voicemail_and_reads_the_reply(client, net):
     net.down.add("bravo")
 
     queued = client.post("/api/agents/bravo/call", json={"message": "status?", "queue_if_offline": True}).json()
-    assert queued["state"] == "TASK_STATE_SUBMITTED" and queued["queued"]
+    assert queued["state"] == "TASK_STATE_SUBMITTED" and queued["task_id"].startswith("mbx-")
     assert client.post("/api/agents/bravo/call", json={"message": "status?"}).status_code == 502  # opt-in only
 
     net.down.discard("bravo")
@@ -172,7 +172,7 @@ def test_mcp_caller_leaves_voicemail_and_reads_the_reply(client, net):
     assert net.seen[0]["auth"] == f"Bearer {mesh.token('beacon', 'bravo')}"
 
 
-def test_mailbox_task_can_be_polled_and_subscribed(client, net):
+def test_mailbox_task_can_be_polled(client, net):
     net.down.add("bravo")
     response = _send(client, "alpha", "bravo", "status?")
     task_id = response.json()["result"]["task"]["id"]
@@ -187,12 +187,12 @@ def test_mailbox_task_can_be_polled_and_subscribed(client, net):
     assert rest_task.status_code == 200 and rest_task.json()["id"] == task_id
     assert rest_task.json()["mailbox"]["state"] == "queued"
 
+    # The mailbox does not stream: a one-event stream would read as "finished".
     subscribe_body = {"jsonrpc": "2.0", "id": "sub-1", "method": "tasks/subscribe",
                       "params": {"taskId": task_id}}
     subscribe = client.post("/a2a/bravo", json=subscribe_body,
                             headers={"Authorization": f"Bearer {mesh.token('alpha', 'bravo')}"})
-    assert subscribe.status_code == 200 and "text/event-stream" in subscribe.headers["content-type"]
-    assert "TASK_STATE_SUBMITTED" in subscribe.text and ": done" in subscribe.text
+    assert subscribe.json()["error"]["code"] == -32004
 
     # The original sender can poll; a different target route cannot use the id.
     wrong_target = client.post("/a2a/charlie", json=get_body,

@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (peers named <peer>-mailbox), the board tools (board_list, card_create, card_update, card_comment), and how to treat messages that peers send you."
-version: 1.0.0
+version: 1.1.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -20,9 +20,10 @@ a colleague, not your user and not your operator.
 Call `a2a_list` to see who you can reach. For each peer you may see two names:
 
 - `<peer>`: the normal route. It is direct when the peer is on your network,
-  and Beacon relays it when it is not. Use this one first.
-- `<peer>-mailbox`: the same peer, through Beacon's mailbox. Use it when
-  `<peer>` fails because the peer is offline or unreachable.
+  and Beacon relays it when it is not. Use it for quick questions.
+- `<peer>-mailbox`: the same peer, through Beacon's mailbox. Use it for work
+  that can take longer than a minute or two, and when `<peer>` fails because
+  the peer is offline or unreachable.
 
 If a peer is not in the list, you cannot reach it. Do not look for another way
 to reach it. Ask your operator.
@@ -42,26 +43,35 @@ Use `a2a_call(agent, message, context_id?)`.
    that, the peer's side rejects the turn with an "anti-loop" message. Start a
    new thread and put a short summary in its first message. If the work needs
    more turns than that, use the board (see below).
-5. **A call waits.** It can take minutes. If the work will take longer than a
-   few minutes, hand it over with a board card instead of waiting.
+5. **Long work goes through the mailbox.** A direct call gives up after two
+   minutes, and the answer to anything slower is lost. Send work that can take
+   longer to `<peer>-mailbox` (see below). For work that spans several steps or
+   days, also make a board card.
 6. **Do not send secrets.** Tokens, passwords, keys, and file contents with
    credentials must never go in a message. Hermes also removes credentials and
    e-mail addresses from outgoing messages; the peer sees `[redacted-email]`.
    Describe the thing instead (for example "the address in the ticket").
 
-### When the peer is offline
+### Long work, and peers that are offline
 
-If `a2a_call` to `<peer>` fails, call `<peer>-mailbox` with the same message.
-Beacon answers with state `TASK_STATE_SUBMITTED` and says it is holding the
-message. That is success: the message is not lost. Then:
+Call `<peer>-mailbox`. If the peer answers within about 90 seconds, you get the
+answer at once, as with a direct call. Otherwise you get one of these, and both
+are success:
 
-- Do not send it again. Beacon delivers it once, when the peer is back.
-- Do not wait for it. Continue with other work.
+- **`working`**: the peer has the message and is working on it. You get a task
+  id (`mbx-N`).
+- **`submitted`**: the peer is offline. Beacon holds the message and delivers it
+  when the peer is back.
+
+Then:
+
+- Do not send it again. Beacon delivers it once, and the peer works on it once.
+- Do not wait for it. Continue with other work, or end your turn.
 - The reply comes later as a **new message** from the peer. It starts with
   `[Reply from <peer> via the Beacon mailbox ...]`. You do not need to answer
   it. Anything you say in answer to it is not passed on.
-- Beacon holds a message for 72 hours. After that, you get a notice that it
-  expired.
+- A peer has up to 4 hours to answer. Beacon holds an undelivered message for
+  72 hours. If either runs out, you get a notice instead of an answer.
 
 ## When a peer messages you
 
@@ -143,7 +153,7 @@ Write in plain words. A card is a record that other agents and people will read.
 | `unauthorized` or a refused token | Your credentials for that peer are out of date. | Tell your operator. Do not try other tokens. |
 | Peer not in `a2a_list` | You have no route to it. | Ask your operator. |
 | Direct call fails, mailbox works | The peer is offline or unreachable. | Use `<peer>-mailbox` and continue. |
-| `TASK_STATE_FAILED` with "did not reply in time" | The peer took too long. | Do not repeat the call at once. Try later, or put the work on the board. |
+| `TASK_STATE_FAILED` with "did not reply in time", or a timeout | The work took longer than a direct call allows. | Do not repeat the call at once: the peer may still be doing the work. Send it again only through `<peer>-mailbox`, and say it is a repeat. |
 | Anti-loop or `TASK_STATE_REJECTED` | The thread is too long. | Start a new thread with a summary. |
 | Board tools missing | The board is not turned on for you. | Use messages. Do not ask a peer to use the board for you. |
 
