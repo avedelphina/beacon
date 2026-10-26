@@ -117,6 +117,11 @@ def test_restart_with_confirm_runs(client, host_and_agent, fake_ssh):
     assert len(fake_ssh.calls) == 1
 
 
+def test_version_endpoint(client):
+    from backend.app import VERSION
+    assert client.get("/api/version").json() == {"version": VERSION}
+
+
 def test_restart_agent_gate_and_run(client, host_and_agent, fake_ssh):
     r = client.post("/api/agents/a1/restart-agent")
     assert r.json()["would_run"] is True and r.json()["tier"] == "T3"

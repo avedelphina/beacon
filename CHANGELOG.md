@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.21.1] — 2026-10-26
+
+### Added
+
+- **Version in the header.** The page shows the running Beacon version next to
+  the logo, from the new `GET /api/version`.
+
 ## [0.21.0] — 2026-10-26
 
 ### Added
