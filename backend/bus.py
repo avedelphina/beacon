@@ -16,6 +16,8 @@ has no "return immediately" mode, so a caller that won't wait passes a short
 `timeout` and relies on the push.
 """
 
+import os
+import ssl
 import uuid
 
 import httpx
@@ -26,6 +28,18 @@ from .schemas import Agent
 # Hermes's own reply window plus headroom, so Beacon reports the agent's
 # timeout verdict instead of cutting the call off first.
 DEFAULT_TIMEOUT = httpx.Timeout(330, connect=10)
+# A PEM file of CA certificates to trust for agents' https endpoints, on top
+# of the public roots: the operator's own CA, for TLS terminated on each
+# agent's host (README, "TLS without an overlay network"). On top, not
+# instead, which is what the standard SSL_CERT_FILE would do.
+CA_FILE_ENV = "BEACON_CA_FILE"
+
+
+def tls() -> ssl.SSLContext:
+    ctx = httpx.create_ssl_context()
+    if ca_file := os.environ.get(CA_FILE_ENV):
+        ctx.load_verify_locations(cafile=ca_file)
+    return ctx
 
 
 class Unreachable(Exception):
@@ -85,7 +99,7 @@ def _rpc(agent: Agent, method: str, params: dict, token: str | None, client: htt
     headers = {"Authorization": f"Bearer {token}", "A2A-Version": "1.0"}
     owns_client = client is None
     if owns_client:
-        client = httpx.Client(timeout=timeout or DEFAULT_TIMEOUT)
+        client = httpx.Client(timeout=timeout or DEFAULT_TIMEOUT, verify=tls())
     try:
         response = client.post(reach.endpoint, json=body, headers=headers)
     except httpx.HTTPError as exc:
