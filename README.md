@@ -931,6 +931,7 @@ this one credential.
 | `POST` | `/api/templates/{name}/apply` | Add a template to agents (`{"agent_ids": [...], "confirm": true}`) — T2 |
 | `GET` | `/api/agents/{id}/status` | Live status |
 | `GET` | `/api/agents/{id}/logs?lines=N` | Log tail |
+| `GET` | `/api/version` | Running Beacon version (shown in the page header) |
 | `GET` | `/api/tiers` | Tier registry — every gated capability, its tier, and why |
 | `POST` | `/api/agents/{id}/deploy?confirm=true` | Install/bring up (streamed) — T3 |
 | `GET`/`POST` | `/api/agents/{id}/reconcile` | Diagnose / apply one fix (`{"fix": "...", "confirm": true}`) — apply is T2 |

@@ -68,7 +68,8 @@ async def lifespan(_app):
         yield
 
 
-app = FastAPI(title="Beacon", version="0.21.0", lifespan=lifespan)
+VERSION = "0.21.1"
+app = FastAPI(title="Beacon", version=VERSION, lifespan=lifespan)
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:
@@ -126,6 +127,11 @@ async def _csp(request, call_next):
         "font-src 'self' https://fonts.gstatic.com"
     )
     return response
+
+
+@app.get("/api/version")
+def get_version() -> dict:
+    return {"version": VERSION}
 
 
 @app.get("/api/tiers")

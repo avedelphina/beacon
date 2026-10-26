@@ -1062,3 +1062,7 @@ setInterval(() => {
   // Agents change the board too; keep it current while it's open.
   if (document.getElementById("board-view").classList.contains("active")) renderBoard();
 }, 30000);
+
+json("/api/version").then((v) => {
+  document.getElementById("beacon-version").textContent = `v${v.version}`;
+}).catch(() => {}); // cosmetic: no version label beats a broken page
