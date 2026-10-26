@@ -48,14 +48,17 @@ import uuid
 from pathlib import Path
 
 # Read once, when Hermes's A2A adapter starts; a change needs a restart.
-INBOUND_KEYS = ("A2A_PORT", "A2A_HOST", "A2A_AGENT_NAME", "A2A_PEER_TOKENS", "A2A_TRUSTED_PEERS")
+# Read when the gateway starts, so a change to any of them restarts it.
+INBOUND_KEYS = ("A2A_PORT", "A2A_HOST", "A2A_AGENT_NAME", "A2A_PEER_TOKENS", "A2A_TRUSTED_PEERS",
+                "A2A_REPLY_TIMEOUT")
 BOARD_TOKEN_KEY = "BEACON_BOARD_TOKEN"
 BOARD_SERVER = "beacon-board"
 MAX_LOG_BYTES = 1_000_000
 # Announces that this sync delivers held messages itself (pull delivery).
 SYNC_VERSION = "2"
-# Hermes answers within its A2A_REPLY_TIMEOUT (300s); wait a little longer.
-LOCAL_REPLY_TIMEOUT = 330
+# How long to wait for the agent's answer before leaving it to the agent's
+# push to Beacon (backend/mailbox.py), so one long task never holds the sync.
+LOCAL_REPLY_TIMEOUT = 60
 # A restart still marked as running after this long is assumed dead
 # (longer than Hermes 0.21's 30-minute graceful drain cap).
 RESTART_STALE_SECONDS = 40 * 60
@@ -95,6 +98,8 @@ def env_settings(mesh: dict, pull_token: str, managed: dict, current: dict) -> d
     mine = set(managed["inbound"]) | set(inbound)
     settings = {
         "A2A_PORT": str(mesh["listen"]["port"]),
+        # How long the agent may work on one task before Hermes drops the answer.
+        **({"A2A_REPLY_TIMEOUT": str(mesh["listen"]["reply_timeout"])} if mesh["listen"].get("reply_timeout") else {}),
         "A2A_AGENT_NAME": mesh["agent"],
         "A2A_PEER_TOKENS": ",".join(
             [e for e in entries(current.get("A2A_PEER_TOKENS", "")) if entry_name(e) not in mine]
@@ -185,16 +190,21 @@ def parts_text(obj) -> str:
     return "\n".join(p["text"] for p in parts or [] if isinstance(p, dict) and isinstance(p.get("text"), str))
 
 
-def deliver_locally(url: str, token: str, text: str, context_id: str | None) -> dict:
+def deliver_locally(url: str, token: str, text: str, context_id: str | None, push_url: str | None = None) -> dict:
     """One A2A SendMessage to the agent on this host. Returns the report for
     Beacon: ok + reply, or the error and whether retrying later is safe. Only
-    "never got there" is transient; a refusal, or a timeout while the agent
-    may already be working on it, is not — retrying could deliver it twice."""
+    "never got there" is transient; a refusal is definite failure. A timeout
+    means the agent has it: with `push_url` it is still working and will send
+    Beacon the answer itself ("working"), without one the outcome is unknown
+    ("uncertain"). Neither is ever sent again."""
     message = {"role": "ROLE_USER", "parts": [{"text": text}], "messageId": uuid.uuid4().hex}
     if context_id:
         message["contextId"] = context_id
+    params = {"message": message}
+    if push_url:
+        params["configuration"] = {"taskPushNotificationConfig": {"url": push_url}}
     body = json.dumps({"jsonrpc": "2.0", "id": uuid.uuid4().hex, "method": "SendMessage",
-                       "params": {"message": message}}).encode()
+                       "params": params}).encode()
     request = urllib.request.Request(url, data=body, method="POST", headers={
         "Authorization": f"Bearer {token}", "Content-Type": "application/json", "A2A-Version": "1.0"})
     try:
@@ -210,8 +220,12 @@ def deliver_locally(url: str, token: str, text: str, context_id: str | None) -> 
         return {"ok": False, "transient": exc.code in (502, 503, 504), "error": f"HTTP {exc.code}"}
     except urllib.error.URLError as exc:  # no connection: it never got the message
         return {"ok": False, "transient": True, "error": str(exc.reason)}
-    except (socket.timeout, OSError) as exc:  # waiting for the answer: it may be working on it
-        return {"ok": False, "transient": False, "error": f"no answer: {exc}"}
+    except (socket.timeout, OSError) as exc:  # waiting for the answer: it is working on it
+        if push_url:
+            return {"ok": False, "transient": False, "working": True,
+                    "error": f"no answer within {LOCAL_REPLY_TIMEOUT} s; the agent sends it to Beacon when done"}
+        return {"ok": False, "transient": False, "uncertain": True,
+                "error": f"delivery uncertain: no answer: {exc}"}
     if not isinstance(payload, dict) or isinstance(payload.get("error"), dict):
         error = payload.get("error", {}).get("message") if isinstance(payload, dict) else "unreadable answer"
         return {"ok": False, "transient": False, "error": str(error)}
@@ -418,10 +432,12 @@ def sync(state: Path) -> int:
             if restarting:  # the gateway is draining; hand it back for the next run
                 report = {"ok": False, "transient": True, "error": "agent restarting"}
             else:
-                report = deliver_locally(mesh["endpoint"], item["token"], item["text"], item.get("context_id"))
+                report = deliver_locally(mesh["endpoint"], item["token"], item["text"], item.get("context_id"),
+                                         item.get("push_url"))
             post_report(cfg, pull_token, item["id"], report)
             log(f"held message {item['id']}: " + ("delivered" if report["ok"] else
-                ("handed back" if report["transient"] else "failed") + f" ({report['error']})"))
+                ("handed back" if report["transient"] else "working, answer by push" if report.get("working")
+                 else "uncertain" if report.get("uncertain") else "failed") + f" ({report['error']})"))
     return 0
 
 

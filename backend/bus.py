@@ -8,8 +8,12 @@ backend/mesh.py derives for that pair. One blocking `SendMessage` per call:
 Hermes holds the request open until the agent answers or its
 A2A_REPLY_TIMEOUT (300s default) passes, then answers with a terminal task
 either way. Threads ride on A2A's
-own `contextId`. Streaming, push notifications, and relaying for agents on
-another network are later steps, not this one.
+own `contextId`.
+
+Work that outlasts one call (backend/mailbox.py) uses `push_url`: Hermes
+POSTs the finished task there, however long after this call gave up. Hermes
+has no "return immediately" mode, so a caller that won't wait passes a short
+`timeout` and relies on the push.
 """
 
 import uuid
@@ -29,30 +33,45 @@ class Unreachable(Exception):
 
     `transient` means the agent itself never got the message (no connection,
     or a gateway in front of it answered 502/503/504), so holding it for later
-    is safe. A refusal, or a read timeout after the agent may already be
-    working on it, is not transient: retrying could deliver it twice.
+    is safe. `uncertain` means the request may have reached the agent but no
+    response was observed (for example, a read timeout), so retrying could
+    deliver it twice. A refusal is a definite failure.
     """
 
-    def __init__(self, message: str, transient: bool = False):
+    def __init__(self, message: str, transient: bool = False, uncertain: bool = False):
         super().__init__(message)
         self.transient = transient
+        self.uncertain = uncertain
 
 
 def call(agent: Agent, message: str, context_id: str | None = None, *, token: str | None = None,
-         client: httpx.Client | None = None) -> dict:
+         client: httpx.Client | None = None, timeout: float | None = None, push_url: str | None = None) -> dict:
     """Send one user message to `agent`; return the task's id, thread, state and reply text.
 
     `context_id` continues an earlier thread — pass back the one a previous
     call returned. Without it the agent starts a new thread. `token` defaults
     to Beacon's own; the mailbox passes the original caller's instead.
+    `timeout` caps the wait for the answer; `push_url` asks the agent to POST
+    the finished task there (A2A push notification).
     """
     msg = {"role": "ROLE_USER", "parts": [{"text": message}], "messageId": uuid.uuid4().hex}
     if context_id:
         msg["contextId"] = context_id
-    return _task_view(agent.id, _rpc(agent, "SendMessage", {"message": msg}, token, client))
+    params = {"message": msg}
+    if push_url:
+        params["configuration"] = {"taskPushNotificationConfig": {"url": push_url}}
+    wait = httpx.Timeout(timeout, connect=10) if timeout else None
+    return _task_view(agent.id, _rpc(agent, "SendMessage", params, token, client, wait))
 
 
-def _rpc(agent: Agent, method: str, params: dict, token: str | None, client: httpx.Client | None) -> dict:
+def get_task(agent: Agent, task_id: str, *, token: str | None = None) -> dict:
+    """The agent's own record of a task (A2A GetTask), as `call` returns it.
+    Hermes keeps finished tasks in memory, so this works until it restarts."""
+    return _task_view(agent.id, _rpc(agent, "GetTask", {"id": task_id}, token, None, httpx.Timeout(20, connect=10)))
+
+
+def _rpc(agent: Agent, method: str, params: dict, token: str | None, client: httpx.Client | None,
+         timeout: httpx.Timeout | None = None) -> dict:
     if agent.reach is None:
         raise Unreachable(f"agent {agent.id!r} has no reach block; it is inventory-only")
     reach = agent.reach
@@ -66,12 +85,14 @@ def _rpc(agent: Agent, method: str, params: dict, token: str | None, client: htt
     headers = {"Authorization": f"Bearer {token}", "A2A-Version": "1.0"}
     owns_client = client is None
     if owns_client:
-        client = httpx.Client(timeout=DEFAULT_TIMEOUT)
+        client = httpx.Client(timeout=timeout or DEFAULT_TIMEOUT)
     try:
         response = client.post(reach.endpoint, json=body, headers=headers)
     except httpx.HTTPError as exc:
         never_arrived = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout))
-        raise Unreachable(f"agent {agent.id!r} did not answer: {exc}", transient=never_arrived) from exc
+        may_have_arrived = isinstance(exc, (httpx.ReadTimeout, httpx.WriteTimeout))
+        raise Unreachable(f"agent {agent.id!r} did not answer: {exc}",
+                          transient=never_arrived, uncertain=may_have_arrived) from exc
     finally:
         if owns_client:
             client.close()

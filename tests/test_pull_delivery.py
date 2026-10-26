@@ -7,6 +7,7 @@ import types
 import importlib.util
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -73,13 +74,16 @@ def test_a_delivered_report_passes_the_reply_back(client, pair):
     assert pair == ["alpha"]  # Beacon tries alpha at once; else alpha's own pull
 
 
-@pytest.mark.parametrize("transient, expected", [(True, "queued"), (False, "failed")])
-def test_a_failed_report_requeues_only_when_safe(client, pair, transient, expected):
+@pytest.mark.parametrize("payload, expected", [
+    ({"ok": False, "transient": True, "error": "boom"}, "queued"),
+    ({"ok": False, "error": "boom"}, "failed"),
+    ({"ok": False, "uncertain": True, "error": "delivery uncertain: read timeout"}, "uncertain"),
+])
+def test_a_failed_report_preserves_delivery_semantics(client, pair, payload, expected):
     message_id = mailbox.enqueue("alpha", "bravo", "message", "x")
     client.get("/mesh/bravo", headers={**_auth("bravo"), **V2})
 
-    client.post(f"/mesh/bravo/inbox/{message_id}", headers=_auth("bravo"),
-                json={"ok": False, "transient": transient, "error": "boom"})
+    client.post(f"/mesh/bravo/inbox/{message_id}", headers=_auth("bravo"), json=payload)
 
     assert _state(message_id) == expected
 
@@ -110,6 +114,7 @@ class FakeNet:
 
     def __init__(self, config):
         self.config, self.reports, self.agent_calls, self.agent_up = config, [], [], True
+        self.agent_params, self.agent_slow = [], 0
         net = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -134,6 +139,9 @@ class FakeNet:
                     net.reports.append((int(self.path.rsplit("/", 1)[1]), body))
                     return self._json(200, {"ok": True})
                 net.agent_calls.append((self.headers["Authorization"], body["params"]["message"]))
+                net.agent_params.append(body["params"])
+                if net.agent_slow:
+                    time.sleep(net.agent_slow)  # longer than the sync waits: the agent is still working
                 task = {"id": "t", "contextId": "c", "status": {"state": "TASK_STATE_COMPLETED",
                         "message": {"role": "ROLE_AGENT", "parts": [{"text": "alpha here"}]}}}
                 self._json(200, {"jsonrpc": "2.0", "id": body["id"], "result": {"task": task}})
@@ -191,6 +199,19 @@ def test_an_agent_that_is_down_gets_it_handed_back(host):
     assert message_id == 7 and report["ok"] is False and report["transient"] is True
 
 
+def test_a_timeout_is_reported_as_uncertain(host, monkeypatch):
+    sync, state, net, restarts = host
+    monkeypatch.setattr(sync, "deliver_locally", lambda *args: {
+        "ok": False, "transient": False, "uncertain": True,
+        "error": "delivery uncertain: no answer: timed out",
+    })
+
+    sync.sync(state)
+
+    assert net.reports == [(7, {"ok": False, "transient": False, "uncertain": True,
+                              "error": "delivery uncertain: no answer: timed out"})]
+
+
 def test_a_restarting_agent_gets_nothing_this_run(host):
     sync, state, net, restarts = host
     net.config["inbound"] = {"bravo": "new-token"}  # changes who may call in: restart
@@ -199,3 +220,33 @@ def test_a_restarting_agent_gets_nothing_this_run(host):
 
     assert restarts == [1] and net.agent_calls == []
     assert net.reports == [(7, {"ok": False, "transient": True, "error": "agent restarting"})]
+
+
+def test_the_push_url_travels_with_the_message_and_a_timeout_reports_working(host, monkeypatch):
+    """A long task: the agent is told where to send its answer, the sync stops
+    waiting, and Beacon is told the agent is working (not "failed")."""
+    sync, state, net, restarts = host
+    net.config["inbox"][0]["push_url"] = "https://beacon.test/a2a/alpha/push/7?k=key"
+    monkeypatch.setattr(sync, "LOCAL_REPLY_TIMEOUT", 0.2)
+    net.agent_slow = 1
+
+    sync.sync(state)
+
+    config = net.agent_params[0]["configuration"]["taskPushNotificationConfig"]
+    assert config == {"url": "https://beacon.test/a2a/alpha/push/7?k=key"}
+    (message_id, report), = net.reports
+    assert message_id == 7 and report["working"] is True and report["ok"] is False
+
+
+def test_the_sync_raises_the_agents_reply_window(host):
+    """Hermes drops an answer found after A2A_REPLY_TIMEOUT (300 s by default);
+    Beacon's window replaces it, and since Hermes reads it at startup, a change
+    restarts the gateway."""
+    sync, state, net, restarts = host
+    net.config["listen"]["reply_timeout"] = 14400
+    net.config["inbox"] = []
+
+    sync.sync(state)
+
+    env = (state.parent / ".env").read_text()
+    assert "A2A_REPLY_TIMEOUT=14400" in env and restarts == [1]

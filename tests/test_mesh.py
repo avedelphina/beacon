@@ -66,7 +66,7 @@ def test_config_lists_listen_inbound_and_outbound(two_agents):
     cfg = mesh.config("alpha")
 
     assert cfg["agent"] == "alpha"
-    assert cfg["listen"] == {"port": 9900, "host": "100.1.1.1"}
+    assert cfg["listen"] == {"port": 9900, "host": "100.1.1.1", "reply_timeout": mesh.REPLY_WINDOW_SECONDS}
     # lan-only is on another network: it can't dial alpha directly, but it can
     # be relayed through Beacon with its own token, so alpha accepts it.
     assert cfg["inbound"] == {"beacon": mesh.token("beacon", "alpha"), "bravo": mesh.token("bravo", "alpha"),
@@ -81,7 +81,7 @@ def test_loopback_endpoint_has_no_listen_host(fleet, secret):
 
     cfg = mesh.config("solo")
 
-    assert cfg["listen"] == {"port": 9901, "host": None}
+    assert cfg["listen"] == {"port": 9901, "host": None, "reply_timeout": mesh.REPLY_WINDOW_SECONDS}
     assert list(cfg["inbound"]) == ["beacon"] and cfg["outbound"] == []
 
 
@@ -312,7 +312,7 @@ def test_bind_overrides_where_the_agent_listens(fleet, secret):
     store.upsert_agent(agent)
     store.upsert_agent(_agent("charlie", endpoint="http://100.1.1.1:9900"))
 
-    assert mesh.config("delta")["listen"] == {"port": 9900, "host": "0.0.0.0"}
+    assert mesh.config("delta")["listen"] == {"port": 9900, "host": "0.0.0.0", "reply_timeout": mesh.REPLY_WINDOW_SECONDS}
     assert mesh.config("charlie")["outbound"][0]["url"] == "http://100.1.1.1:9901"
 
 

@@ -115,8 +115,11 @@ async def call_agent(agent_id: str, message: str, context_id: str | None = None,
     task state, and context_id. Pass a previous reply's context_id to continue
     that thread; omit it to start a new one. The agent may take minutes to
     answer. Agents without a reach block are reported as not callable.
-    With queue_if_offline, an unreachable agent gets the message from the
-    Beacon mailbox when it is back; read the reply later with `mailbox`."""
+    Use queue_if_offline for anything that may take more than a minute or
+    two, or for an agent that may be offline: the message goes through the
+    Beacon mailbox, which returns at once with a task id (mbx-N) when the
+    answer is not ready (state WORKING) or the agent is unreachable
+    (SUBMITTED). Read the answer later with `mailbox_task`."""
     body = {"message": message}
     if context_id:
         body["context_id"] = context_id
@@ -132,6 +135,13 @@ async def mailbox(limit: int = 20) -> object:
     agents, their delivery state, and replies to messages you queued with
     call_agent(queue_if_offline=True) — those have recipient "beacon"."""
     return await _get("/api/mailbox", limit=limit)
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def mailbox_task(task_id: str) -> object:
+    """Get a durable mailbox task by id, such as ``mbx-12``. Returns the
+    A2A state plus Beacon delivery details and any late reply."""
+    return await _get(f"/api/mailbox/tasks/{_path_identifier(task_id, re.compile(r'^mbx-[0-9]+$'), 'task id')}")
 
 
 @mcp.tool(annotations=READ_ONLY)

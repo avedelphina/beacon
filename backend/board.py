@@ -37,12 +37,31 @@ def list_cards(project: str | None = None, assignee: str | None = None, state: s
 
 
 def get_card(card_id: int) -> dict:
+    """A card with its full history. An `assign_notice` event carries the
+    mailbox delivery state live (queued/delivering/delivered/failed/uncertain/expired,
+    attempts, last_error) under `notice`, separate from the card mutation
+    itself — the assign event records succeeded the instant the card
+    changed; the notice may still be queued, retried, or have failed."""
     with opstore.connect() as db:
         card = db.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
         if card is None:
             raise store.NotFound(f"card {card_id} not found")
         events = db.execute("SELECT * FROM card_events WHERE card_id = ? ORDER BY id", (card_id,)).fetchall()
-    return {**dict(card), "events": [dict(e) for e in events]}
+        notice_ids = [e["notice_id"] for e in events if e["notice_id"] is not None]
+        notices = {}
+        if notice_ids:
+            placeholders = ",".join("?" * len(notice_ids))
+            for row in db.execute(f"SELECT * FROM mailbox WHERE id IN ({placeholders})", notice_ids):
+                notices[row["id"]] = {"task_id": f"mbx-{row['id']}", "state": row["state"],
+                                      "attempts": row["attempts"], "last_error": row["last_error"],
+                                      "updated_at": row["updated_at"]}
+    out_events = []
+    for e in events:
+        event = dict(e)
+        if e["notice_id"] is not None:
+            event["notice"] = notices.get(e["notice_id"])
+        out_events.append(event)
+    return {**dict(card), "events": out_events}
 
 
 def create_card(author: str, title: str, body: str = "", project: str | None = None,
@@ -105,14 +124,25 @@ def comment(author: str, card_id: int, text: str, context_id: str | None = None)
     return get_card(card_id)
 
 
-def _event(db, card_id: int, author: str, kind: str, body: str, context_id: str | None = None) -> None:
-    db.execute("INSERT INTO card_events (card_id, author, kind, body, context_id, created_at)"
-               " VALUES (?, ?, ?, ?, ?, ?)", (card_id, author, kind, body, context_id or None, time.time()))
+def _event(db, card_id: int, author: str, kind: str, body: str, context_id: str | None = None,
+          notice_id: int | None = None) -> None:
+    db.execute("INSERT INTO card_events (card_id, author, kind, body, context_id, notice_id, created_at)"
+               " VALUES (?, ?, ?, ?, ?, ?, ?)",
+               (card_id, author, kind, body, context_id or None, notice_id, time.time()))
 
 
 def _notify_assignee(card_id: int, author: str, assignee: str) -> None:
     """Tell an assigned agent through the mailbox — it may be offline, and it
-    may not have the board tools, so the notice carries the card itself."""
+    may not have the board tools, so the notice carries the card itself.
+
+    The card mutation that triggered this already committed before this runs
+    (create_card/update_card call it after their own `with opstore.connect()`
+    block), so assignment is durable and visible immediately regardless of
+    how long mailbox delivery takes. The `assign_notice` event records the
+    mailbox row id so the card can show the notice's own delivery task id and
+    state (queued/delivered/failed) without conflating it with the assignment
+    itself. Only called when the assignee actually changed, so a repeated
+    update with the same assignee and no other change never re-enqueues."""
     if assignee == author:
         return
     try:
@@ -126,8 +156,12 @@ def _notify_assignee(card_id: int, author: str, assignee: str) -> None:
     text = (f"You were assigned card #{card_id} on the Beacon board by {author}.\n"
             f"Title: {card['title']}\nProject: {card['project'] or '-'}\nState: {card['state']}\n\n"
             f"{card['body'][:NOTICE_BODY]}")
-    mailbox.enqueue(sender, assignee, "notice", text)
-    # Deliver now if it's online; otherwise its next mesh pull does.
+    notice_id = mailbox.enqueue(sender, assignee, "notice", text)
+    with opstore.connect() as db:
+        _event(db, card_id, mesh.BEACON_PEER, "assign_notice", f"notice queued for {assignee}",
+              notice_id=notice_id)
+    # Deliver now if it's online; otherwise its next mesh pull does. This may
+    # be slow or fail transiently; the assignment above already returned.
     threading.Thread(target=mailbox.deliver_pending, args=(assignee,), daemon=True).start()
 
 

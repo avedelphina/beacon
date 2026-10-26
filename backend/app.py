@@ -1,6 +1,7 @@
 import contextlib
 import datetime
 import hashlib
+import hmac
 import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -38,8 +39,10 @@ class DecommissionRequest(BaseModel):
 class CallAgentRequest(BaseModel):
     message: str
     context_id: str | None = None
-    # Agent offline? Leave it in the Beacon mailbox instead of failing; the
-    # reply turns up in GET /api/mailbox once the agent is back.
+    # Go through the Beacon mailbox: an offline agent gets voicemail, and an
+    # answer slower than mailbox.HANDOFF_SECONDS comes back later instead of
+    # being lost. Either way the call returns a task id (mbx-N); the answer
+    # turns up in GET /api/mailbox/tasks/{task_id} and GET /api/mailbox.
     queue_if_offline: bool = False
 
     @field_validator("message")
@@ -65,7 +68,7 @@ async def lifespan(_app):
         yield
 
 
-app = FastAPI(title="Beacon", version="0.19.0", lifespan=lifespan)
+app = FastAPI(title="Beacon", version="0.20.0", lifespan=lifespan)
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:
@@ -370,15 +373,9 @@ def call_agent(id_: str, body: CallAgentRequest) -> dict:
     """One agent calls another by name. Auth is the same session or MCP
     bearer as every other /api route; the hop itself is A2A SendMessage.
     """
-    agent = store.get_agent(id_)
-    try:
-        return {"agent": id_, **bus.call(agent, body.message, body.context_id)}
-    except bus.Unreachable as exc:
-        if not (exc.transient and body.queue_if_offline):
-            raise
-    message_id = mailbox.enqueue(mesh.BEACON_PEER, id_, "message", body.message, body.context_id)
-    return {"agent": id_, "task_id": f"mbx-{message_id}", "context_id": body.context_id,
-            "state": "TASK_STATE_SUBMITTED", "reply": "", "queued": message_id}
+    if body.queue_if_offline:
+        return {"agent": id_, **mailbox.send(mesh.BEACON_PEER, id_, body.message, body.context_id)}
+    return {"agent": id_, **bus.call(store.get_agent(id_), body.message, body.context_id)}
 
 
 class CardCreate(BaseModel):
@@ -583,7 +580,24 @@ def mailbox_recent(limit: int = 50) -> list[dict]:
     return mailbox.recent(min(max(limit, 1), 500))
 
 
+@app.get("/api/mailbox/tasks/{task_id}")
+def mailbox_task(task_id: str) -> dict:
+    """Current A2A-shaped status for a durable Beacon mailbox task (``mbx-N``)."""
+    try:
+        return mailbox.task_view(task_id)
+    except store.NotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 A2A_METHODS = {"SendMessage": True, "message/send": False}  # name -> answers in the v1.0 {"task": ...} wrapper
+TASK_GET_METHODS = {"GetTask", "tasks/get"}
+# The mailbox card says streaming: false. A client treats a closed stream as a
+# finished task, so a one-snapshot stream of a task still working would lie.
+TASK_SUBSCRIBE_METHODS = {"SubscribeToTask", "tasks/subscribe"}
+
+
+def _a2a_task(task_id: str, caller: str, target: str) -> dict:
+    return mailbox.task_view(task_id, requester=caller, target=target)
 
 
 def _a2a_error(req_id, code: int, message: str, status: int) -> JSONResponse:
@@ -613,6 +627,16 @@ async def a2a_mailbox(id_: str, request: Request):
         logger.warning("mailbox: refused %s -> %s (access policy: no rule allows it)", caller, id_)
         return _a2a_error(req_id, -32052, f"{id_} does not accept calls from {caller}", 403)
     method = req.get("method")
+    if method in TASK_SUBSCRIBE_METHODS:
+        return _a2a_error(req_id, -32004, "the Beacon mailbox does not stream; poll GetTask instead", 200)
+    if method in TASK_GET_METHODS:
+        params = req.get("params") or {}
+        task_id = str(params.get("taskId") or params.get("id") or "")
+        try:
+            task = _a2a_task(task_id, caller, id_)
+        except store.NotFound as exc:
+            return _a2a_error(req_id, -32001, str(exc), 200)
+        return {"jsonrpc": "2.0", "id": req_id, "result": task}
     if method not in A2A_METHODS:
         return _a2a_error(req_id, -32601, f"method not found: {method}", 200)
     message = (req.get("params") or {}).get("message") or {}
@@ -639,9 +663,10 @@ def a2a_mailbox_card(id_: str, request: Request) -> dict:
     url = f"{mesh.public_url() or str(request.base_url).rstrip('/')}/a2a/{id_}"
     return {
         "name": f"{id_} (Beacon mailbox)",
-        "description": (f"Reaches {id_} through Beacon. Use it when {id_} cannot be reached directly: the "
-                        f"message is delivered now if possible, otherwise when {id_} is back online, and the "
-                        "reply then arrives later as a new message."),
+        "description": (f"Reaches {id_} through Beacon. Use it when {id_} cannot be reached directly, or for "
+                        f"work that may take longer than a minute or two: the message is delivered now if "
+                        f"possible, otherwise when {id_} is back online, and a reply that is not ready at once "
+                        "arrives later as a new message."),
         "url": url, "version": "1.0.0",
         "supportedInterfaces": [{"url": url, "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}],
         "capabilities": {"streaming": False, "pushNotifications": False},
@@ -654,6 +679,9 @@ class InboxReport(BaseModel):
     ok: bool
     reply: str = ""
     transient: bool = False
+    uncertain: bool = False
+    # No answer in time, but the agent has it and will push the answer.
+    working: bool = False
     error: str = ""
 
 
@@ -686,9 +714,32 @@ def mesh_inbox_report(id_: str, message_id: int, body: InboxReport, background: 
     """The sync's result for one held message it delivered locally."""
     if not mesh.may_pull(id_, authorization):
         raise HTTPException(401, "not authorized for this agent's mesh config")
-    if sender := mailbox.report(id_, message_id, body.ok, body.reply, body.transient, body.error):
+    if sender := mailbox.report(id_, message_id, body.ok, body.reply, body.transient, body.error,
+                                uncertain=body.uncertain, working=body.working):
         background.add_task(mailbox.deliver_pending, sender)
     return {"ok": True}
+
+
+@app.post("/a2a/{id_}/push/{message_id}")
+async def a2a_push(id_: str, message_id: int, request: Request, background: BackgroundTasks,
+                   k: str = "") -> dict:
+    """An agent's A2A push notification: the finished task for a message the
+    mailbox delivered and stopped waiting for (backend/mailbox.py). The key in
+    the URL is derived per agent and message, so only the agent Beacon gave
+    it to can settle that message. Answered at once; the work runs after."""
+    if not hmac.compare_digest(k, mailbox.push_key(id_, message_id)):
+        raise HTTPException(401, "not a push URL Beacon issued")
+    try:
+        payload = await request.json()
+    except ValueError:
+        raise HTTPException(400, "body must be JSON")
+    background.add_task(_settle_push, id_, message_id, payload)
+    return {"ok": True}
+
+
+def _settle_push(agent_id: str, message_id: int, payload: dict) -> None:
+    if sender := mailbox.receive_push(agent_id, message_id, payload):
+        mailbox.deliver_pending(sender)
 
 
 @app.get("/api/agents/{id_}")

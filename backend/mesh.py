@@ -36,6 +36,11 @@ SECRET_ENV = "BEACON_A2A_SECRET"
 PUBLIC_URL_ENV = "BEACON_PUBLIC_URL"
 # Skills Beacon hands every agent with its mesh config; one folder per skill.
 SKILLS_DIR_ENV = "BEACON_SKILLS_DIR"
+# How long an agent may work on one A2A task before Hermes gives up on it and
+# drops the answer. Hermes's own default is 300 s, which is why work longer
+# than a short exchange never came back. The host sync writes this as
+# A2A_REPLY_TIMEOUT; the mailbox waits this long for a late answer.
+REPLY_WINDOW_SECONDS = 4 * 3600
 MAX_SKILL_BYTES = 64 * 1024
 BEACON_PEER = "beacon"
 
@@ -148,6 +153,7 @@ def config(agent_id: str) -> dict:
         "listen": {
             "port": listen.port or (443 if listen.scheme == "https" else 80),
             "host": None if loopback else listen.hostname,
+            "reply_timeout": REPLY_WINDOW_SECONDS,
         },
         # Callers from every network: a relayed caller arrives through Beacon
         # with its own token. The access policy still decides who.
