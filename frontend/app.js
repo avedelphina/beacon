@@ -132,9 +132,9 @@ async function renderHosts() {
   renderRows("hosts", await api.list("hosts"), (h) => `
       <td>${esc(h.id)}</td>
       <td>${esc(h.address)}</td>
-      <td>${esc(h.ssh.user)}</td>
-      <td>${esc(h.ssh.key ?? h.ssh.config_file)}</td>
-      <td>${esc(h.ssh.port)}</td>
+      <td>${h.ssh ? esc(h.ssh.user) : '<span class="hint">no SSH (A2A only)</span>'}</td>
+      <td>${esc(h.ssh?.key ?? h.ssh?.config_file ?? "")}</td>
+      <td>${esc(h.ssh?.port ?? "")}</td>
       <td>${esc(h.tags.join(", "))}</td>
       <td class="row-actions">
         <button class="link-btn" data-edit="${esc(h.id)}">Edit</button>
@@ -147,9 +147,9 @@ function fillHostForm(h) {
   f.id.value = h?.id ?? "";
   f.id.readOnly = !!h;
   f.address.value = h?.address ?? "";
-  f.ssh_user.value = h?.ssh.user ?? "";
-  f.ssh_port.value = h?.ssh.port ?? 22;
-  f.ssh_key.value = h?.ssh.key ?? "";
+  f.ssh_user.value = h?.ssh?.user ?? "";
+  f.ssh_port.value = h?.ssh?.port ?? 22;
+  f.ssh_key.value = h?.ssh?.key ?? "";
   f.tags.value = h?.tags.join(", ") ?? "";
   document.getElementById("host-modal-title").textContent = h ? `Edit ${h.id}` : "Add host";
 }
@@ -176,7 +176,8 @@ document.getElementById("host-form").addEventListener("submit", async (e) => {
   const body = {
     id: f.id.value,
     address: f.address.value,
-    ssh: { user: f.ssh_user.value, key: f.ssh_key.value, port: Number(f.ssh_port.value) },
+    // No SSH user: a host Beacon only reaches its agents on over A2A.
+    ssh: f.ssh_user.value ? { user: f.ssh_user.value, key: f.ssh_key.value, port: Number(f.ssh_port.value) } : null,
     tags: splitList(f.tags.value),
   };
   try {
@@ -235,13 +236,21 @@ function updateBulkBar() {
   document.getElementById("agent-bulk-count").textContent = `${agentSelection.size} selected`;
 }
 
+// The agent's host reports chat settings that let anyone message it; Beacon
+// then withholds the board from it even with reach.board on.
+function openChatChip(a) {
+  if (!a.chat_open?.length) return "";
+  const withheld = a.reach?.board;
+  return ` <span class="chip chip-warn" title="Open to anyone: ${esc(a.chat_open.join(", "))}${withheld ? ". Board withheld until it is locked down." : ""}">${withheld ? "board withheld" : "open chat"}</span>`;
+}
+
 function renderAgentTable() {
   renderTagBar();
   const shown = allAgents.filter((a) => agentFilter === null || (agentFilter === "" ? !tagsOf(a).length : tagsOf(a).includes(agentFilter)));
   renderRows("agents", shown, (a) => `
       <td class="sel"><input type="checkbox" data-select="${esc(a.id)}" aria-label="Select ${esc(a.id)}"${agentSelection.has(a.id) ? " checked" : ""}></td>
       <td id="status-${esc(a.id)}">${statusPill("loading")}</td>
-      <td>${esc(a.id)}</td>
+      <td>${esc(a.id)}${openChatChip(a)}</td>
       <td>${tagChips(tagsOf(a))}</td>
       <td>${esc(a.type)}</td>
       <td>${esc(a.host)}</td>

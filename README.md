@@ -86,6 +86,21 @@ that file's own `Host` block own auth and host-key verification instead of
 `BEACON_KNOWN_HOSTS`; Beacon uses strict checking and never trusts a new key
 automatically.
 
+A host can have no `ssh` block at all:
+
+```yaml
+  - id: partner-box
+    address: 192.0.2.7
+```
+
+Beacon never logs in to such a host. Its agents join the mesh, the mailbox,
+and the board like any other agent. Install their sync yourself: pipe the
+output of `python -m backend.mesh install <agent>` to the host by any route
+you have. Driver actions (status, logs, deploy, config push, restart) refuse
+with 409, and the Agents tab shows the status as `unknown`. Use this for an
+agent on a machine where Beacon has no account, or for an agent that is not
+Hermes.
+
 ### `fleet/agents/<id>.yaml`
 
 ```yaml
@@ -224,7 +239,7 @@ agent keeps its last config and keeps talking.
   run `install` for every agent again (the old pull tokens stop working).
 - **Transport security:** use a network that encrypts (WireGuard, for
   example), or put a TLS terminator in front of each agent and use an
-  `https://` endpoint.
+  `https://` endpoint. See [TLS without an overlay network](#tls-without-an-overlay-network).
 
 **The pull endpoint.** `GET /mesh/{agent-id}` returns that agent's config:
 
@@ -310,6 +325,8 @@ as Beacon's, and the next sync writes each peer once more.
   offers only `--yes`, which would interrupt them. The retry gets past
   that: the restart happens at the first idle moment, and no session is
   cut off.
+- With each pull, it reports which settings open the agent's chat to
+  anyone (see [Fleet board](#fleet-board)): the names, never the values.
 - If Beacon cannot be reached, nothing changes. A lock file stops two
   runs from overlapping.
 
@@ -354,6 +371,37 @@ official image, `hermes gateway restart` stops the chat platforms, but the
 process does not exit, and the agent stays half down. `docker restart -t
 120` gives running turns two minutes to finish. If `sudo` asks for a
 password, copy the script to the host and run it there with `sudo bash`.
+
+#### TLS without an overlay network
+
+Hermes's A2A server does not speak TLS. On a network that does not encrypt
+traffic (a plain LAN, the internet), put a TLS terminator on each agent's
+host and give the agent an `https://` endpoint. Beacon does not install or
+manage the terminator. Any CA works; step-ca with ACME is a good fit.
+
+1. Let the agent listen on loopback only, and let the terminator listen on
+   the network:
+
+   ```yaml
+   reach:
+     endpoint: https://edge-01.lan.example:9443   # the terminator, as callers see it
+     bind: 127.0.0.1:9900                          # Hermes, behind it
+     network: office-lan
+   ```
+
+   For example, with Caddy: `edge-01.lan.example:9443 { reverse_proxy 127.0.0.1:9900 }`.
+2. Install your CA's root certificate in the operating system's trust store
+   on every agent's host. Hermes verifies with the platform store, so its
+   `a2a_call` then trusts the peers. The host sync (`urllib`) uses OpenSSL's
+   default paths. Where those do not include the root, as with some NAS
+   Pythons, run the sync with `SSL_CERT_FILE=<root.pem>`.
+3. Give Beacon the same root as `BEACON_CA_FILE` (PEM). Beacon trusts it in
+   addition to the public roots, for its own calls to agents: the bus, the
+   relay, and the mailbox. Without it, those calls fail with
+   `CERTIFICATE_VERIFY_FAILED`, and the mailbox holds the message.
+
+The bearer tokens still carry identity. Mutual TLS waits until Hermes
+supports client certificates.
 
 ### Access policy
 
@@ -604,6 +652,21 @@ Hermes connects MCP servers at startup. If `board` is turned off later, the
 server entry is disabled and the token is removed. `/board/mcp` enforces
 the opt-in as well: an agent without `reach.board` is refused even when it
 presents its valid pull token.
+
+**An open chat withholds the board.** With each pull, the host sync reports
+which settings let anyone at all message the agent: any `*_ALLOW_ALL_USERS`
+flag (for example `GATEWAY_ALLOW_ALL_USERS` or `TELEGRAM_ALLOW_ALL_USERS`)
+in the profile `.env` or in a Docker agent's container environment, and
+`allow_all_users` in `config.yaml`. It sends the names, never the values.
+While any of them is on, Beacon leaves the board out of the agent's mesh
+config and refuses it at `/board/mcp`, even with `reach.board: true`. Beacon
+logs a warning, and the Agents tab marks the agent "board withheld". When
+the chat is locked down again, the next sync gets the board back. An agent
+whose sync is older than this reports nothing, and then `reach.board`
+decides alone. The sync does not see variables that a systemd unit or a
+launchd plist sets itself. The report comes from the agent's own host, so
+it catches a chat that someone opened later by mistake. It does not
+protect against a host that lies.
 
 To connect Claude Code:
 
@@ -923,7 +986,7 @@ this one credential.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET`/`PUT`/`DELETE` | `/api/hosts/{id}` | Host CRUD |
-| `GET`/`PUT`/`DELETE` | `/api/agents/{id}` | Agent CRUD (`GET` also returns `effective_desired`, the template-merged view) |
+| `GET`/`PUT`/`DELETE` | `/api/agents/{id}` | Agent CRUD (`GET` also returns `effective_desired`, the template-merged view, and `chat_open`, the settings its host last reported as opening its chat to anyone — `null` if never reported) |
 | `GET` | `/api/agents/registry` | Who can be called, and the capabilities each declares. No endpoints, no key names |
 | `POST` | `/api/agents/{id}/call` | Send one A2A message to a registered agent (`{"message": "...", "context_id": "..."}`) — see [Agent bus](#agent-bus) |
 | `GET` | `/api/templates` | List templates, each with the agent ids using it |

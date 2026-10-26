@@ -39,11 +39,13 @@ def author_for(authorization: str | None) -> str | None:
         return None
     presented = authorization.removeprefix("Bearer ")
     try:
-        # Only agents opted in with reach.board. Every agent holds its pull
-        # token, so without this check the opt-in would only decide whether
-        # the tools are configured, not whether the board answers.
+        # Only agents opted in with reach.board, and not while their chat is
+        # open to anyone. Every agent holds its pull token, so without this
+        # check the opt-in would only decide whether the tools are
+        # configured, not whether the board answers.
+        exposure = mesh.open_chats()
         for agent in store.list_agents():
-            if agent.reach and agent.reach.board and hmac.compare_digest(
+            if mesh.board_allowed(agent, exposure) and hmac.compare_digest(
                     presented, mesh.token(agent.id, mesh.BEACON_PEER)):
                 return agent.id
     except mesh.MissingSecret:

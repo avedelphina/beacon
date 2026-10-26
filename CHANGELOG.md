@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-10-26
+
+Finishes the agent-communication track (C4 chat exposure, C5 TLS).
+
+### Added
+
+- **An open chat withholds the board.** The host sync reports, with every
+  pull, which settings let anyone at all message the agent: `*_ALLOW_ALL_USERS`
+  flags in the profile `.env` or a Docker agent's container environment, and
+  `allow_all_users` in `config.yaml` (names only, header
+  `X-Beacon-Open-Chat`). While any is on, Beacon leaves the board out of the
+  agent's mesh config and refuses it at `/board/mcp`, even with
+  `reach.board: true`, logs a warning, and marks the agent "board withheld"
+  in the Agents tab. `GET /api/agents` and `GET /api/agents/{id}` return the
+  report as `chat_open`. An older sync reports nothing; then `reach.board`
+  decides alone, as before. Update the sync on each host to get this.
+- **Hosts without SSH.** `ssh` is now optional on a host. Beacon never logs in
+  to such a host; its agents take part in the mesh, mailbox, and board, while
+  driver actions refuse with 409 and status shows `unknown`. The host form
+  accepts an empty SSH user for this.
+- **TLS without an overlay network (C5).** `BEACON_CA_FILE` names your own
+  CA's certificate (PEM), trusted on top of the public roots for Beacon's
+  calls to agents (bus, relay, mailbox). With a TLS terminator in front of
+  each agent and an `https://` endpoint, agents on a plain LAN talk over TLS.
+  README, "TLS without an overlay network", has the recipe.
+
 ## [0.21.1] — 2026-10-26
 
 ### Added

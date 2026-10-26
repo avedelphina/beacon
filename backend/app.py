@@ -15,7 +15,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import auth, board, bus, cron_store, mailbox, mesh, opstore, policy, scheduler, store, templates, workflow
 from .board_mcp import board_app
-from .drivers import for_agent
+from .drivers import NoSSH, for_agent
 from .schemas import Agent, CronJob, Host
 from .tiers import TIER_LABELS, CAPABILITY_TIERS, requires_confirm, tier_for
 
@@ -68,7 +68,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.21.1"
+VERSION = "0.22.0"
 app = FastAPI(title="Beacon", version=VERSION, lifespan=lifespan)
 
 
@@ -160,6 +160,7 @@ app.add_exception_handler(workflow.UnauthorizedResponder, _error_handler(403))
 app.add_exception_handler(workflow.UnauthorizedWorkflowAccess, _error_handler(403))
 app.add_exception_handler(workflow.HumanApprovalRequired, _error_handler(403))
 app.add_exception_handler(workflow.StalePlan, _error_handler(409))
+app.add_exception_handler(NoSSH, _error_handler(409))
 
 
 def _started(lines: Iterator[str]) -> Iterator[str]:
@@ -296,8 +297,12 @@ def delete_host(id_: str) -> dict:
 
 
 @app.get("/api/agents")
-def list_agents() -> list[Agent]:
-    return store.list_agents()
+def list_agents() -> list[dict]:
+    # chat_open is what the agent's host last reported (display-only, like
+    # effective_desired): the settings that open its chat to anyone, [] for
+    # none, null when its sync never reported. Open withholds the board.
+    exposure = mesh.open_chats()
+    return [a.model_dump() | {"chat_open": exposure.get(a.id)} for a in store.list_agents()]
 
 
 class PolicyText(BaseModel):
@@ -693,15 +698,19 @@ class InboxReport(BaseModel):
 
 @app.get("/mesh/{id_}")
 def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None = Header(None),
-                x_beacon_sync_version: str | None = Header(None)) -> dict:
+                x_beacon_sync_version: str | None = Header(None),
+                x_beacon_open_chat: str | None = Header(None, max_length=2048)) -> dict:
     """An agent's own A2A mesh config, pulled by its host's sync job. Outside
     /api/ on purpose: the only credential is that agent's derived pull token —
     not a session, not the MCP bearer — because the body holds tokens no one
     else may read. Checked before the agent is looked up, so a wrong token
-    can't probe which agents exist.
+    can't probe which agents exist. The sync reports whether the agent's chat
+    is open to anyone first, so this very response already reflects it.
     """
     if not mesh.may_pull(id_, authorization):
         raise HTTPException(401, "not authorized for this agent's mesh config")
+    if x_beacon_open_chat is not None:
+        mesh.record_open_chat(id_, x_beacon_open_chat)
     config = mesh.config(id_)
     if x_beacon_sync_version == "2":
         # The sync delivers held messages to the agent on its own host and
@@ -753,7 +762,8 @@ def get_agent(id_: str) -> dict:
     # Raw record (own overrides only) plus the template-merged view. PUT
     # sends back the raw `desired`; `effective_desired` is display-only.
     agent = store.get_agent(id_)
-    return agent.model_dump() | {"effective_desired": templates.resolve(agent)}
+    return agent.model_dump() | {"effective_desired": templates.resolve(agent),
+                                 "chat_open": mesh.open_chats().get(id_)}
 
 
 def _access_fields(agent: Agent | None) -> tuple:
@@ -814,7 +824,11 @@ def apply_template(name: str, body: TemplateApplyRequest) -> dict:
 
 @app.get("/api/agents/{id_}/status")
 def get_agent_status(id_: str) -> dict:
-    agent, host, driver = for_agent(id_)
+    try:
+        agent, host, driver = for_agent(id_)
+    except NoSSH as exc:
+        # Not a failure: Beacon just has no way to look. The UI polls this.
+        return {"state": "unknown", "detail": str(exc)}
     return driver.status(agent, host)
 
 

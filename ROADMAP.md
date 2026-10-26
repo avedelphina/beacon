@@ -137,7 +137,14 @@ Delivered in 0.14.0:
   reach still get held messages and late replies.
 - Restart requests survive Hermes 0.22's refusal while sessions are live.
 
-Next, in this order:
+Delivered in 0.22.0, which completes this track:
+
+- Chat exposure (C4): the host sync reports a chat open to anyone, and
+  Beacon withholds the board from that agent on its own.
+- TLS beyond an overlay network (C5), and hosts without SSH for agents that
+  Beacon only talks to.
+
+The items, in the order they were built:
 
 ### C1 — Relay through Beacon (delivered)
 
@@ -184,7 +191,7 @@ day-to-day coordination.
 visible with its state and thread history, without reading any agent's
 logs.
 
-### C4 — Access policy (mostly delivered)
+### C4 — Access policy (delivered)
 
 Today every agent on a network may call every other agent on it.
 
@@ -211,12 +218,13 @@ Status:
 - **Scoped credentials: in effect.** Agents hold only their own derived
   tokens for `/mesh`, `/a2a`, and `/board`, never the shared MCP bearer.
   The bearer remains the operators' credential until Horizon 5.
-- **Chat exposure:** handled by keeping board tools opt-in
-  (`reach.board`). An agent whose chat accepts anyone should not get them.
-  Beacon cannot yet see an agent's chat policy. A later step could have
-  the sync report it, so that Beacon can refuse board access on its own.
+- **Chat exposure: delivered.** Board tools stay opt-in (`reach.board`).
+  In addition, the host sync reports the settings that open the agent's
+  chat to anyone, and Beacon withholds the board while any is on. The
+  `a2a` toolset on an open chat platform is still the operator's call:
+  Beacon does not see per-platform toolsets yet.
 
-### C5 — Transport security beyond an overlay network
+### C5 — Transport security beyond an overlay network (delivered)
 
 Hermes A2A has no native TLS. On a network that does not encrypt traffic,
 terminate TLS on each host and use `https://` endpoints. Any CA works;
@@ -226,11 +234,19 @@ certificates.
 **Acceptance:** two agents on a plain LAN talk over TLS, with certificates
 from the operator's CA.
 
+Delivered as a recipe, not as code on the agents' hosts: a terminator per
+host, `https://` endpoints, the CA in each host's trust store (Hermes
+verifies with the platform store), and `BEACON_CA_FILE` for Beacon's own
+calls. Beacon does not install or manage terminators.
+
 Related foundation work, in Horizon 0:
 
 - Replace the expired Teleport machine identity with plain SSH or with
-  step-ca SSH certificates.
-- Allow hosts without SSH settings, for agents that Beacon only talks to.
+  step-ca SSH certificates. This is an operator step: OpenSSH loads
+  `<key>-cert.pub` and `@cert-authority` known-hosts lines with no Beacon
+  change.
+- Allow hosts without SSH settings, for agents that Beacon only talks to
+  (delivered in 0.22.0).
 
 ## Horizon 0 — Protect and stabilize the foundation
 
@@ -669,9 +685,10 @@ CI, fixed driver actions, config-schema validation, templates, cron actions,
 and confirmation tiers. Since 0.10.0 it also has agent-to-agent
 communication over A2A.
 
-Agent communication is the current priority. Store-and-forward (C2) and the
-fleet board (C3) need the same small SQLite operational store that
-Horizon 1 plans. So the store comes first, and it serves both tracks:
+Agent communication was the first priority and is complete as of 0.22.0.
+Store-and-forward (C2) and the fleet board (C3) needed the same small SQLite
+operational store that Horizon 1 plans. So the store came first, and it
+serves both tracks. Steps 1–3 are done; step 4 is next:
 
 1. add a small SQLite operational store;
 2. relay through Beacon (C1), then store-and-forward on that store (C2);
