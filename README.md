@@ -755,6 +755,7 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 | **Templates** | A `fleet/templates/*.yaml` config fragment (`config` + `env_keys` only) merged under many agents' `desired` at once — model stacks, fallbacks, and auxiliary-task models declared once. Apply adds a template name to a batch of agent records. | `GET /api/templates`, `GET /api/templates/{name}`, `POST /api/templates/{name}/apply` |
 | **Plugins** | Lists installed plugins with version, enabled/disabled state, and source. Updating one (git pull) can trip Hermes's own security scan and auto-disable it — that's surfaced as a `disabled_by_scan` flag rather than left buried in scan-report text, since an auto-disabled plugin can mean a messaging platform silently goes offline. | `GET /api/agents/{id}/plugins`, `POST /api/agents/{id}/plugins/{name}/update` |
 | **Restart** | Plain `gateway restart` — the everyday operate action, works regardless of current state. Distinct from Reconcile's problem-triggered fixes. | `POST /api/agents/{id}/restart` |
+| **Restart agent** | Hard restart of the whole agent. With `desired.container` set, `docker restart -t 120 <container>` (falls back to `sudo -n`); otherwise `systemctl --user restart` on the gateway unit, with no graceful drain. Use when Restart gateway can't recover it (s6 half-down, wedged gateway). | `POST /api/agents/{id}/restart-agent` |
 | **Update** | `hermes update` on the shared code checkout — affects every profile on that install, not just one agent's record of it. Streamed. | `POST /api/agents/{id}/update` |
 | **Decommission** | Stops and uninstalls the gateway, optionally purges the profile's data (refused for the default profile — that directory is shared with every other profile on the install) and optionally deletes the OS account. Moves the YAML record to `fleet/decommissioned/` rather than deleting it. | `POST /api/agents/{id}/decommission` (streamed) |
 | **Policy** | Edits `fleet/policy.yaml`, who may call whom (see [Access policy](#access-policy)). Check first, then save. Tier T4: a human browser session only, never the MCP token. | `POST /api/policy/preview`, `PUT /api/policy` |
@@ -937,6 +938,7 @@ this one credential.
 | `GET` | `/api/agents/{id}/plugins` | List installed plugins (name, version, status, source) |
 | `POST` | `/api/agents/{id}/plugins/{name}/update?confirm=true` | Update one plugin (git pull) — T3 |
 | `POST` | `/api/agents/{id}/restart?confirm=true` | Restart the gateway — T2 |
+| `POST` | `/api/agents/{id}/restart-agent?confirm=true` | Hard-restart the container or systemd unit — T3 |
 | `POST` | `/api/agents/{id}/update?confirm=true` | `hermes update` on the shared install (streamed) — T4 |
 | `POST` | `/api/agents/{id}/decommission` | Tear down (`{"purge": bool, "remove_user": bool, "confirm": true}`, streamed) — T4, T5 if purge/remove_user |
 | `GET`/`PUT`/`DELETE` | `/api/cron-jobs/{id}` | Cron job CRUD |

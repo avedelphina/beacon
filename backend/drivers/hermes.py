@@ -72,6 +72,9 @@ def _validate_agent(agent: Agent) -> None:
     os_user = agent.desired.get("os_user")
     if os_user and not OS_USER_RE.match(os_user):
         raise ValueError(f"desired.os_user {os_user!r} must match {OS_USER_RE.pattern}")
+    container = agent.desired.get("container")
+    if container and not CONTAINER_RE.fullmatch(container):
+        raise ValueError(f"desired.container {container!r} must match {CONTAINER_RE.pattern}")
 
 
 def _wrap_for_user(agent: Agent, host: Host, command: str) -> str:
@@ -614,9 +617,9 @@ def _fix_command(agent: Agent, fix: str) -> str:
     return FIXES[fix].format(hermes=_cmd_prefix(agent), unit=shlex.quote(service_name(agent)))
 
 
-def _run_command(agent: Agent, host: Host, command: str, timeout: int = 60) -> dict:
+def _run_command(agent: Agent, host: Host, command: str, timeout: int = 60, as_agent_user: bool = True) -> dict:
     inner = f"{RUNTIME_ENV}; {PATH_PREFIX}; {command}"
-    result = ssh.run(host, _wrap_for_user(agent, host, inner), timeout=timeout)
+    result = ssh.run(host, _wrap_for_user(agent, host, inner) if as_agent_user else inner, timeout=timeout)
 
     if err := result.transport_error:
         return {"ok": False, "output": err}
@@ -637,6 +640,26 @@ def restart(agent: Agent, host: Host) -> dict:
     """
     _validate_agent(agent)
     return _run_command(agent, host, f"{_cmd_prefix(agent)} gateway restart", timeout=120)
+
+
+def restart_agent(agent: Agent, host: Host) -> dict:
+    """Whole-agent restart, for when `restart` (gateway only) isn't enough.
+
+    Docker agents (desired.container) restart the container: under the
+    s6-supervised official image `hermes gateway restart` stops the chat
+    platforms but never exits, leaving the agent half down (see
+    mesh_install_docker_script). Everything else gets a plain systemd
+    restart of the gateway unit, which skips Hermes's graceful drain and
+    works on a gateway that is wedged. `sudo -n` fallback because the SSH
+    login user is often not in the docker group; it fails closed if sudo
+    would prompt.
+    """
+    _validate_agent(agent)
+    if container := agent.desired.get("container"):
+        restart = f"docker restart -t 120 {shlex.quote(container)}"
+        # Not as os_user: that account has no business owning the container.
+        return _run_command(agent, host, f"{restart} || sudo -n {restart}", timeout=180, as_agent_user=False)
+    return _run_command(agent, host, f"systemctl --user restart {shlex.quote(service_name(agent))}", timeout=120)
 
 
 PLUGIN_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")

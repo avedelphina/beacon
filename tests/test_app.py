@@ -117,6 +117,15 @@ def test_restart_with_confirm_runs(client, host_and_agent, fake_ssh):
     assert len(fake_ssh.calls) == 1
 
 
+def test_restart_agent_gate_and_run(client, host_and_agent, fake_ssh):
+    r = client.post("/api/agents/a1/restart-agent")
+    assert r.json()["would_run"] is True and r.json()["tier"] == "T3"
+    assert fake_ssh.calls == []
+    fake_ssh.result = SSHResult(ok=True, stdout="", stderr="", returncode=0)
+    assert client.post("/api/agents/a1/restart-agent?confirm=true").json()["ok"] is True
+    assert "systemctl --user restart" in fake_ssh.last_command
+
+
 def test_deploy_without_confirm_does_not_touch_ssh(client, host_and_agent, fake_ssh):
     r = client.post("/api/agents/a1/deploy")
     assert r.status_code == 200

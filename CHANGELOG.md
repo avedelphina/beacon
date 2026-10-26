@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-10-26
+
+### Added
+
+- **Restart agent.** A second button beside "Restart gateway", plus
+  `POST /api/agents/{id}/restart-agent` and an MCP `restart_agent` tool (T3).
+  An agent with `desired.container` restarts that Docker container
+  (`docker restart -t 120`, with a `sudo -n` fallback). Any other agent gets
+  `systemctl --user restart` on its gateway unit, which works on a wedged
+  gateway that `hermes gateway restart` cannot drain.
+
 ## [0.20.0] — 2026-10-26
 
 ### Added
