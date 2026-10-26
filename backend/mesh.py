@@ -22,16 +22,24 @@ CLI (runs where Beacon's env is; the output contains a token):
 import argparse
 import hashlib
 import hmac
+import json
+import logging
 import os
+import re
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import policy, store
+from . import opstore, policy, store
 from .drivers import get_driver
 from .schemas import ID_RE, Agent
 
+logger = logging.getLogger(__name__)
+
 SECRET_ENV = "BEACON_A2A_SECRET"
+# A setting name in the sync's open-chat report (X-Beacon-Open-Chat).
+CHAT_SETTING_RE = re.compile(r"^[A-Za-z0-9_.]{1,64}$")
 # The URL agents' hosts reach Beacon on for pulls, e.g. http://100.64.0.1:8642.
 PUBLIC_URL_ENV = "BEACON_PUBLIC_URL"
 # Skills Beacon hands every agent with its mesh config; one folder per skill.
@@ -83,6 +91,45 @@ def skills() -> list[dict]:
         found.append({"name": path.parent.name, "sha256": hashlib.sha256(content.encode()).hexdigest(),
                       "content": content})
     return found
+
+
+def record_open_chat(agent_id: str, report: str) -> None:
+    """Store what the agent's host sync reported with its pull: the names of
+    the settings that open its chat to anyone, or "none". Runtime state, so
+    the opstore, not fleet YAML. A change is logged when it moves the board."""
+    parts = [] if report.strip().lower() == "none" else [p.strip() for p in report.split(",") if p.strip()]
+    # A name that doesn't look like a setting still counts as open.
+    names = sorted({p if CHAT_SETTING_RE.fullmatch(p) else "unrecognized" for p in parts})[:32]
+    with opstore.connect() as conn:
+        row = conn.execute("SELECT open_json FROM chat_exposure WHERE agent = ?", (agent_id,)).fetchone()
+        conn.execute("INSERT INTO chat_exposure (agent, open_json, reported_at) VALUES (?, ?, ?) "
+                     "ON CONFLICT (agent) DO UPDATE SET open_json = excluded.open_json, "
+                     "reported_at = excluded.reported_at", (agent_id, json.dumps(names), time.time()))
+    if row is None or json.loads(row["open_json"]) != names:
+        agent = store.get_agent(agent_id)
+        if agent.reach and agent.reach.board:
+            if names:
+                logger.warning("board withheld from %s: its chat is open to anyone (%s)", agent_id, ", ".join(names))
+            elif row is not None:
+                logger.info("board back for %s: its chat no longer reports open access", agent_id)
+
+
+def open_chats() -> dict[str, list[str]]:
+    """agent id -> the settings its host last reported as opening its chat
+    to anyone. An agent missing here has never reported (an older sync)."""
+    with opstore.connect() as conn:
+        return {r["agent"]: json.loads(r["open_json"]) for r in conn.execute("SELECT * FROM chat_exposure")}
+
+
+def board_allowed(agent: Agent, exposure: dict[str, list[str]] | None = None) -> bool:
+    """reach.board, unless the agent's host reported a chat open to anyone:
+    Hermes offers its MCP servers on every chat platform, so a stranger could
+    write to the board through it. An older sync reports nothing, and then
+    the operator's reach.board stands. The report comes from the agent's own
+    host, so it catches a chat opened later by mistake, not a hostile host."""
+    if not (agent.reach and agent.reach.board):
+        return False
+    return not (open_chats() if exposure is None else exposure).get(agent.id)
 
 
 def may_call(caller: str, target: Agent, fleet: list[Agent] | None = None) -> bool:
@@ -161,7 +208,7 @@ def config(agent_id: str) -> dict:
                     for name in (BEACON_PEER, *(p.id for p in [*direct, *relayed] if may_call(p.id, agent, fleet)))},
         "outbound": outbound,
         # The agent signs in to the board with its pull token, which it has.
-        "board": {"url": f"{beacon_url}/board/mcp"} if agent.reach.board and beacon_url else None,
+        "board": {"url": f"{beacon_url}/board/mcp"} if beacon_url and board_allowed(agent) else None,
         "skills": skills(),
     }
 

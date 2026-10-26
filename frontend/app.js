@@ -235,13 +235,21 @@ function updateBulkBar() {
   document.getElementById("agent-bulk-count").textContent = `${agentSelection.size} selected`;
 }
 
+// The agent's host reports chat settings that let anyone message it; Beacon
+// then withholds the board from it even with reach.board on.
+function openChatChip(a) {
+  if (!a.chat_open?.length) return "";
+  const withheld = a.reach?.board;
+  return ` <span class="chip chip-warn" title="Open to anyone: ${esc(a.chat_open.join(", "))}${withheld ? ". Board withheld until it is locked down." : ""}">${withheld ? "board withheld" : "open chat"}</span>`;
+}
+
 function renderAgentTable() {
   renderTagBar();
   const shown = allAgents.filter((a) => agentFilter === null || (agentFilter === "" ? !tagsOf(a).length : tagsOf(a).includes(agentFilter)));
   renderRows("agents", shown, (a) => `
       <td class="sel"><input type="checkbox" data-select="${esc(a.id)}" aria-label="Select ${esc(a.id)}"${agentSelection.has(a.id) ? " checked" : ""}></td>
       <td id="status-${esc(a.id)}">${statusPill("loading")}</td>
-      <td>${esc(a.id)}</td>
+      <td>${esc(a.id)}${openChatChip(a)}</td>
       <td>${tagChips(tagsOf(a))}</td>
       <td>${esc(a.type)}</td>
       <td>${esc(a.host)}</td>

@@ -174,15 +174,37 @@ def board_server(mesh: dict) -> dict | None:
     return {"url": board["url"], "headers": {"Authorization": "Bearer ${env:%s}" % BOARD_TOKEN_KEY}}
 
 
-def peer_list(mesh: dict) -> dict:
-    return {
-        peer["name"]: {
-            "url": peer["url"],
-            "auth": {"type": "bearer", "token": "${env:%s}" % token_env(peer["name"])},
-            "capabilities": peer.get("capabilities", []),
-        }
-        for peer in mesh["outbound"]
-    }
+ENV_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
+CONFIG_OPEN_RE = re.compile(r"^\s*allow_all_users:\s*[\"']?(true|yes|1)[\"']?\s*(#.*)?$", re.I | re.M)
+
+
+def open_chats(cfg: dict) -> list:
+    """The settings that let anyone at all message this agent, by name: any
+    `*_ALLOW_ALL_USERS` flag (Hermes's per-platform and gateway-wide
+    switches, e.g. GATEWAY_ALLOW_ALL_USERS) in the profile's .env or in a
+    Docker agent's container environment, where a compose file often sets
+    it, and `allow_all_users` in config.yaml. Names only, never values.
+    Beacon withholds the fleet board from such an agent (backend/mesh.py).
+    Not seen: variables a systemd unit or launchd plist sets itself."""
+    env_file = Path(cfg["env_file"])
+    lines = env_file.read_text().splitlines() if env_file.exists() else []
+    hermes = cfg["hermes"]
+    if len(hermes) > 5 and hermes[1] == "exec" and hermes[5] == "hermes":  # docker exec -u <user> <container>
+        try:
+            lines += subprocess.run(hermes[:5] + ["env"], capture_output=True, text=True,
+                                    timeout=30).stdout.splitlines()
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log(f"could not read the container's environment: {exc}")
+    found = set()
+    for line in lines:
+        match = ENV_LINE_RE.match(line)
+        if (match and match.group(1).endswith("_ALLOW_ALL_USERS")
+                and match.group(2).strip().strip("\"'").lower() in ("true", "1", "yes")):
+            found.add(match.group(1))
+    config = env_file.parent / "config.yaml"
+    if config.exists() and CONFIG_OPEN_RE.search(config.read_text()):
+        found.add("allow_all_users")
+    return sorted(found)
 
 
 def parts_text(obj) -> str:
@@ -375,7 +397,9 @@ def sync(state: Path) -> int:
         pull_token = (state / "token").read_text().strip()
         request = urllib.request.Request(f"{cfg['beacon']}/mesh/{cfg['agent']}",
                                          headers={"Authorization": f"Bearer {pull_token}",
-                                                  "X-Beacon-Sync-Version": SYNC_VERSION})
+                                                  "X-Beacon-Sync-Version": SYNC_VERSION,
+                                                  # "none", not empty: a proxy may drop an empty header.
+                                                  "X-Beacon-Open-Chat": ",".join(open_chats(cfg)) or "none"})
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
                 mesh = json.load(response)

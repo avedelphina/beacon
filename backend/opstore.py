@@ -93,6 +93,12 @@ CREATE TABLE IF NOT EXISTS workflow_events (
     created_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS workflow_events_by_request ON workflow_events (request_id, id);
+
+CREATE TABLE IF NOT EXISTS chat_exposure (
+    agent       TEXT PRIMARY KEY,
+    open_json   TEXT NOT NULL,     -- names of the settings that open its chat to anyone; [] for none
+    reported_at REAL NOT NULL
+);
 """
 
 
