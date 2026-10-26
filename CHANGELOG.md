@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-10-26
+
 ### Added
 
 - **Long work through the mailbox.** Work that took longer than a short
