@@ -44,6 +44,7 @@ const api = {
     return `/api/agents/${id}/config-diff?${params}`;
   },
   restart: (id) => json(`/api/agents/${id}/restart?confirm=true`, "POST"),
+  restartAgent: (id) => json(`/api/agents/${id}/restart-agent?confirm=true`, "POST"),
   listPlugins: (id) => json(`/api/agents/${id}/plugins`),
   updatePlugin: (id, plugin) => json(`/api/agents/${id}/plugins/${plugin}/update?confirm=true`, "POST"),
   applyTemplate: (name, agentIds) => json(`/api/templates/${name}/apply`, "POST", { agent_ids: agentIds, confirm: true }),
@@ -444,24 +445,31 @@ document.getElementById("inspect-deploy").addEventListener("click", async (e) =>
   refreshStatuses(await api.list("agents"));
 });
 
-document.getElementById("inspect-restart").addEventListener("click", async (e) => {
-  if (!currentInspectId) return;
-  if (!confirm(`Restart ${currentInspectId}'s gateway?`)) return;
-  const btn = e.target;
-  const out = document.getElementById("inspect-restart-output");
-  out.hidden = false;
-  out.textContent = "restarting…";
-  btn.disabled = true;
-  try {
-    const result = await api.restart(currentInspectId);
-    out.textContent = result.output || (result.ok ? "done" : "failed");
-  } catch (err) {
-    out.textContent = `[error] ${err.message}`;
-  } finally {
-    btn.disabled = false;
-    refreshStatuses(await api.list("agents"));
-  }
-});
+function wireRestart(btnId, prompt, call) {
+  document.getElementById(btnId).addEventListener("click", async (e) => {
+    if (!currentInspectId) return;
+    if (!confirm(prompt(currentInspectId))) return;
+    const btn = e.target;
+    const out = document.getElementById("inspect-restart-output");
+    out.hidden = false;
+    out.textContent = "restarting…";
+    btn.disabled = true;
+    try {
+      const result = await call(currentInspectId);
+      out.textContent = result.output || (result.ok ? "done" : "failed");
+    } catch (err) {
+      out.textContent = `[error] ${err.message}`;
+    } finally {
+      btn.disabled = false;
+      refreshStatuses(await api.list("agents"));
+    }
+  });
+}
+
+wireRestart("inspect-restart", (id) => `Restart ${id}'s gateway?`, api.restart);
+wireRestart("inspect-restart-agent",
+  (id) => `Hard-restart ${id}? Restarts its Docker container (desired.container) or its systemd unit, without a graceful drain. Live sessions are dropped.`,
+  api.restartAgent);
 
 const PLUGIN_SEVERITY = { enabled: "ok", disabled: "warn" };
 

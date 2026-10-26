@@ -322,6 +322,15 @@ async def list_plugins(agent_id: str) -> object:
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
+async def restart_agent(agent_id: str, confirm: bool = False) -> object:
+    """Hard-restart a whole agent: its Docker container if it has one, else its systemd unit
+    (no graceful drain). Drops live sessions; prefer `restart` first. Requires confirm=true."""
+    if not confirm:
+        return f"Would hard-restart {agent_id!r}. Call again with confirm=true to actually run it."
+    return await _post(f"/api/agents/{_agent_path_id(agent_id)}/restart-agent?confirm=true")
+
+
+@mcp.tool(annotations=DESTRUCTIVE)
 async def restart(agent_id: str, confirm: bool = False) -> object:
     """Restart an agent's gateway service. Requires confirm=true."""
     if not confirm:

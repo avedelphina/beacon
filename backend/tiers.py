@@ -48,6 +48,11 @@ CAPABILITY_TIERS: dict[str, tuple[Tier, str]] = {
         "Reversible, low-risk, everyday operate action — the service comes back up on its "
         "own, nothing is lost.",
     ),
+    "restart_agent": (
+        Tier.T3,
+        "Hard restart of the whole agent (container, or the systemd unit without Hermes's "
+        "graceful drain) — drops live sessions, so a step above the gateway restart.",
+    ),
     "apply_fix": (
         Tier.T2,
         "Reconcile's findings are all reversible-by-design fixes (restart, orphaned-unit "

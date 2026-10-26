@@ -332,6 +332,29 @@ def test_restart_unreachable(fake_ssh):
     assert result == {"ok": False, "output": "ssh timed out"}
 
 
+def test_restart_agent_systemd_for_non_docker(fake_ssh):
+    fake_ssh.result = SSHResult(ok=True, stdout="", stderr="", returncode=0)
+    hermes.restart_agent(make_agent(profile="demo-profile"), make_host())
+    assert "systemctl --user restart hermes-gateway-demo-profile" in fake_ssh.last_command
+
+
+def test_restart_agent_docker_when_container_set(fake_ssh):
+    fake_ssh.result = SSHResult(ok=True, stdout="", stderr="", returncode=0)
+    agent = make_agent()
+    agent.desired["container"] = "hermes-nas"
+    hermes.restart_agent(agent, make_host())
+    assert "docker restart -t 120 hermes-nas || sudo -n docker restart" in fake_ssh.last_command
+    assert "systemctl" not in fake_ssh.last_command
+
+
+def test_restart_agent_rejects_bad_container_before_ssh(fake_ssh):
+    agent = make_agent()
+    agent.desired["container"] = "x; rm -rf /"
+    with pytest.raises(ValueError):
+        hermes.restart_agent(agent, make_host())
+    assert fake_ssh.calls == []
+
+
 # ---------------------------------------------------------------------------
 # list_plugins() / update_plugin()
 # ---------------------------------------------------------------------------

@@ -23,7 +23,7 @@ def test_read_only_capabilities_never_need_confirm():
 
 
 def test_t2_and_above_require_confirm():
-    for capability in ("restart", "apply_fix", "push_config", "update_plugin", "deploy", "update_agent", "decommission"):
+    for capability in ("restart", "restart_agent", "apply_fix", "push_config", "update_plugin", "deploy", "update_agent", "decommission"):
         tier, _ = tier_for(capability)
         assert tier >= Tier.T2
         assert requires_confirm(tier)

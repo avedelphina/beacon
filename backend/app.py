@@ -68,7 +68,7 @@ async def lifespan(_app):
         yield
 
 
-app = FastAPI(title="Beacon", version="0.20.0", lifespan=lifespan)
+app = FastAPI(title="Beacon", version="0.21.0", lifespan=lifespan)
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:
@@ -838,6 +838,14 @@ def restart_agent(id_: str, confirm: bool = False) -> dict:
         return gate
     agent, host, driver = for_agent(id_)
     return driver.restart(agent, host)
+
+
+@app.post("/api/agents/{id_}/restart-agent")
+def restart_whole_agent(id_: str, confirm: bool = False) -> dict:
+    if (gate := _confirm_gate("restart_agent", confirm, f"hard-restart {id_!r} (container if desired.container is set, else its systemd unit)")) is not None:
+        return gate
+    agent, host, driver = for_agent(id_)
+    return driver.restart_agent(agent, host)
 
 
 @app.post("/api/agents/{id_}/deploy")
