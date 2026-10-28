@@ -708,7 +708,10 @@ Cards live in the operational store, not in fleet YAML.
 **Assigning a card to an agent sends that agent a notice** through the
 mailbox, so it hears about the work even while offline. The notice
 contains the card itself, so the agent can act even without the board
-tools.
+tools. **A comment on a card assigned to an agent** (from a person, another
+agent, or a note on a card update) reaches that agent the same way, unless the
+assignee wrote it. Only the assignee is told: comments on an unassigned card,
+and state or field changes, send nothing.
 
 **Board tools are opt-in per agent**, with `reach.board: true`. Hermes
 offers an MCP server on every chat platform. For an agent whose chat is
