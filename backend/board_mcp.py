@@ -27,7 +27,8 @@ INSTRUCTIONS = """The Beacon fleet board: shared cards for work that spans agent
 Use it to hand work to another agent, to record progress where others can see it, and to find
 what is assigned to you. States: todo, doing, blocked, review, done. When you work on a card
 over A2A, pass the thread's context_id to card_comment or card_update so the card links to it.
-Assigning a card to an agent also sends that agent a notice."""
+Assigning a card to an agent also sends that agent a notice, and so does a comment on a card
+assigned to it."""
 
 
 def author_for(authorization: str | None) -> str | None:

@@ -84,6 +84,23 @@ def test_no_notice_for_people_or_self_assignment(client, fleet_agents):
     assert _notices() == []
 
 
+def test_a_comment_on_an_assigned_card_reaches_the_assignee(client, fleet_agents):
+    card = client.post("/api/board/cards", json={"title": "Check backups", "assignee": "bravo"}).json()
+    assert len(_notices()) == 1  # the assignment
+
+    client.post(f"/api/board/cards/{card['id']}/comments", json={"text": "Skip the NAS."})
+    board.update_card("beacon", card["id"], note="Also skip the lab host.")  # a note alone is a comment too
+    notices = _notices()
+    assert [n["recipient"] for n in notices] == ["bravo"] * 3
+    assert "Skip the NAS." in notices[1]["body"] and "Also skip the lab host." in notices[2]["body"]
+    kinds = [e["kind"] for e in board.get_card(card["id"])["events"]]
+    assert kinds.count("comment_notice") == 2
+
+    board.comment("bravo", card["id"], "On it.")  # the assignee's own words are not sent back
+    board.comment("alpha", board.create_card("alpha", "unassigned")["id"], "hello")  # nobody to tell
+    assert len(_notices()) == 3
+
+
 # --- MCP, as agents use it --------------------------------------------------
 
 HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}

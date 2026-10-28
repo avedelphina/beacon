@@ -113,6 +113,8 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
     new_assignee = next((value for column, _, value, _ in changes if column == "assignee"), None)
     if new_assignee:
         _notify_assignee(card_id, author, new_assignee)
+    elif note and not changes:
+        _notify_comment(card_id, author, note)
     return get_card(card_id)
 
 
@@ -121,6 +123,7 @@ def comment(author: str, card_id: int, text: str, context_id: str | None = None)
     with opstore.connect() as db:
         _event(db, card_id, author, "comment", _required(text, "comment"), context_id)
         db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (time.time(), card_id))
+    _notify_comment(card_id, author, text)
     return get_card(card_id)
 
 
@@ -143,6 +146,26 @@ def _notify_assignee(card_id: int, author: str, assignee: str) -> None:
     state (queued/delivered/failed) without conflating it with the assignment
     itself. Only called when the assignee actually changed, so a repeated
     update with the same assignee and no other change never re-enqueues."""
+    card = get_card(card_id)
+    text = (f"You were assigned card #{card_id} on the Beacon board by {author}.\n"
+            f"Title: {card['title']}\nProject: {card['project'] or '-'}\nState: {card['state']}\n\n"
+            f"{card['body'][:NOTICE_BODY]}")
+    _send_notice(card_id, author, assignee, "assign_notice", text)
+
+
+def _notify_comment(card_id: int, author: str, text: str) -> None:
+    """A comment on a card assigned to an agent reaches that agent too, or the
+    comment would sit in the card's history unseen by the one who has to act on
+    it. Not when the assignee wrote it, so a reply never notifies its writer."""
+    card = get_card(card_id)
+    if not card["assignee"]:
+        return
+    _send_notice(card_id, author, card["assignee"], "comment_notice",
+                 f"{author} commented on card #{card_id} on the Beacon board, which is assigned to you.\n"
+                 f"Title: {card['title']}\nState: {card['state']}\n\n{text[:NOTICE_BODY]}")
+
+
+def _send_notice(card_id: int, author: str, assignee: str, kind: str, text: str) -> None:
     if assignee == author:
         return
     try:
@@ -151,15 +174,10 @@ def _notify_assignee(card_id: int, author: str, assignee: str) -> None:
         return  # a person, or not in the fleet: nobody to message
     if agent.reach is None:
         return
-    card = get_card(card_id)
     sender = author if _is_agent(author) else mesh.BEACON_PEER
-    text = (f"You were assigned card #{card_id} on the Beacon board by {author}.\n"
-            f"Title: {card['title']}\nProject: {card['project'] or '-'}\nState: {card['state']}\n\n"
-            f"{card['body'][:NOTICE_BODY]}")
     notice_id = mailbox.enqueue(sender, assignee, "notice", text)
     with opstore.connect() as db:
-        _event(db, card_id, mesh.BEACON_PEER, "assign_notice", f"notice queued for {assignee}",
-              notice_id=notice_id)
+        _event(db, card_id, mesh.BEACON_PEER, kind, f"notice queued for {assignee}", notice_id=notice_id)
     # Deliver now if it's online; otherwise its next mesh pull does. This may
     # be slow or fail transiently; the assignment above already returned.
     threading.Thread(target=mailbox.deliver_pending, args=(assignee,), daemon=True).start()

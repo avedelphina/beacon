@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.25.1] — 2026-10-28
+
+### Fixed
+
+- **A comment on a card assigned to an agent now reaches that agent.** Before,
+  only the assignment sent a notice, so a comment sat in the card's history
+  and the agent never saw it. The notice goes through the mailbox like the
+  assignment's, is recorded as a `comment_notice` event on the card, and is not
+  sent when the assignee wrote the comment. A note given with a card update
+  counts as a comment. State and field changes still send nothing.
+
 ## [0.25.0] — 2026-10-28
 
 ### Added
