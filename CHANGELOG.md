@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-10-28
+
+### Added
+
+- **Onboarding for agents that already run.** The agent form now has an A2A
+  mesh section (endpoint, network, bind, board), and an **Enroll** button
+  creates a one-time command for the agent's host:
+  `curl .../enroll/<code> | bash -s -- --schedule`. The code works once, for
+  15 minutes, and only its hash is stored. It fetches the agent's install
+  script, so the pull token never passes through the browser, and it works for
+  hosts Beacon cannot SSH into. Creating a code is a human-session action
+  (`enroll_agent`, T4).
+- **Checklist.** `GET /api/agents/{id}/onboarding` and the Enroll dialog show
+  the command run, first sync, schedule (a second pull), A2A answer, and chat
+  status, live.
+- **`--schedule` for the install scripts.** With the flag, the script adds
+  the 5-minute sync to the crontab of whoever runs it, replacing an earlier
+  line for the same sync and keeping the rest. Without it, nothing changes.
+- Beacon counts pulls per agent (`agent_seen.pulls`), which the checklist
+  uses to see the schedule work.
+
 ## [0.24.0] — 2026-10-28
 
 ### Changed

@@ -126,8 +126,23 @@ CREATE TABLE IF NOT EXISTS fleet_meta (
 
 CREATE TABLE IF NOT EXISTS agent_seen (
     agent       TEXT PRIMARY KEY,
-    last_pull   REAL NOT NULL      -- the agent's host sync last pulled /mesh/{agent}
+    last_pull   REAL NOT NULL,     -- the agent's host sync last pulled /mesh/{agent}
+    pulls       INTEGER NOT NULL DEFAULT 1
 );
+
+-- Single-use codes that hand an agent's install script to its host (backend/onboarding.py).
+CREATE TABLE IF NOT EXISTS enrollments (
+    code_hash       TEXT PRIMARY KEY,   -- sha256 of the code: the table never holds a usable one
+    agent           TEXT NOT NULL,
+    docker          TEXT,
+    docker_user     TEXT,
+    created_by      TEXT NOT NULL,
+    created_at      REAL NOT NULL,
+    expires_at      REAL NOT NULL,
+    fetched_at      REAL,
+    pulls_at_fetch  INTEGER
+);
+CREATE INDEX IF NOT EXISTS enrollments_by_agent ON enrollments (agent, created_at);
 """
 
 
@@ -155,6 +170,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     """Additive, idempotent column backfills for tables that predate them.
     `CREATE TABLE IF NOT EXISTS` above never touches an existing table, so a
     new nullable column needs its own guarded `ALTER TABLE` here."""
+    seen = {row[1] for row in conn.execute("PRAGMA table_info(agent_seen)")}
+    if "pulls" not in seen:
+        conn.execute("ALTER TABLE agent_seen ADD COLUMN pulls INTEGER NOT NULL DEFAULT 1")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(card_events)")}
     if "notice_id" not in columns:
         conn.execute("ALTER TABLE card_events ADD COLUMN notice_id INTEGER REFERENCES mailbox (id)")

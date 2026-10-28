@@ -7,13 +7,13 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, availability, board, bus, cron_store, fleet, mailbox, mesh, opstore, policy, scheduler, store, templates, workflow
+from . import auth, availability, board, bus, cron_store, fleet, mailbox, mesh, onboarding, opstore, policy, scheduler, store, templates, workflow
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, CronJob, Host
@@ -27,6 +27,13 @@ class FixRequest(BaseModel):
 
 class TemplateApplyRequest(BaseModel):
     agent_ids: list[str]
+    confirm: bool = False
+
+
+class EnrollRequest(BaseModel):
+    docker: str | None = None  # the agent's container; the command then runs on its host as root
+    docker_user: str = "hermes"
+    schedule: bool = True
     confirm: bool = False
 
 
@@ -74,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.24.0"
+VERSION = "0.25.0"
 
 
 async def _record_actor(request: Request) -> None:
@@ -811,6 +818,40 @@ def put_agent(id_: str, agent: Agent, request: Request) -> Agent:
     if _access_fields(existing) != _access_fields(agent):
         _require_human_session(request, "set_agent_access")
     return store.upsert_agent(agent)
+
+
+@app.post("/api/agents/{id_}/enroll")
+def enroll_agent(id_: str, body: EnrollRequest, request: Request) -> dict:
+    """A single-use code (15 minutes) and the command that fetches this agent's
+    install script with it, to run on the agent's host. Human session only: the
+    script holds the agent's pull token."""
+    _require_human_session(request, "enroll_agent")
+    store.get_agent(id_)  # 404 first
+    where = f" (Docker container {body.docker!r})" if body.docker else ""
+    if (gate := _confirm_gate("enroll_agent", body.confirm, f"create a one-time enrollment command for {id_!r}{where}")) is not None:
+        return gate
+    made = onboarding.create(id_, body.docker, body.docker_user, _board_author(request))  # ValueError -> 400
+    logger.warning("enrollment code created for %s by %s", id_, _board_author(request))
+    return {"agent": id_, "expires_at": made["expires_at"],
+            "command": onboarding.command(made["code"], bool(body.docker), body.schedule)}
+
+
+@app.get("/api/agents/{id_}/onboarding")
+def agent_onboarding(id_: str) -> dict:
+    """The checklist for bringing this agent into the mesh (backend/onboarding.py)."""
+    return onboarding.status(id_)
+
+
+@app.get("/enroll/{code}", response_class=PlainTextResponse)
+def enroll_script(code: str) -> str:
+    """The install script for a valid enrollment code, once. Outside /api/ on
+    purpose: the host running the command has no session; the code is the
+    credential. Every refusal looks the same."""
+    redeemed = onboarding.redeem(code)
+    if redeemed is None:
+        raise HTTPException(404, "this enrollment code is not valid")
+    logger.warning("enrollment code used: install script for %s fetched", redeemed[0])
+    return redeemed[1]
 
 
 @app.delete("/api/agents/{id_}")

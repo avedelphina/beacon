@@ -166,7 +166,22 @@
     </label>
     <label>Owner <input name="owner" placeholder="tom"></label>
     <label>Notes <input name="notes"></label>
-    <label>Templates <span class="hint">(comma separated, names from fleet/templates/)</span>
+    <fieldset class="mesh-fields">
+      <legend>A2A mesh <span class="hint">(empty endpoint: not in the mesh)</span></legend>
+      <label>Endpoint <span class="hint">(as other agents reach it)</span>
+        <input name="reach_endpoint" placeholder="http://100.64.0.12:9900">
+      </label>
+      <div class="field-row">
+        <label>Network <input name="reach_network" placeholder="tailnet"></label>
+        <label>Listens on <span class="hint">(if not the endpoint)</span>
+          <input name="reach_bind" placeholder="0.0.0.0:9900">
+        </label>
+      </div>
+      <label class="check"><input type="checkbox" name="reach_board"> Board and workflow tools
+        <span class="hint">(not while its chat is open to anyone: Beacon withholds them)</span>
+      </label>
+    </fieldset>
+    <label>Templates <span class="hint">(names of saved templates)</span>
       <input name="templates" placeholder="anthropic-stack, eu-relay">
     </label>
     <label>Desired config <span class="hint">(JSON)</span>
@@ -185,6 +200,32 @@
       <button type="submit" class="btn primary">Save</button>
     </div>
   </form>
+</div>
+
+<div class="modal-backdrop" id="enroll-modal">
+  <div class="modal">
+    <h2 id="enroll-title">Bring an agent into the mesh</h2>
+    <form id="enroll-form">
+      <p class="hint">Creates a command to run once on the agent's host. It fetches the agent's install script
+      with a code that works once, for 15 minutes, so its token never passes through this page.</p>
+      <label>Docker container <span class="hint">(only if the agent runs in Docker; run the command on its host)</span>
+        <input name="docker" placeholder="hermes-agent">
+      </label>
+      <label>User inside the container <input name="docker_user" value="hermes"></label>
+      <label class="check"><input type="checkbox" name="schedule" checked> Also add the 5-minute sync to cron
+        <span class="hint">(otherwise the script prints the line for you to add)</span>
+      </label>
+      <div class="modal-actions"><button type="submit" class="btn primary">Create command</button></div>
+    </form>
+    <div id="enroll-command" hidden>
+      <p>Run this on the agent's host<span id="enroll-who"></span>. It works once, until <span id="enroll-expires"></span>:</p>
+      <pre id="enroll-cmd" class="inspect-status"></pre>
+      <button type="button" class="btn" id="enroll-copy">Copy</button>
+    </div>
+    <h3>Progress</h3>
+    <div id="enroll-steps"></div>
+    <div class="modal-actions"><button type="button" class="btn" data-close>Close</button></div>
+  </div>
 </div>
 
 <div class="modal-backdrop" id="inspect-modal">

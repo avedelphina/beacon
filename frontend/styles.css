@@ -392,6 +392,11 @@ tbody td:first-child { color: var(--ink); font-family: var(--font-mono); }
   background: var(--surface-2); color: var(--ink); white-space: nowrap;
 }
 .chip-warn { border-color: var(--warn); color: var(--warn); }
+.mesh-fields { border: 1px solid var(--line-soft); border-radius: 6px; padding: 0.6rem 0.8rem; margin: 0.4rem 0; display: grid; gap: 0.6rem; }
+.mesh-fields legend { padding: 0 0.4rem; font-size: 0.85rem; }
+label.check { display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; }
+label.check input { width: auto; }
+#enroll-cmd { white-space: pre-wrap; word-break: break-all; user-select: all; }
 .chip-btn { cursor: pointer; font: inherit; font-family: var(--font-mono); font-size: 0.75rem; padding: 0.15rem 0.6rem; }
 .chip-btn.active { background: var(--signal); border-color: var(--signal); color: #fff; }
 .chip-btn.active .hint { color: inherit; opacity: 0.85; }

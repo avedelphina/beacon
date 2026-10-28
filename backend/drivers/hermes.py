@@ -720,6 +720,28 @@ echo "[beacon] done"
 
 MESH_SYNC = Path(__file__).with_name("hermes_mesh_sync.py")
 
+# The sync's schedule, as the shell of an install script sees it ($py and
+# $dir are set by then).
+SYNC_LINE = r'*/5 * * * * \"$py\" \"$dir/sync.py\" \"$dir\" >> \"$dir/sync.log\" 2>&1'
+
+
+def _schedule_lines(agent_id: str, who: str) -> list[str]:
+    """The end of an install script: print the cron line, or with `--schedule`
+    (the enrollment command passes it) put it in the crontab of whoever runs
+    the script. A line for this sync already there is replaced, so running it
+    again never doubles it. With no crontab command it prints the line, as
+    without the flag. Either way the script says what it did."""
+    return [
+        f'line="{SYNC_LINE}"',
+        'if [ "${1:-}" = "--schedule" ] && command -v crontab >/dev/null 2>&1; then',
+        '  { crontab -l 2>/dev/null | grep -vF "$dir/sync.py" || true; printf "%s\\n" "$line"; } | crontab -',
+        f'  echo "[beacon] mesh sync for {agent_id} installed, run once, and scheduled every 5 minutes ({who})"',
+        "else",
+        f'  echo "[beacon] mesh sync for {agent_id} installed and run once. To keep it in sync, schedule ({who}):"',
+        '  echo "  $line"',
+        "fi",
+    ]
+
 
 def mesh_install_script(agent: Agent, beacon_url: str, pull_token: str) -> str:
     """One-time host bootstrap for the A2A mesh pull (see backend/mesh.py).
@@ -767,8 +789,7 @@ def mesh_install_script(agent: Agent, beacon_url: str, pull_token: str) -> str:
         # operator's call.
         f"{_cmd_prefix(agent)} tools enable a2a --platform a2a",
         '"$py" "$dir/sync.py" "$dir" | tee -a "$dir/sync.log"',
-        f'echo "[beacon] mesh sync for {agent.id} installed and run once. To keep it in sync, schedule:"',
-        'echo "  */5 * * * * \\"$py\\" \\"$dir/sync.py\\" \\"$dir\\" >> \\"$dir/sync.log\\" 2>&1"',
+        *_schedule_lines(agent.id, "for this user"),
     ]) + "\n"
 
 
@@ -830,6 +851,5 @@ def mesh_install_docker_script(agent: Agent, beacon_url: str, pull_token: str, c
         f"{exec_user} sh -c 'touch \"$HERMES_HOME/.env\"'",
         f"{exec_user} hermes{' ' + ' '.join(profile_args) if profile_args else ''} tools enable a2a --platform a2a",
         '"$py" "$dir/sync.py" "$dir" | tee -a "$dir/sync.log"',
-        f'echo "[beacon] mesh sync for {agent.id} installed and run once. Schedule as root on this host:"',
-        'echo "  */5 * * * * \\"$py\\" \\"$dir/sync.py\\" \\"$dir\\" >> \\"$dir/sync.log\\" 2>&1"',
+        *_schedule_lines(agent.id, "as root on this host"),
     ]) + "\n"
