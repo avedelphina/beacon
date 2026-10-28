@@ -12,6 +12,13 @@
   assignment's, is recorded as a `comment_notice` event on the card, and is not
   sent when the assignee wrote the comment. A note given with a card update
   counts as a comment. State and field changes still send nothing.
+- **The agent table fits its window.** The action buttons were a flex
+  container set on a table cell, which pulled the cell out of the table: Delete
+  ran off the right edge in Firefox, the buttons shifted from row to row, the
+  row borders broke, and a row with a chip was taller than the rest. The cell is
+  a table cell again, the page is wider (1280px instead of 1000px), the name and
+  its chips stay on one line, and below 1100px the Type column (always the same
+  today) is hidden so the actions stay on screen. Rows highlight on hover.
 
 ## [0.25.0] — 2026-10-28
 

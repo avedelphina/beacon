@@ -99,7 +99,7 @@ body {
 
 .tab.active { color: var(--ink); border-bottom-color: var(--signal); }
 
-.page { max-width: 1000px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+.page { max-width: 1280px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
 
 .view { display: none; }
 .view.active { display: block; }
@@ -137,7 +137,14 @@ tbody tr:last-child td { border-bottom: none; }
 tbody td { color: var(--slate); }
 tbody td:first-child { color: var(--ink); font-family: var(--font-mono); }
 
-.row-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+/* A table cell stays a table cell: display:flex on the <td> took it out of the
+   table, so its row border broke and the buttons drifted from row to row. */
+.row-actions { white-space: nowrap; text-align: right; }
+.row-actions .link-btn + .link-btn { margin-left: 0.5rem; }
+tbody tr:hover td { background: var(--surface-2); }
+/* An agent's name and its chips stay on one line, so no row is taller than the rest. */
+td[data-label="ID"] { white-space: nowrap; }
+td[data-label="ID"] .chip { margin-left: 0.4rem; }
 
 .link-btn {
   background: none;
@@ -413,6 +420,15 @@ td.sel input { width: 1.05rem; height: 1.05rem; cursor: pointer; }
 .tag-groups { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
 .tag-group { font-family: var(--font-mono); font-size: 0.85rem; color: var(--slate); display: flex; flex-wrap: wrap; gap: 0.4rem 0.6rem; align-items: baseline; }
 
+/* Every agent is "hermes" today; on a narrow window the column is the first to go,
+   so the actions stay on screen. (Phones hide Type and Profile below.) */
+@media (max-width: 1100px) {
+  #agents-view th:nth-child(5), #agents-body td:nth-child(5) { display: none; }
+}
+@media (min-width: 721px) and (max-width: 1100px) {
+  #agents-view th, #agents-body td { padding-left: 0.55rem; padding-right: 0.55rem; }
+}
+
 /* ---- phones ---- */
 @media (max-width: 720px) {
   /* The header wraps: brand and log-out on the first row, the tabs on a second
@@ -452,6 +468,9 @@ td.sel input { width: 1.05rem; height: 1.05rem; cursor: pointer; }
   .table-wrap:not(#policy-matrix-wrap) td.row-actions { justify-content: flex-start; flex-wrap: wrap; padding-top: 0.5rem; border-top: 1px solid var(--line-soft); margin-top: 0.3rem; }
   .table-wrap:not(#policy-matrix-wrap) td.row-actions::before { content: none; }
   .row-actions { gap: 0.2rem 0.4rem; }
+  .row-actions .link-btn + .link-btn { margin-left: 0; }
+  td[data-label="ID"] { white-space: normal; }
+  tbody tr:hover td { background: none; }
 
   /* Things you tap. */
   .btn { min-height: 2.6rem; }
