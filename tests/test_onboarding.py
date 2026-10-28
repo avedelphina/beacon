@@ -11,7 +11,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import auth, availability, mesh, onboarding, opstore, store
+from backend import auth, availability, board, mesh, onboarding, opstore, store, workflow
 from backend.app import app
 from backend.drivers import hermes
 from backend.schemas import Agent, Host
@@ -83,6 +83,86 @@ def test_the_enroll_path_needs_no_session_when_login_is_on(joined, human_client,
     code = _mint(human_client).json()["command"].split("/enroll/")[1].split(" ")[0]
     monkeypatch.setattr(auth, "AUTH_ENABLED", True)
     assert TestClient(app).get(f"/enroll/{code}").status_code == 200
+
+
+# --- asked for by an agent, approved by a person ----------------------------
+
+
+@pytest.fixture
+def card(joined):
+    store.upsert_agent(Agent.model_validate({"id": "beta", "type": "hermes", "host": "h1", "profile": "beta",
+        "reach": {"endpoint": "http://127.0.0.1:9", "network": "lan", "board": True}}))
+    return board.create_card("beacon", "Enroll alpha", "", None, None)["id"]
+
+
+def _approve(client, request, action="approved"):
+    return client.post(f"/api/workflows/{request['id']}/respond", json={
+        "action": action, "plan_revision": request["plan_revision"], "plan_hash": request["plan_hash"]})
+
+
+def test_an_approved_request_hands_its_requester_the_command_once(card, human_client):
+    request = onboarding.request_enrollment("beacon", card, "alpha", None, "hermes", True)
+    assert request["state"] == "pending" and request["tier"] == 4 and request["eligible_responder"] == "human"
+    with pytest.raises(workflow.WorkflowError, match="pending, not approved"):
+        onboarding.claim(request["id"], "beacon")
+
+    assert _approve(human_client, request).status_code == 200
+    made = onboarding.claim(request["id"], "beacon")
+    assert made["command"].startswith(f"curl -fsS {PUBLIC}/enroll/") and made["command"].endswith("-- --schedule")
+    code = made["command"].split("/enroll/")[1].split(" ")[0]
+    assert TestClient(app).get(f"/enroll/{code}").status_code == 200
+    assert workflow.get(request["id"])["state"] == "executed"
+    with pytest.raises(workflow.WorkflowError, match="executed, not approved"):
+        onboarding.claim(request["id"], "beacon")  # once
+
+
+def test_a_rejected_request_gives_nothing_and_no_one_else_can_claim(card, human_client):
+    rejected = onboarding.request_enrollment("beacon", card, "alpha", None, "hermes", True)
+    _approve(human_client, rejected, "rejected")
+    with pytest.raises(workflow.WorkflowError):
+        onboarding.claim(rejected["id"], "beacon")
+
+    request = onboarding.request_enrollment("beacon", card, "alpha", None, "hermes", True)
+    _approve(human_client, request)
+    with pytest.raises(workflow.UnauthorizedWorkflowAccess):
+        onboarding.claim(request["id"], "alpha")  # approved for beacon's ask, not alpha's
+    with opstore.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM enrollments").fetchone()[0] == 0
+
+
+def test_an_agent_can_ask_only_for_itself(card, human_client):
+    with pytest.raises(workflow.UnauthorizedWorkflowAccess):
+        onboarding.request_enrollment("beta", card, "alpha", None, "hermes", True)
+    request = onboarding.request_enrollment("beta", card, "beta", None, "hermes", True)
+    _approve(human_client, request)
+    assert "/enroll/" in onboarding.claim(request["id"], "beta")["command"]
+
+
+def test_an_agent_cannot_approve_or_forge_its_own_request(card, human_client):
+    request = onboarding.request_enrollment("beta", card, "beta", None, "hermes", True)
+    with pytest.raises(workflow.UnauthorizedResponder):  # only a person in the browser answers
+        workflow.respond(request["id"], actor="beta", human=False, action="approved", response=None,
+                         plan_revision=request["plan_revision"], plan_hash=request["plan_hash"])
+
+    # Made by hand with another agent as the target and reassuring words: refused at claim.
+    forged_target = {"agent": "alpha", "docker": None, "docker_user": "hermes", "schedule": True}
+    binding = workflow.plan_binding({"x": 1})
+    forged = workflow.create(card_id=card, kind="approval", requester="beta", eligible_responder="human",
+                             capability="enroll_agent", tier=4, title="Enroll beta", summary="routine", options=None,
+                             target=forged_target, **binding)
+    _approve(human_client, forged)
+    with pytest.raises(workflow.UnauthorizedWorkflowAccess):
+        onboarding.claim(forged["id"], "beta")
+    assert workflow.get(forged["id"])["state"] == "failed"
+
+    # Its own target but other words than the ones Beacon writes: also refused.
+    own = {"agent": "beta", "docker": None, "docker_user": "hermes", "schedule": True}
+    reworded = workflow.create(card_id=card, kind="approval", requester="beta", eligible_responder="human",
+                               capability="enroll_agent", tier=4, title="Enroll beta", summary="routine", options=None,
+                               target=own, **binding)
+    _approve(human_client, reworded)
+    with pytest.raises(workflow.WorkflowError, match="not made by enroll_request"):
+        onboarding.claim(reworded["id"], "beta")
 
 
 # --- the script's --schedule ------------------------------------------------

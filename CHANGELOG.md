@@ -22,6 +22,15 @@
   line for the same sync and keeping the rest. Without it, nothing changes.
 - Beacon counts pulls per agent (`agent_seen.pulls`), which the checklist
   uses to see the schedule work.
+- **Enrollment asked for by an agent or an MCP client.** Two board tools,
+  `enroll_request` and `enroll_claim`: the requester makes a T4 approval on a
+  card, a person approves it in the web UI, and the requester then claims the
+  same one-time command once. An agent can ask only for itself; an MCP client
+  (the bearer) for any agent. Claiming checks that the request is Beacon's
+  own text for its target, so one made by hand with `workflow_create` is
+  refused. The tools need a token, so for an agent that is not yet enrolled
+  they serve a client holding the MCP bearer; an agent that already syncs can
+  use them to re-install. The agent skill is 1.3.0.
 
 ## [0.24.0] — 2026-10-28
 

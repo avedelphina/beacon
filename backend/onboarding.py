@@ -16,9 +16,10 @@ import hashlib
 import secrets
 import time
 
-from . import availability, mesh, opstore, store
+from . import availability, mesh, opstore, store, workflow
 
 CODE_TTL_SECONDS = 15 * 60
+CAPABILITY = "enroll_agent"
 
 
 def _hash(code: str) -> str:
@@ -59,6 +60,61 @@ def redeem(code: str) -> tuple[str, str] | None:
                           "WHERE code_hash = ? AND fetched_at IS NULL", (now, pulls["pulls"] if pulls else 0,
                                                                          row["code_hash"])).rowcount
     return (row["agent"], script) if used else None
+
+
+def _plan(requester: str, target: dict) -> dict:
+    """The text a person approves and its binding, made from the target alone.
+    claim() makes it again, so a request made by hand through workflow_create
+    with other words (or another target) than the ones shown is refused."""
+    agent_id, docker = target["agent"], target["docker"]
+    where = f" in Docker container {docker!r}" if docker else ""
+    title = f"Enroll {agent_id} in the Beacon mesh"
+    summary = (f"{requester} asks for a one-time command (15 minutes, works once) that installs the Beacon mesh sync for "
+               f"{agent_id}{where}. Approving lets {requester} receive it; the command carries {agent_id}'s pull token "
+               f"in the script it fetches. Reject if you did not expect this.")
+    return {"title": title, "summary": summary,
+            **workflow.plan_binding({"capability": CAPABILITY, "tier": 4, "title": title, "summary": summary,
+                                     "options": [], "target": target})}
+
+
+def _check_requester(requester: str, agent_id: str) -> None:
+    if requester != mesh.BEACON_PEER and requester != agent_id:
+        raise workflow.UnauthorizedWorkflowAccess("an agent can ask to enroll only itself")
+
+
+def request_enrollment(requester: str, card_id: int, agent_id: str, docker: str | None, docker_user: str,
+                       schedule: bool) -> dict:
+    """The second way in: an agent (for itself) or an MCP client (for any agent)
+    asks, a person approves in the web UI (a T4 approval workflow), and the
+    requester then claims the command with claim(). The person is the gate the
+    HTTP route's session check is for; the requester never needs a session."""
+    _check_requester(requester, agent_id)
+    store.get_agent(agent_id)
+    mesh.install_script(agent_id, docker or None, docker_user)  # ValueError: could not work, so do not ask
+    target = {"agent": agent_id, "docker": docker or None, "docker_user": docker_user, "schedule": schedule}
+    plan = _plan(requester, target)
+    return workflow.create(card_id=card_id, kind="approval", requester=requester, eligible_responder="human",
+                           capability=CAPABILITY, tier=4, title=plan["title"], summary=plan["summary"], options=None,
+                           target=target, plan_revision=plan["plan_revision"], plan_hash=plan["plan_hash"])
+
+
+def claim(request_id: int, actor: str) -> dict:
+    """The command for an approved enrollment request, once, to its requester."""
+    request = workflow.claim_approved(request_id, actor=actor, capability=CAPABILITY)
+    target = request["target"]
+    try:
+        if set(target) != {"agent", "docker", "docker_user", "schedule"}:
+            raise workflow.WorkflowError("this request was not made by enroll_request")
+        _check_requester(actor, target["agent"])
+        if _plan(actor, target)["plan_hash"] != request["plan_hash"]:
+            raise workflow.WorkflowError("this request was not made by enroll_request")
+        made = create(target["agent"], target["docker"], target["docker_user"], f"{actor}, workflow {request_id}")
+    except Exception:
+        workflow.mark_execution_outcome(request_id, actor, "failed")
+        raise
+    workflow.mark_executed(request_id, actor)
+    return {"agent": target["agent"], "expires_at": made["expires_at"],
+            "command": command(made["code"], bool(target["docker"]), target["schedule"])}
 
 
 def command(code: str, docker: bool, schedule: bool) -> str:

@@ -89,7 +89,9 @@ CAPABILITY_TIERS: dict[str, tuple[Tier, str]] = {
         Tier.T4,
         "Mints a single-use code that makes Beacon hand the agent's pull token (inside its "
         "install script) to whoever presents it within 15 minutes. That is the agent's "
-        "identity for the mesh, so the LLM-facing MCP token must not be able to mint one.",
+        "identity for the mesh, so the LLM-facing MCP token must not be able to mint one. "
+        "The board's enroll_request/enroll_claim reach the same code only through an approval "
+        "a person gave in a browser session.",
     ),
     "set_policy": (
         Tier.T4,

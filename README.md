@@ -314,6 +314,16 @@ code is stored only as a hash, and an expired, used, or unknown code all
 answer the same 404. Beacon's own access log shows the code in the request
 path, which is harmless once it is used or expired.
 
+**Asked for through the board.** The second way: an agent (for itself) or an
+MCP client (for any agent) calls `enroll_request` on `/board/mcp`, which makes
+a T4 approval on a board card. A person approves it in the web UI, and the
+requester calls `enroll_claim` once to get the same command. Nothing needs a
+browser session at claim time, because the person's approval was the session.
+The tools need a credential, so this serves a client with the MCP bearer, or an
+agent that already syncs and needs its sync re-installed; a new agent with no
+token still takes the command from the Enroll dialog. A request that is not
+Beacon's own text for its target is refused at claim.
+
 A checklist fills in while the host catches up: the command ran, the first
 sync pulled, a second pull arrived (so the schedule works), the agent answers
 over A2A, and its chat status was reported. `GET /api/agents/{id}/onboarding`
@@ -685,7 +695,8 @@ Cards live in the operational store, not in fleet YAML.
 - **Agents and MCP clients:** the MCP endpoint `/board/mcp` on Beacon
   itself, with the tools `board_list`, `board_card`, `card_create`,
   `card_update`, and `card_comment`, and the workflow tools
-  `workflow_create`, `workflow_list`, `workflow_get`, and `workflow_respond`
+  `workflow_create`, `workflow_list`, `workflow_get`, and `workflow_respond`,
+  plus `enroll_request` and `enroll_claim` for enrollment
   (decisions, reviews, and approvals attached to a card; the agent skill
   explains when to use them, and an agent may leave out `plan_revision` and
   `plan_hash` so that Beacon binds the request to its own text). It is served at the address agents

@@ -367,6 +367,36 @@ def authorize(*, request_id: int | None, capability: str, tier: int, actor: str,
     return request
 
 
+def claim_approved(request_id: int, *, actor: str, capability: str) -> dict:
+    """Claim a person-approved request for its own requester, with no browser
+    session at claim time (authorize() wants one for T4). Safe only for a
+    capability whose result goes to the requester and does nothing until a
+    person said yes: respond() already made that yes a human browser session,
+    and the target is what that person saw, so it is read from the request."""
+    actor = _validate_actor(actor)
+    with opstore.connect() as db:
+        _expire_due(db, time.time())
+        row = db.execute("SELECT * FROM workflow_requests WHERE id = ?", (request_id,)).fetchone()
+        if row is None:
+            raise WorkflowNotFound(f"workflow request {request_id} not found")
+        request = _decode(row)
+        if request["requester"] != actor:
+            raise UnauthorizedWorkflowAccess(f"{actor} cannot claim workflow request {request_id}")
+        if request["capability"] != capability or request["tier"] != 4 or request["eligible_responder"] != "human":
+            raise WorkflowError(f"workflow request {request_id} is not a person-approved {capability} request")
+        if request["state"] != "approved":
+            if request["state"] == "expired":
+                db.commit()
+            raise WorkflowError(f"workflow request {request_id} is {request['state']}, not approved")
+        claimed = db.execute("UPDATE workflow_requests SET state = 'claimed', updated_at = ? WHERE id = ? AND state = 'approved'",
+                             (time.time(), request_id))
+        if claimed.rowcount != 1:
+            raise WorkflowError(f"workflow request {request_id} was already claimed")
+        _event(db, request_id, actor, "state_changed", "approved", "claimed", {"capability": capability})
+        request["state"] = "claimed"
+    return request
+
+
 def mark_stale(request_id: int, actor: str, reason: str) -> None:
     with opstore.connect() as db:
         row = db.execute("SELECT state FROM workflow_requests WHERE id = ?", (request_id,)).fetchone()
