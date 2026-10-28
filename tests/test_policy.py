@@ -10,7 +10,7 @@ from backend.schemas import Agent, Host
 
 
 def _write(fleet, text):
-    (fleet / "policy.yaml").write_text(text)
+    policy.save(text, "test")
 
 
 def _agent(id_, *tags, network="tailnet"):
@@ -75,7 +75,7 @@ def test_adding_a_bot_is_one_tag(families):
 
 
 def test_no_policy_file_means_beacon_only(families):
-    (families / "policy.yaml").unlink()
+    store.delete_record(policy.KIND, policy.RECORD)
     assert not _can("a-1", "a-2") and not _can("coordinator", "a-1")
     assert mesh.may_call(mesh.BEACON_PEER, store.get_agent("a-1"))
     assert mesh.config("a-1")["outbound"] == []
@@ -136,10 +136,13 @@ def test_problems_catch_typos_and_empty_selectors(families):
     assert "agent 'b-1' has undeclared tag 'family-b'" in found
 
 
-def test_invalid_policy_files_are_rejected(families):
+def test_invalid_policies_are_rejected(families):
     for bad in ("rules:\n  - {from: [], to: [x]}\n", "rules:\n  - {from: ['Bad Name'], to: ['*']}\n",
                 "rules:\n  - {from: ['*'], to: ['*'], extra: 1}\n", "tags: ['Not Valid']\n"):
-        _write(families, bad)
+        with pytest.raises(ValueError):
+            policy.save(bad, "test")
+        # And one that got into the store some other way is refused on load, not trusted.
+        store.save_record(policy.KIND, policy.RECORD, bad)
         with pytest.raises(ValueError):
             policy.load()
 
@@ -158,9 +161,9 @@ def test_cli_prints_the_matrix_and_exits_1_on_problems(families, capsys):
     assert mesh.main(["policy"]) == 0
     out = capsys.readouterr().out
     assert "coordinator" in out and "yes" in out
-    (families / "policy.yaml").unlink()
+    store.delete_record(policy.KIND, policy.RECORD)
     assert mesh.main(["policy"]) == 1
-    assert "no fleet/policy.yaml" in capsys.readouterr().out
+    assert "no access policy is set" in capsys.readouterr().out
 
 
 def test_agent_tags_must_be_valid_names():

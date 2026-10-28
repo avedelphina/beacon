@@ -19,7 +19,6 @@ rules:
 
 @pytest.fixture
 def fleet3(fleet, monkeypatch):
-    monkeypatch.setattr(policy, "HISTORY_DIR", fleet / "policy-history")
     monkeypatch.setenv(mesh.SECRET_ENV, "test-mesh-secret")
     store.upsert_host(Host.model_validate({"id": "h1", "address": "10.0.0.1", "ssh": {"user": "u", "key": "/k"}}))
     for agent_id, tag in (("a-1", "family-a"), ("a-2", "family-a"), ("b-1", "family-b")):
@@ -72,9 +71,8 @@ def test_save_needs_confirmation_then_writes_with_history(client, fleet3):
     assert done["saved"] is True and done["hash"] == policy.text_hash(FAMILIES)
     assert policy.read_text() == FAMILIES  # comments and layout kept exactly
     assert policy.load().tags == ["family-a", "family-b"]  # the cache saw the change
-    kept = list((fleet3 / "policy-history").glob("*.yaml"))
-    assert len(kept) == 1 and kept[0].read_text() == ALLOW_ALL
-    assert not list(fleet3.glob(".policy-*.tmp"))  # the temp file is gone
+    saved, before = store.history(policy.KIND, policy.RECORD)  # newest first, with who made each
+    assert (saved["body"], saved["actor"]) == (FAMILIES, "beacon") and before["body"] == ALLOW_ALL
 
 
 def test_save_refuses_invalid_text_and_a_stale_base(client, fleet3):
@@ -82,7 +80,7 @@ def test_save_refuses_invalid_text_and_a_stale_base(client, fleet3):
     bad = client.put("/api/policy", json={"text": "rules: [", "base_hash": h, "confirm": True})
     assert bad.status_code == 422
 
-    (fleet3 / "policy.yaml").write_text(FAMILIES)  # someone else edited the file
+    policy.save(FAMILIES, "someone-else")  # someone else edited the policy
     stale = client.put("/api/policy", json={"text": ALLOW_ALL, "base_hash": h, "confirm": True})
     assert stale.status_code == 409 and policy.read_text() == FAMILIES
 
@@ -102,12 +100,10 @@ def test_the_mcp_token_cannot_change_the_policy_but_can_read_and_preview(fleet3,
 
 
 def test_history_keeps_only_the_newest(fleet3, monkeypatch):
-    monkeypatch.setattr(policy, "HISTORY_KEEP", 3)
-    # Names are "<second>-<author>"; distinct authors keep six saves in one second apart.
+    monkeypatch.setattr(store, "HISTORY_KEEP", 3)
     for i in range(6):
         policy.save(ALLOW_ALL + f"# edit {i}\n", f"user{i}")
-    kept = sorted(p.name.split("-", 1)[1] for p in (fleet3 / "policy-history").glob("*.yaml"))
-    assert kept == ["user3.yaml", "user4.yaml", "user5.yaml"]
+    assert [h["actor"] for h in store.history(policy.KIND, policy.RECORD)] == ["user5", "user4", "user3"]
 
 
 def test_saved_policy_changes_the_peer_lists(client, fleet3):

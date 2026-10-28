@@ -17,10 +17,12 @@ follows Keep a Changelog; update it when changing behavior.
   Key deps: `fastapi`, `uvicorn[standard]`, `pyyaml`, `httpx`, `pyjwt[crypto]`,
   `itsdangerous`, `mcp` (for the board's MCP endpoint). No `pyproject.toml`;
   dependencies live in `requirements.txt`.
-- **Source of truth**: plain YAML files under `fleet/` — `hosts.yaml` (SSH
-  targets), `agents/*.yaml` (one file per agent), `templates/*.yaml` (shared
-  config fragments), `cron_jobs/*.yaml`. No database. Real inventory files are
-  gitignored; only `hosts.yaml.example` is committed.
+- **Source of truth**: the fleet (hosts, agents, templates, cron jobs, the
+  access policy) lives in the SQLite store `state/beacon.db`, with a history of
+  every change (`fleet_history`). YAML under `fleet/` is only the import/export
+  form (`python -m backend.fleet import|export`); a store with no fleet imports
+  `fleet/` once on its first start. Real inventory files are gitignored; only
+  `hosts.yaml.example` is committed.
 - **Frontend**: `frontend/` — a single static page, vanilla HTML/CSS/JS, no
   build step, no framework.
 - **Transport**: the system `ssh` binary (`backend/ssh.py` is the only place
@@ -40,20 +42,22 @@ follows Keep a Changelog; update it when changing behavior.
 backend/
   app.py          FastAPI routes; confirm-gate and tier enforcement
   auth.py         Zitadel OIDC login (authorization code + PKCE) + auth/CSRF middleware
-  store.py        fleet/ YAML read/write (one file per record)
+  store.py        the fleet in the operational store: records + change history
+  fleet.py        YAML import/export, first-start import, `python -m backend.fleet`
   cron_store.py   cron job records
   scheduler.py    CLI cron dispatcher — no background scheduler in the app
   schemas.py      pydantic models: Host, Agent, CronJob, SSHConfig
   templates.py    config template load/validate/deep-merge under `desired`
   tiers.py        capability -> T0–T5 autonomy tier registry
   bus.py          agent bus: one A2A v1.0 SendMessage to an agent's reach.endpoint
-  policy.py       fleet/policy.yaml: tag rules (Tailscale-style) behind may_call;
-                  preview/save for the Policy tab (T4, history in fleet/policy-history/)
+  policy.py       the access policy (YAML text in the store): tag rules
+                  (Tailscale-style) behind may_call; preview/save for the Policy
+                  tab (T4, history in fleet_history)
   mailbox.py      relay + voicemail behind POST /a2a/{agent}; delivers on the
                   recipient's /mesh pull (no scheduler); slow answers come back
                   by A2A push to /a2a/{agent}/push/{id} (long work)
-  opstore.py      operational store: SQLite at state/beacon.db (runtime state,
-                  never fleet YAML)
+  opstore.py      operational store: SQLite at state/beacon.db (runtime state and
+                  the fleet itself; schema and migrations live here)
   skills/         skills Beacon hands every agent via the mesh config; the host
                   sync installs them (mesh.skills, hermes_mesh_sync.install_skills)
   board.py        fleet board: cards + history in the opstore; assignment
@@ -122,8 +126,8 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 - `pytest.ini` sets `testpaths = tests` and `pythonpath = .` so `import
   backend` resolves without installing the package.
 - `tests/conftest.py` provides the two fixtures every test relies on: `fleet`
-  (monkeypatches `store`/`cron_store` paths into a tmp dir, so tests never
-  touch the real `fleet/`) and `fake_ssh` (replaces the `ssh` module the
+  (points the store at a tmp dir, so tests never touch the real
+  `state/beacon.db` or `fleet/`) and `fake_ssh` (replaces the `ssh` module the
   driver calls with a recorder returning canned results — no real SSH, no
   real filesystem). New driver/store tests should use these fixtures rather
   than touching real hosts or paths.
@@ -149,11 +153,13 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
   `{"would_run": true, ...}` description instead of acting. T4/T5 additionally
   require a human browser session — MCP's bearer token cannot execute them.
   Register any new mutating capability in `CAPABILITY_TIERS` with a rationale.
-- **Live state is never stored in YAML.** `status()` and `config_diff()` poll
-  the host fresh; fleet records hold only intent (`desired`).
+- **Live state is never stored in the fleet records.** `status()` and
+  `config_diff()` poll the host fresh; fleet records hold only intent
+  (`desired`). Runtime facts (pulls, chat reports, mailbox) have their own
+  tables.
 - **Agent access policy is one rule**, `mesh.may_call(caller, target)`
-  (`fleet/policy.yaml` tag rules via `backend/policy.py`, plus `reach.callers`;
-  Beacon is always allowed; no policy file means Beacon only). Any new path by which one
+  (the stored policy's tag rules via `backend/policy.py`, plus `reach.callers`;
+  Beacon is always allowed; no policy means Beacon only). Any new path by which one
   agent reaches or hands work to another must check it, as direct calls,
   the mailbox and board assignment do.
 - **The host sync only touches what Beacon created** (`managed.json` beside
@@ -175,12 +181,13 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 
 ## Security considerations
 
-- **Never commit secrets or real inventory.** Gitignored: `.env`,
+- **Never commit secrets or real inventory.** `state/` (the database, with the
+  whole fleet in it) is gitignored too, and so is any exported fleet. Gitignored: `.env`,
   `fleet/hosts.yaml`, `fleet/agents/*.yaml`, `fleet/templates/*.yaml`,
   `fleet/cron_jobs/*.yaml`, `fleet/decommissioned/`, `tbot/data/`,
-  `tbot/storage/`. Fleet YAML stores `.env` key *names* only (`env_keys`) —
+  `tbot/storage/`. Fleet records store `.env` key *names* only (`env_keys`) —
   secret values never leave the host. A2A tokens are derived from one
-  Beacon env var, `BEACON_A2A_SECRET`, never stored in YAML or returned by
+  Beacon env var, `BEACON_A2A_SECRET`, never stored in the fleet or returned by
   the API — except `GET /mesh/{agent}`, which returns only that agent's
   config and accepts only its own derived pull token (no session, no MCP
   bearer). `mesh install` output contains a token: pipe it, don't keep it.
@@ -208,8 +215,7 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 
 ## Known limitations (don't "fix" silently — see ROADMAP.md)
 
-- Single writer: `fleet/*.yaml` has no locking.
 - Hermes is the only implemented driver.
-- No audit trail of who did what.
+- Audit trail is partial: fleet changes keep who made them (`fleet_history`); actions on hosts (deploy, push, restart) are not recorded yet.
 - Pull-based only: nothing polls or alerts on its own. (The mailbox delivers
   when an agent's own sync pulls, not on a Beacon timer.)

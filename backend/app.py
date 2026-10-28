@@ -6,14 +6,14 @@ import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, availability, board, bus, cron_store, mailbox, mesh, opstore, policy, scheduler, store, templates, workflow
+from . import auth, availability, board, bus, cron_store, fleet, mailbox, mesh, opstore, policy, scheduler, store, templates, workflow
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, CronJob, Host
@@ -27,6 +27,11 @@ class FixRequest(BaseModel):
 
 class TemplateApplyRequest(BaseModel):
     agent_ids: list[str]
+    confirm: bool = False
+
+
+class TemplateBody(BaseModel):
+    content: dict
     confirm: bool = False
 
 
@@ -54,22 +59,32 @@ class CallAgentRequest(BaseModel):
 
 logger = logging.getLogger("beacon")
 
-try:
-    _fleet_problems = policy.problems(policy.load(), store.list_agents())
-except Exception as exc:  # an invalid policy file must not stop Beacon from starting
-    _fleet_problems = [f"fleet/policy.yaml is invalid: {exc}"]
-for _problem in _fleet_problems:
-    logger.warning("access policy: %s", _problem)
 
 
 @contextlib.asynccontextmanager
 async def lifespan(_app):
+    fleet.bootstrap()  # a store with no fleet yet takes the YAML one, once
+    try:
+        problems = policy.problems(policy.load(), store.list_agents())
+    except Exception as exc:  # an invalid policy must not stop Beacon from starting
+        problems = [f"the access policy is invalid: {exc}"]
+    for problem in problems:
+        logger.warning("access policy: %s", problem)
     async with board_app.lifespan():
         yield
 
 
-VERSION = "0.23.1"
-app = FastAPI(title="Beacon", version=VERSION, lifespan=lifespan)
+VERSION = "0.24.0"
+
+
+async def _record_actor(request: Request) -> None:
+    """Who changes the fleet in this request, for its history. Async so that it
+    runs in the request's own context, which the route function then inherits."""
+    user = request.session.get("user") if "session" in request.scope else None
+    store.ACTOR.set((user or {}).get("email") or mesh.BEACON_PEER)
+
+
+app = FastAPI(title="Beacon", version=VERSION, lifespan=lifespan, dependencies=[Depends(_record_actor)])
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:
@@ -349,16 +364,16 @@ def preview_policy(body: PolicyText) -> dict:
 
 @app.put("/api/policy")
 def put_policy(body: PolicySave, request: Request):
-    """Replace fleet/policy.yaml with the edited text. A human browser session
-    only (T4), asks for confirmation first, refuses invalid text and a file
+    """Replace the access policy with the edited text. A human browser session
+    only (T4), asks for confirmation first, refuses invalid text and a policy
     that changed since the editor loaded it, and keeps the old version in
-    fleet/policy-history/."""
+    the fleet history."""
     _require_human_session(request, "set_policy")
     checked = policy.preview(body.text, store.list_agents())
     if checked["errors"]:
         raise HTTPException(422, "; ".join(checked["errors"]))
     if policy.text_hash(policy.read_text()) != body.base_hash:
-        raise HTTPException(409, "fleet/policy.yaml changed since you opened it; reload the editor and redo your edit")
+        raise HTTPException(409, "the access policy changed since you opened it; reload the editor and redo your edit")
     summary = (f"replace the access policy: {len(checked['added'])} call path(s) added, "
                f"{len(checked['removed'])} removed; restarts {', '.join(checked['restarts']) or 'no agents'}")
     if (gate := _confirm_gate("set_policy", body.confirm, summary)) is not None:
@@ -816,6 +831,27 @@ def get_template(name: str) -> dict:
     return {"name": name, "content": content, "used_by": _used_by(name, store.list_agents())}
 
 
+@app.put("/api/templates/{name}")
+def put_template(name: str, body: TemplateBody) -> dict:
+    templates.validate(name, body.content)  # before gating or writing anything
+    if (gate := _confirm_gate("set_template", body.confirm, f"save template {name!r}")) is not None:
+        return gate
+    templates.save_template(name, body.content)
+    return {"ok": True, "name": name, "content": body.content, "used_by": _used_by(name, store.list_agents())}
+
+
+@app.delete("/api/templates/{name}")
+def delete_template(name: str, confirm: bool = False) -> dict:
+    templates.load_template(name)  # 404 if missing
+    users = _used_by(name, store.list_agents())
+    if users:
+        raise HTTPException(409, f"template {name!r} is still used by: {', '.join(users)}")
+    if (gate := _confirm_gate("set_template", confirm, f"delete template {name!r}")) is not None:
+        return gate
+    templates.delete_template(name)
+    return {"ok": True}
+
+
 @app.post("/api/templates/{name}/apply")
 def apply_template(name: str, body: TemplateApplyRequest) -> dict:
     templates.load_template(name)  # validate before gating/writing anything
@@ -963,7 +999,7 @@ def decommission_agent(id_: str, body: DecommissionRequest, request: Request) ->
         # have no real confidence teardown happened, so leave the record be.
         if exit_code() == "0":
             store.archive_agent(id_)
-            yield "[beacon] record archived to fleet/decommissioned/\n"
+            yield "[beacon] record archived (kept as a decommissioned agent)\n"
         else:
             yield "[beacon] teardown didn't complete cleanly — record left in place, nothing archived\n"
 

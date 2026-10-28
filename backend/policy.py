@@ -1,6 +1,6 @@
 """Who may call whom: Tailscale-style rules over agent ids and tags.
 
-`fleet/policy.yaml` holds the rules; agents carry `tags` in their own record.
+The policy (YAML text, kept in the fleet store) holds the rules; agents carry `tags` in their own record.
 
     tags: [family-a, family-b]            # optional: declared, so a typo is an error
     rules:
@@ -13,7 +13,7 @@ A selector is an agent id, `tag:<name>` (`*` wildcards allowed in the name), or
 `*` for every agent. A call from X to Y is allowed when no `deny` rule matches
 and some `rules` entry does. Rules are one-way: `from` calls `to`. Beacon
 itself (operators, MCP clients) is always allowed and is not part of any rule.
-With no policy file nothing is allowed except Beacon, so "everyone may talk
+With no policy set nothing is allowed except Beacon, so "everyone may talk
 to everyone" has to be written down: `{from: ["*"], to: ["*"]}`.
 
 Replies are not governed here: an answer to a call that was allowed is always
@@ -22,11 +22,7 @@ allowed (backend/mailbox.py delivers late ones as Beacon).
 
 import fnmatch
 import hashlib
-import os
 import re
-import tempfile
-import time
-from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -34,10 +30,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from . import store
 from .schemas import ID_RE, Agent
 
-POLICY_FILE = store.FLEET_DIR / "policy.yaml"
-# Every saved-over version is kept here (gitignored), newest 50.
-HISTORY_DIR = store.FLEET_DIR / "policy-history"
-HISTORY_KEEP = 50
+# The policy is one record in the fleet store (kind "policy"): the YAML text as
+# written, so comments and layout survive. Every saved version stays in
+# fleet_history, with who saved it.
+KIND, RECORD = "policy", "policy"
 _SELECTOR_RE = re.compile(r"^(\*|tag:[a-z0-9*][a-z0-9*-]*|[a-z0-9][a-z0-9-]*)$")
 
 
@@ -77,20 +73,18 @@ class Policy(BaseModel):
         return v
 
 
-_cache: dict = {"key": None, "policy": None}
+_cache: dict = {"text": None, "policy": None}
 
 
 def load() -> Policy | None:
-    """The policy, or None when there is no file (Beacon-only). Cached by the
-    file's mtime and size, since every peer list and call consults it."""
-    path = Path(POLICY_FILE)
-    if not path.exists():
+    """The policy, or None when none is set (Beacon-only). Parsed again only
+    when the text changed, since every peer list and call consults it."""
+    text = store.find_record(KIND, RECORD)
+    if text is None:
         return None
-    stat = path.stat()
-    key = (str(path), stat.st_mtime_ns, stat.st_size)
-    if _cache["key"] != key:
-        _cache["policy"] = Policy.model_validate(yaml.safe_load(path.read_text()) or {})
-        _cache["key"] = key
+    if _cache["text"] != text:
+        _cache["policy"] = Policy.model_validate(yaml.safe_load(text) or {})
+        _cache["text"] = text
     return _cache["policy"]
 
 
@@ -120,7 +114,7 @@ def problems(policy: Policy | None, fleet: list[Agent]) -> list[str]:
     """What is probably a mistake, for `mesh policy` and the API: undeclared
     tags, selectors that match nothing, and a missing file."""
     if policy is None:
-        return ["no fleet/policy.yaml: only Beacon may call agents; "
+        return ["no access policy is set: only Beacon may call agents; "
                 'write {from: ["*"], to: ["*"]} to let every agent talk to every other'] if fleet else []
     found = []
     declared = set(policy.tags)
@@ -156,8 +150,7 @@ def matrix(policy: Policy | None, fleet: list[Agent]) -> dict[str, list[str]]:
 
 
 def read_text() -> str:
-    path = Path(POLICY_FILE)
-    return path.read_text() if path.exists() else ""
+    return store.find_record(KIND, RECORD) or ""
 
 
 def text_hash(text: str) -> str:
@@ -213,24 +206,8 @@ def preview(text: str, fleet: list[Agent]) -> dict:
 
 
 def save(text: str, author: str) -> None:
-    """Write `text` as the policy, keeping the version it replaces in
-    fleet/policy-history/. The text is written exactly as given, so comments
-    and layout survive. Atomic: a reader never sees half a file. Raises
-    ValueError if it doesn't parse."""
+    """Store `text` as the policy, exactly as given (comments and layout
+    survive), with `author` in the history. One transaction: a reader never
+    sees half of it. Raises ValueError if it doesn't parse."""
     parse(text)
-    path = Path(POLICY_FILE)
-    if path.exists():
-        history = Path(HISTORY_DIR)
-        history.mkdir(parents=True, exist_ok=True)
-        who = re.sub(r"[^a-z0-9]+", "-", author.lower()).strip("-") or "unknown"
-        (history / f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{who}.yaml").write_text(path.read_text())
-        for old in sorted(history.glob("*.yaml"))[:-HISTORY_KEEP]:
-            old.unlink()
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".policy-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as handle:
-            handle.write(text)
-        os.replace(tmp, path)
-    except BaseException:
-        os.unlink(tmp)
-        raise
+    store.save_record(KIND, RECORD, text, actor=author)

@@ -1,8 +1,8 @@
 """Shared fixtures.
 
 Two things every driver/store test needs and neither should ever touch for
-real: the filesystem (fleet/ YAML) and the network (ssh). `fleet` redirects
-store.py's file paths into a tmp dir; `fake_ssh` replaces the `ssh` module
+real: the fleet store (state/beacon.db) and the network (ssh). `fleet` points
+the store at a throwaway directory; `fake_ssh` replaces the `ssh` module
 backend/drivers/hermes.py calls through with something that records what it
 was asked to run and hands back a canned result — this is the "fake SSH
 target" the roadmap calls for, just simpler than a real sshd: what matters
@@ -32,6 +32,8 @@ from backend.ssh import SSHResult
 from backend import opstore as _opstore  # noqa: E402
 
 _opstore.STATE_DIR = Path(tempfile.mkdtemp(prefix="beacon-test-state-"))
+# And the YAML fleet that a first start imports must never be the real one.
+store.FLEET_DIR = Path(tempfile.mkdtemp(prefix="beacon-test-fleet-"))
 
 
 @pytest.fixture(autouse=True)
@@ -51,32 +53,16 @@ def _board_notices_run_inline(monkeypatch):
 
 @pytest.fixture
 def fleet(tmp_path, monkeypatch):
-    """Points backend.store and cron_store at an empty, throwaway fleet/
-    directory.
+    """An empty fleet in a throwaway store; returns the directory, which also
+    serves as the (empty) YAML fleet a first start would import.
     """
-    from backend import cron_store
+    from backend import opstore, policy
 
-    agents_dir = tmp_path / "agents"
-    agents_dir.mkdir()
-    templates_dir = tmp_path / "templates"
-    templates_dir.mkdir()
-    cron_dir = tmp_path / "cron_jobs"
-    cron_dir.mkdir()
-    monkeypatch.setattr(store, "HOSTS_FILE", tmp_path / "hosts.yaml")
-    monkeypatch.setattr(store, "AGENTS_DIR", agents_dir)
-    monkeypatch.setattr(store, "DECOMMISSIONED_DIR", tmp_path / "decommissioned")
-    monkeypatch.setattr(cron_store, "CRON_DIR", cron_dir)
-
-    from backend import opstore, policy, templates
-
-    monkeypatch.setattr(templates, "TEMPLATES_DIR", templates_dir)
-    # The operational store (mailbox, ...) is runtime state; keep it out of
-    # the real state/ dir too.
     monkeypatch.setattr(opstore, "STATE_DIR", tmp_path / "state")
-    # Tests start from "everyone may call everyone"; the default with no file
-    # is Beacon-only, and the policy tests delete this file to check that.
-    monkeypatch.setattr(policy, "POLICY_FILE", tmp_path / "policy.yaml")
-    (tmp_path / "policy.yaml").write_text('rules:\n  - {from: ["*"], to: ["*"]}\n')
+    monkeypatch.setattr(store, "FLEET_DIR", tmp_path / "fleet")
+    # Tests start from "everyone may call everyone"; the default with no
+    # policy is Beacon-only, and the policy tests delete it to check that.
+    policy.save('rules:\n  - {from: ["*"], to: ["*"]}\n', "test")
     return tmp_path
 
 

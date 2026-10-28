@@ -100,6 +100,30 @@ CREATE TABLE IF NOT EXISTS chat_exposure (
     reported_at REAL NOT NULL
 );
 
+-- The fleet itself (backend/store.py): one row per record.
+CREATE TABLE IF NOT EXISTS fleet_records (
+    kind        TEXT NOT NULL,     -- host | agent | decommissioned | cron | template | policy
+    id          TEXT NOT NULL,
+    body        TEXT NOT NULL,     -- JSON of the record; the policy: its YAML text as written
+    revision    INTEGER NOT NULL DEFAULT 1,
+    updated_at  REAL NOT NULL,
+    PRIMARY KEY (kind, id)
+);
+CREATE TABLE IF NOT EXISTS fleet_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL,
+    rid         TEXT NOT NULL,
+    action      TEXT NOT NULL,     -- set | delete | archive | import
+    body        TEXT,              -- what the record became; null: deleted
+    actor       TEXT NOT NULL,
+    at          REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS fleet_history_by_record ON fleet_history (kind, rid, id);
+CREATE TABLE IF NOT EXISTS fleet_meta (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS agent_seen (
     agent       TEXT PRIMARY KEY,
     last_pull   REAL NOT NULL      -- the agent's host sync last pulled /mesh/{agent}

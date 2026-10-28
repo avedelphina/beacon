@@ -2,8 +2,9 @@
 and the three HTTP routes (list, get, apply — including the confirm gate).
 """
 
+import json
+
 import pytest
-import yaml
 from fastapi.testclient import TestClient
 
 from backend import store, templates
@@ -12,7 +13,7 @@ from tests.conftest import make_agent, make_host
 
 
 def write_template(fleet, name: str, body: dict) -> None:
-    (fleet / "templates" / f"{name}.yaml").write_text(yaml.safe_dump(body))
+    store.save_record("template", name, json.dumps(body))
 
 
 # --- deep merge -----------------------------------------------------------

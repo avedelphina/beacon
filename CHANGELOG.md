@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-10-28
+
+### Changed
+
+- **The fleet lives in the database, not in YAML files.** Hosts, agents,
+  templates, cron jobs and the access policy are rows in `state/beacon.db`
+  (`fleet_records`), so a write is one transaction and nothing depends on a
+  `fleet/` directory that a deploy can replace with an old copy. Every change
+  is kept with who made it (`fleet_history`, the latest 100 per record; cron
+  runs excluded). Closes the "single writer, no locking" limitation.
+- **YAML is for import and export.** `python -m backend.fleet export [dir]`
+  writes the old `fleet/` layout; `import [dir]` merges one back, checking
+  every record first (`--skip-invalid` to import the valid ones). A store
+  with no fleet imports `fleet/` once, on its first start, and never reads the
+  directory again. Back up `state/` (or run `export` on a schedule).
+- The policy is stored as the text you wrote, comments included; its history
+  moves from `fleet/policy-history/` to the fleet history.
+
+### Added
+
+- `PUT /api/templates/{name}` and `DELETE /api/templates/{name}` (capability
+  `set_template`, T2): templates can now be created and changed through the
+  API. A template an agent still uses cannot be deleted.
+
 ## [0.23.1] — 2026-10-28
 
 ### Fixed

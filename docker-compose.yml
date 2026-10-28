@@ -38,8 +38,10 @@ services:
       # so OIDC must be configured before this leaves loopback.
       - "${BEACON_MESH_BIND:-127.0.0.1:18642}:8642"
     volumes:
+      # Only for `python -m backend.fleet import|export` and the one-time import on a
+      # store's first start; the fleet itself lives in ./state.
       - ./fleet:/app/fleet
-      # Operational store (backend/opstore.py): mailbox now, board next.
+      # Operational store (backend/opstore.py): the fleet itself, mailbox, board, workflows.
       - ./state:/app/state
       - ./ssh:/etc/beacon:ro
       - ./tbot/data:/tbot-data:ro

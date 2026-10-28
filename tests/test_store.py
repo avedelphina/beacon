@@ -78,7 +78,7 @@ def test_archive_agent_moves_record_out_of_live_fleet(fleet):
 
     with pytest.raises(store.NotFound):
         store.get_agent("a1")
-    assert (fleet / "decommissioned" / "a1.yaml").exists()
+    assert [a.id for a in store.list_decommissioned()] == ["a1"]
 
 
 def test_archive_missing_agent_raises(fleet):

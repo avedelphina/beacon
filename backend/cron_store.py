@@ -1,29 +1,23 @@
-from pathlib import Path
-
+from . import store
 from .schemas import CronJob
-from .store import FLEET_DIR, InvalidId, NotFound, check_id, dump, existing, list_dir, load  # noqa: F401 — re-exported
-
-CRON_DIR = FLEET_DIR / "cron_jobs"
-
-
-def _job_path(id_: str) -> Path:
-    return CRON_DIR / f"{id_}.yaml"
+from .store import InvalidId, NotFound, check_id  # noqa: F401 — re-exported
 
 
 def list_cron_jobs() -> list[CronJob]:
-    return list_dir(CRON_DIR, CronJob)
+    return store.list_of("cron", CronJob)
 
 
 def get_cron_job(id_: str) -> CronJob:
     check_id(id_)
-    return load(_job_path(id_), id_, CronJob)
+    return store.load("cron", id_, CronJob)
 
 
 def upsert_cron_job(job: CronJob) -> CronJob:
-    dump(_job_path(job.id), job)
+    check_id(job.id)
+    store.save_record("cron", job.id, store.encode(job))
     return job
 
 
 def delete_cron_job(id_: str) -> None:
     check_id(id_)
-    existing(_job_path(id_), id_).unlink()
+    store.delete_record("cron", id_)
