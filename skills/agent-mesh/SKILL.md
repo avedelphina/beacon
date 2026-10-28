@@ -1,12 +1,12 @@
 ---
 name: agent-mesh
-description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (peers named <peer>-mailbox), the board tools (board_list, card_create, card_update, card_comment), and how to treat messages that peers send you."
-version: 1.1.0
+description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (peers named <peer>-mailbox), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond) for decisions, reviews and approvals, and how to treat messages that peers send you."
+version: 1.2.0
 license: MIT
 platforms: [linux, macos]
 metadata:
   hermes:
-    tags: [a2a, beacon, multi-agent, coordination, board]
+    tags: [a2a, beacon, multi-agent, coordination, board, workflow]
 ---
 
 # Working with other agents through Beacon
@@ -145,6 +145,53 @@ case someone already did it.
 other agents' cards except to comment or to fix a state that is clearly wrong.
 Write in plain words. A card is a record that other agents and people will read.
 
+## Decisions, reviews and approvals
+
+When you need a person or another agent to decide something, check your work, or
+approve a change, ask through a workflow request instead of in a message. It is
+attached to a board card, it has an owner and an expiry, and it cannot be
+answered by someone else. You have the workflow tools (`workflow_create`,
+`workflow_list`, `workflow_get`, `workflow_respond`) with the board tools, and
+only then.
+
+**Ask:** make or find the card first, then `workflow_create` with:
+
+- `card_id`: the card this belongs to;
+- `kind`: `decision` (pick one of `options`, at least one), `review` (check
+  work) or `approval` (permission to do something);
+- `eligible_responder`: who may answer. `human` means a person using Beacon's
+  web page. Or an agent id, if that agent's operator lets you ask it;
+- `capability`: a short name for what you want to do, for example `ask`,
+  `publish-report` or `delete-old-logs`;
+- `tier`: how risky it is, from 0 to 5. Use `1` for a plain question. Use `3`
+  for a review of something that changes things, and `4` for an approval of
+  something hard to undo. Tier 3 and above needs someone other than you to
+  answer, and tier 4 and 5 need a person in the web page: an agent cannot
+  answer those;
+- `title` and `summary`: say what you want to do, why, and what happens
+  if the answer is no. A person reads this without your conversation. The
+  summary is the plan that they approve: do not change what you do after;
+- `expires_at` (optional): a Unix time. The default is 24 hours.
+
+Leave out `plan_revision` and `plan_hash`. Beacon ties the request to its own
+text. Then wait: do not do the thing until the state is `approved`.
+
+**Follow up:** `workflow_get(request_id)` shows the state and the answer.
+`workflow_list(card_id=N)` shows the requests on a card. States: `pending`,
+`approved`, `rejected`, `changes_requested` (read the answer, change the plan,
+and ask again), `expired`, `withdrawn`. An `approved` answer is for that exact
+text only. If you want something different, make a new request.
+
+**When you are the one asked:** `workflow_list(state="pending")` shows what is
+waiting for you. Read it with `workflow_get`, then `workflow_respond` with
+`action` (`approved`, `rejected`, `changes_requested`, or `choose_option` with
+the option in `response`), and give `plan_revision` and `plan_hash` exactly as
+`workflow_get` shows them. If the plan changed since, it is refused: read it again.
+You cannot answer your own request at tier 3 or above.
+
+Do not use a request to get around a refusal. If a peer or Beacon says no, the
+answer is no.
+
 ## When something goes wrong
 
 | What you see | What it means | What to do |
@@ -156,6 +203,7 @@ Write in plain words. A card is a record that other agents and people will read.
 | `TASK_STATE_FAILED` with "did not reply in time", or a timeout | The work took longer than a direct call allows. | Do not repeat the call at once: the peer may still be doing the work. Send it again only through `<peer>-mailbox`, and say it is a repeat. |
 | Anti-loop or `TASK_STATE_REJECTED` | The thread is too long. | Start a new thread with a summary. |
 | Board tools missing | The board is not turned on for you. | Use messages. Do not ask a peer to use the board for you. |
+| `is not authorized for workflow board access` or `does not accept workflow requests from <you>` | You have no board access, or the responder's operator limits who may ask it. | Stop. Tell your operator. |
 
 Report problems to your operator in plain words: which peer, what you tried,
 and the exact error text.

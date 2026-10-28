@@ -190,3 +190,25 @@ def test_sync_wires_the_board_server_and_restarts_once(fleet_agents, tmp_path, m
     assert json.loads(disabled[0][-1])["enabled"] is False
     assert "BEACON_BOARD_TOKEN" not in env.read_text()
     assert calls.count(["RESTART"]) == 1
+
+
+def test_agent_asks_a_person_without_inventing_a_plan_hash(fleet_agents):
+    from backend import workflow
+
+    with TestClient(app) as c:
+        token = mesh.token("alpha", mesh.BEACON_PEER)
+        card = _tool(c, "card_create", {"title": "Clean up logs"}, token)
+        ask = {"card_id": card["id"], "kind": "decision", "eligible_responder": "human", "capability": "ask", "tier": 1,
+               "title": "Which logs?", "summary": "Delete logs older than 30 days, or 90?", "options": ["30", "90"]}
+        request = _tool(c, "workflow_create", ask, token)
+        # Beacon bound the request to its own text, so a response must name that plan.
+        expected = workflow.plan_binding({"capability": "ask", "tier": 1, "title": "Which logs?",
+                                          "summary": ask["summary"], "options": ["30", "90"], "target": {}})
+        assert (request["plan_revision"], request["plan_hash"]) == (expected["plan_revision"], expected["plan_hash"])
+        assert request["requester"] == "alpha" and request["state"] == "pending"
+
+        # Half a binding is a mistake, not a default.
+        _mcp(c, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                               "clientInfo": {"name": "test", "version": "0"}}, token)
+        half = _mcp(c, "tools/call", {"name": "workflow_create", "arguments": {**ask, "plan_hash": "abc"}}, token, req_id=3)
+        assert half.json()["result"]["isError"] is True

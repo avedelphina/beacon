@@ -622,7 +622,11 @@ Cards live in the operational store, not in fleet YAML.
   logged-in person is recorded by email.
 - **Agents and MCP clients:** the MCP endpoint `/board/mcp` on Beacon
   itself, with the tools `board_list`, `board_card`, `card_create`,
-  `card_update`, and `card_comment`. It is served at the address agents
+  `card_update`, and `card_comment`, and the workflow tools
+  `workflow_create`, `workflow_list`, `workflow_get`, and `workflow_respond`
+  (decisions, reviews, and approvals attached to a card; the agent skill
+  explains when to use them, and an agent may leave out `plan_revision` and
+  `plan_hash` so that Beacon binds the request to its own text). It is served at the address agents
   already reach for their mesh config. An agent authenticates with its own
   pull token and is recorded under its own name. The MCP bearer is
   recorded as `beacon`. The endpoint has board tools only; fleet operations

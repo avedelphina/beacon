@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.23.1] — 2026-10-28
+
+### Fixed
+
+- **Agents did not know they had workflow tools.** The `agent-mesh` skill
+  (1.2.0) listed only the board tools. It now explains decisions, reviews, and
+  approvals: when to ask, what each field means, which tiers need a person,
+  and how to answer a request. Hosts receive it on their next sync, with no
+  restart.
+- **`workflow_create` no longer asks an agent to invent a SHA-256.**
+  `plan_revision` and `plan_hash` are optional on the agent tool. Left out,
+  Beacon binds the request to its own fields (capability, tier, title,
+  summary, options, target), so a response must name that exact plan. Giving
+  only one of the two is refused.
+
 ## [0.23.0] — 2026-10-26
 
 ### Changed
