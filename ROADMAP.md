@@ -20,16 +20,18 @@ changing the core operating model.
 
 Beacon observes three related states:
 
-1. **Desired state** — what the checked-in fleet configuration declares.
+1. **Desired state** — what the fleet records declare.
 2. **Observed state** — what a host currently reports when Beacon polls it.
 3. **Runtime state** — what service, gateway, process, or agent is actually
    running and using.
 
 These states must not be collapsed into one file or one status value.
 
-- Git/YAML is the declarative source of truth.
+- The fleet store is the declarative source of truth. Since 0.24.0 it is
+  SQLite with a history of every change; YAML import and export give Git
+  review, backups, and a way to move a fleet between instances.
 - Beacon's operational store records observations, actions, approvals, and
-  evidence; it must not rewrite desired YAML with runtime churn.
+  evidence; it must not rewrite desired records with runtime churn.
 - The host remains authoritative for local runtime facts.
 - Borg or another backup system remains authoritative for recoverable data.
 - Beacon verifies and links evidence from those systems; it does not replace
@@ -50,9 +52,9 @@ arbitrary remote shell with a dashboard attached.
 
 Beacon 0.10.0 already provides the right starting shape:
 
-- Git-diffable YAML inventory in `fleet/hosts.yaml`,
-  `fleet/agents/*.yaml`, `fleet/templates/*.yaml`, and
-  `fleet/cron_jobs/*.yaml`.
+- A fleet store (hosts, agents, templates, cron jobs, the access policy) in
+  SQLite, with change history, and YAML import and export in the old
+  `fleet/` layout.
 - A FastAPI backend and static frontend with no required hosted service.
 - A driver seam in `backend/drivers/`; Hermes is the first driver, not the
   only permitted driver.
@@ -74,7 +76,7 @@ The current gaps are equally important:
 - Observations are polled on demand and are not durable.
 - Action output is mostly streamed and then lost.
 - There is no durable action ledger, approval record, or evidence chain.
-- Cron runtime fields are mixed into Git-backed declarative YAML.
+- Cron runtime fields (last run) are still stored in the declarative job record, though not in its history.
 - `confirm=true` is not yet a complete approval workflow.
 - Configuration ownership is not expressed per file or YAML path.
 - Backup status and restore readiness are not first-class facts.
@@ -254,8 +256,9 @@ Related foundation work, in Horizon 0:
 
 - Preserve and review any dirty working-tree changes before merging or
   discarding them. Never let a Beacon update overwrite local fleet edits.
-- Add concurrency protection for `fleet/*.yaml` and define how Git changes,
-  UI changes, and scheduled actions interact.
+- Concurrency protection for the fleet (delivered in 0.24.0: it is in the
+  store, so a write is one transaction). Still open: how a Git change to an
+  exported fleet reaches the store, which is `import`, by hand.
 - Keep the existing Hermes schema guardrail and expand it only from verified
   upstream schemas.
 - Make SSH configuration paths portable between standalone and container
@@ -264,11 +267,11 @@ Related foundation work, in Horizon 0:
   path separately from the Teleport path.
 - Keep the API loopback-only or authenticated by default in governance
   deployments. Open unauthenticated mode is for local development only.
-- Add a documented backup of Beacon's own repository, `fleet/`, and secrets
-  metadata before the first remote reconciliation.
+- Add a documented backup of Beacon's own repository, `state/` (the fleet),
+  and secrets metadata before the first remote reconciliation.
 
 **Acceptance:** a fresh standalone install can inventory a test host, produce a
-config diff, and recover its local fleet definition from Git without touching
+config diff, and recover its local fleet definition from an export without touching
 a production agent.
 
 ## Horizon 1 — Make observation first-class
@@ -437,7 +440,7 @@ and explain whether a result came from an event, a poll, or stale evidence.
 
 **Goal:** Git remains reviewable while runtime history becomes queryable.
 
-Keep these in Git/YAML:
+Keep these in the fleet store (exported to YAML for Git):
 
 - host and agent inventory;
 - version/channel pins;
@@ -607,7 +610,7 @@ action allowlist, and every target has an action result plus evidence.
 
 Standalone Beacon should support:
 
-- local YAML+Git as the desired-state store;
+- the local fleet store as the desired-state store, with YAML export for Git;
 - ordinary SSH keys and known-hosts;
 - local cron/launchd/Kubernetes invocation;
 - local auth or one-user operator mode bound to loopback;

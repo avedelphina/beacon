@@ -79,6 +79,12 @@ CAPABILITY_TIERS: dict[str, tuple[Tier, str]] = {
         "Reversible by removing the name; the config it implies still passes through "
         "push_config's own T3 gate before it reaches a host.",
     ),
+    "set_template": (
+        Tier.T2,
+        "Saves or deletes a template — a record in the fleet store, touching no host. "
+        "Reversible from the history; what it implies still passes through push_config's "
+        "own T3 gate before it reaches a host.",
+    ),
     "set_policy": (
         Tier.T4,
         "Changes who may call whom across the whole fleet, and restarts every agent whose "

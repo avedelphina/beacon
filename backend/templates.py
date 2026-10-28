@@ -1,4 +1,4 @@
-"""Config templates — a fleet/templates/*.yaml fragment applied to many
+"""Config templates — a fragment applied to many
 agents at once, so "every EU relay runs this model stack" is declared in one
 place instead of copied into every agent file.
 
@@ -10,38 +10,29 @@ install_mode is a good way to break several installs at once.
 The merge is read-only. `Agent.templates` lists the fragments; `resolve()`
 deep-merges them in order and then the agent's own `desired` on top (the
 agent always wins). The expanded result is never written back to the agent
-file — round-tripping that through GET/PUT would bake the template in
+record — round-tripping that through GET/PUT would bake the template in
 permanently.
 """
 
-from pathlib import Path
+import json
 
-import yaml
-
+from . import store
 from .schemas import ID_RE as NAME_RE, Agent
-from .store import FLEET_DIR, NotFound
+from .store import NotFound
 
-TEMPLATES_DIR = FLEET_DIR / "templates"
 ALLOWED_KEYS = {"config", "env_keys"}
 
 
-def _path(name: str) -> Path:
+def check_name(name: str) -> None:
     if not NAME_RE.match(name):
         raise ValueError(f"template name {name!r} must match {NAME_RE.pattern}")
-    return TEMPLATES_DIR / f"{name}.yaml"
 
 
-def list_templates() -> list[str]:
-    if not TEMPLATES_DIR.exists():
-        return []
-    return sorted(p.stem for p in TEMPLATES_DIR.glob("*.yaml"))
-
-
-def load_template(name: str) -> dict:
-    path = _path(name)
-    if not path.exists():
-        raise NotFound(f"template {name!r}")
-    data = yaml.safe_load(path.read_text()) or {}
+def validate(name: str, data: object) -> dict:
+    """The template's content, or ValueError saying what is wrong with it."""
+    check_name(name)
+    if data is None:
+        data = {}
     if not isinstance(data, dict):
         raise ValueError(f"template {name!r} must be a mapping, got {type(data).__name__}")
     extra = set(data) - ALLOWED_KEYS
@@ -50,6 +41,32 @@ def load_template(name: str) -> dict:
             f"template {name!r} has unsupported keys {sorted(extra)} — only {sorted(ALLOWED_KEYS)} are allowed"
         )
     return data
+
+
+def list_templates() -> list[str]:
+    return sorted(store.records("template"))
+
+
+def load_template(name: str) -> dict:
+    check_name(name)
+    body = store.find_record("template", name)
+    if body is None:
+        raise NotFound(f"template {name!r}")
+    return validate(name, json.loads(body))
+
+
+def save_template(name: str, content: object) -> dict:
+    data = validate(name, content)
+    store.save_record("template", name, json.dumps(data))
+    return data
+
+
+def delete_template(name: str) -> None:
+    check_name(name)
+    try:
+        store.delete_record("template", name)
+    except NotFound:
+        raise NotFound(f"template {name!r}") from None
 
 
 def _deep_merge(base: dict, over: dict) -> dict:

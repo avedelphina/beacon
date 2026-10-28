@@ -10,10 +10,11 @@ only one it's meant to ever support.
 
 ## How it's built
 
-- **Source of truth**: plain YAML files under `fleet/` — `hosts.yaml` (SSH
-  targets) and `agents/*.yaml` (one file per agent). Git-diffable, hand-editable,
-  no database.
-- **Backend**: FastAPI ([backend/](backend/)), reads/writes that YAML and
+- **Source of truth**: the fleet (hosts, agents, templates, cron jobs, the
+  access policy) lives in Beacon's SQLite store, `state/beacon.db`, with a
+  history of every change and who made it. YAML is how it goes in and out:
+  `python -m backend.fleet import|export` (see [Fleet storage](#fleet-storage)).
+- **Backend**: FastAPI ([backend/](backend/)), reads/writes that store and
   runs everything else over SSH.
 - **Drivers**: agent-type-specific logic lives behind a small module
   interface ([backend/drivers/hermes.py](backend/drivers/hermes.py)) — `status`,
@@ -55,8 +56,8 @@ docker compose up -d --build
 ```
 
 Two services: `tbot` (renews the Machine ID identity into `./tbot/data`)
-and `beacon` (reads it). `fleet/` is bind-mounted too, so your inventory
-persists across rebuilds and is editable from the host. See
+and `beacon` (reads it). `state/` is bind-mounted too, so your fleet
+persists across rebuilds; back it up (see [Fleet storage](#fleet-storage)). See
 [Teleport / tbot](#teleport--tbot) for the details.
 
 Copy `.env.example` to `.env` and fill it in to require login — see
@@ -64,6 +65,35 @@ Copy `.env.example` to `.env` and fill it in to require login — see
 same as local dev.
 
 ## Data model
+
+### Fleet storage
+
+The fleet runs from `state/beacon.db`, one row per record. A write is one
+transaction, so two people editing at once cannot lose each other's changes,
+and each change is kept with who made it (the latest 100 per record; cron
+job runs are not kept). Nothing reads YAML while Beacon runs.
+
+YAML is for moving the fleet:
+
+```bash
+python -m backend.fleet export fleet     # write the store out as YAML, for Git or a backup
+python -m backend.fleet import fleet     # merge a YAML fleet into the store
+```
+
+The layout is the one in the sections below (`hosts.yaml`, `agents/`,
+`templates/`, `cron_jobs/`, `decommissioned/`, `policy.yaml`), so the two
+directions undo each other. Import checks every record first and changes
+nothing if any is invalid (`--skip-invalid` imports the valid ones); a record
+with the same id is replaced, and no other record is touched. In Docker, run
+them with `docker compose exec beacon python -m backend.fleet ...`.
+
+**First start.** A store with no fleet imports `fleet/` by itself, once. After
+that, Beacon never reads the directory again, so an old copy of `fleet/` that
+comes back with a deploy cannot put old records back. The store file is now the
+thing to back up and to keep from being replaced by an old copy: `export` on a
+schedule gives you a copy in a form you can diff.
+
+The sections below show each record as YAML, which is its exported form.
 
 ### `fleet/hosts.yaml`
 
@@ -405,11 +435,11 @@ supports client certificates.
 
 ### Access policy
 
-Who may call whom is decided by one file, `fleet/policy.yaml`, written in
-the style of Tailscale's ACLs. Agents carry **tags** in their own record, and
-rules connect agents and tags. The file is plain YAML, so it is reviewed in
-Git like the rest of the fleet. `fleet/policy.yaml.example` has a starting
-point.
+Who may call whom is decided by one policy (exported as `fleet/policy.yaml`),
+written in the style of Tailscale's ACLs. Agents carry **tags** in their own
+record, and rules connect agents and tags. The policy is stored as the YAML
+text you wrote, comments and layout included. `fleet/policy.yaml.example` has
+a starting point.
 
 ```yaml
 # fleet/policy.yaml
@@ -432,7 +462,7 @@ tags: [family-a]       # adding another bot to a family is this one line
 - **Rules are one-way:** `from` may call `to`. Add a rule the other way if
   both should be able to start a conversation.
 - **Allowed means** no `deny` rule matches and some `rules` entry does.
-- **No file means Beacon only.** Without `fleet/policy.yaml`, no agent may
+- **No policy means Beacon only.** Without one, no agent may
   call another. To let everyone talk to everyone, write it down:
   `rules: [{from: ["*"], to: ["*"]}]`.
 - **Beacon itself** (operators and MCP clients) is always allowed and is
@@ -492,11 +522,11 @@ session can save, but the MCP token cannot, so no automated caller can widen
 its own reach. MCP clients may read the policy and preview a change
 (`get_policy`, `preview_policy`).
 
-- A save is refused if the text is invalid (HTTP 422), or if the file changed
+- A save is refused if the text is invalid (HTTP 422), or if the policy changed
   since the editor loaded it (HTTP 409), so nobody overwrites another edit.
-- The version a save replaces is kept in `fleet/policy-history/`, named with
-  the time and who saved it (the newest 50). Restore one by pasting it into
-  the editor.
+- Every saved version is kept with the time and who saved it (the newest 100;
+  `store.history("policy", "policy")`). Restore one by pasting it into the
+  editor.
 - Beacon is always allowed, so no policy can lock the operators out.
 - The agent form has a **Tags** field. It also keeps an agent's `reach` and
   any other field it doesn't show when you save (see CHANGELOG).
@@ -595,7 +625,8 @@ shown on the card.
 
 The messages live in the operational store, `state/beacon.db` (SQLite;
 `BEACON_STATE_DIR` changes the directory). In Docker it is the `./state`
-volume. It is runtime state: never commit it, and back it up like `fleet/`.
+volume. It holds the fleet as well as runtime state: never commit it, and back
+it up (`python -m backend.fleet export` gives a copy as YAML).
 
 **Moving Beacon.** Each pulled config includes `"beacon"`: the URL that
 the agent's next sync should call. To move Beacon, run the new instance
@@ -710,6 +741,8 @@ nothing is rewritten when nothing changed.
 
 A config fragment applied to many agents at once — "every EU relay runs this
 model stack" declared in one place instead of copied into every agent file.
+Create and change them with `PUT /api/templates/{name}` (T2) or by importing
+YAML; a template that an agent still uses cannot be deleted.
 
 ### `fleet/cron_jobs/<id>.yaml`
 
@@ -820,13 +853,13 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 | **Reconcile** | Diagnoses drift patterns found in the wild — an orphaned unit (profile dir deleted, unit left behind), a unit stuck `failed`, installed-but-not-started, linger disabled. Dry run by default; each finding names a `fix` to apply individually. | `GET` (dry run) / `POST` (apply one fix) `/api/agents/{id}/reconcile` |
 | **Config** | Compares `desired.config`/`desired.env_keys` against the live `config.yaml` and `.env` **key names only** (secret values never leave the host). Push validates every declared path against the known Hermes config schema first — an unknown subkey of a known section is refused (the CLI would write it silently), unknown top-level keys push with a warning — then runs `hermes config set` per declared key and restarts the gateway if it's active. Both sides see the template-merged `desired`. | `GET`/`POST /api/agents/{id}/config-diff` |
 | **Availability** | Whether the agent answers over A2A, not over SSH: Beacon GETs the agent's `/health` (no token), and also records when the agent's host last pulled its mesh config. `online` = answered; `sync-only` = Beacon cannot reach it but its host synced in the last 15 minutes; `offline` = neither; `no-a2a` = no `reach` block. SSH status (the systemd unit) is separate and shown in Inspect. | `GET /api/availability` |
-| **Templates** | A `fleet/templates/*.yaml` config fragment (`config` + `env_keys` only) merged under many agents' `desired` at once — model stacks, fallbacks, and auxiliary-task models declared once. Apply adds a template name to a batch of agent records. | `GET /api/templates`, `GET /api/templates/{name}`, `POST /api/templates/{name}/apply` |
+| **Templates** | A config fragment (`config` + `env_keys` only) merged under many agents' `desired` at once — model stacks, fallbacks, and auxiliary-task models declared once. Apply adds a template name to a batch of agent records; save and delete are T2. | `GET /api/templates`, `GET`/`PUT`/`DELETE /api/templates/{name}`, `POST /api/templates/{name}/apply` |
 | **Plugins** | Lists installed plugins with version, enabled/disabled state, and source. Updating one (git pull) can trip Hermes's own security scan and auto-disable it — that's surfaced as a `disabled_by_scan` flag rather than left buried in scan-report text, since an auto-disabled plugin can mean a messaging platform silently goes offline. | `GET /api/agents/{id}/plugins`, `POST /api/agents/{id}/plugins/{name}/update` |
 | **Restart** | Plain `gateway restart` — the everyday operate action, works regardless of current state. Distinct from Reconcile's problem-triggered fixes. | `POST /api/agents/{id}/restart` |
 | **Restart agent** | Hard restart of the whole agent. With `desired.container` set, `docker restart -t 120 <container>` (falls back to `sudo -n`); otherwise `systemctl --user restart` on the gateway unit, with no graceful drain. Use when Restart gateway can't recover it (s6 half-down, wedged gateway). | `POST /api/agents/{id}/restart-agent` |
 | **Update** | `hermes update` on the shared code checkout — affects every profile on that install, not just one agent's record of it. Streamed. | `POST /api/agents/{id}/update` |
-| **Decommission** | Stops and uninstalls the gateway, optionally purges the profile's data (refused for the default profile — that directory is shared with every other profile on the install) and optionally deletes the OS account. Moves the YAML record to `fleet/decommissioned/` rather than deleting it. | `POST /api/agents/{id}/decommission` (streamed) |
-| **Policy** | Edits `fleet/policy.yaml`, who may call whom (see [Access policy](#access-policy)). Check first, then save. Tier T4: a human browser session only, never the MCP token. | `POST /api/policy/preview`, `PUT /api/policy` |
+| **Decommission** | Stops and uninstalls the gateway, optionally purges the profile's data (refused for the default profile — that directory is shared with every other profile on the install) and optionally deletes the OS account. Keeps the record as a decommissioned agent rather than deleting it. | `POST /api/agents/{id}/decommission` (streamed) |
+| **Policy** | Edits the access policy, who may call whom (see [Access policy](#access-policy)). Check first, then save. Tier T4: a human browser session only, never the MCP token. | `POST /api/policy/preview`, `PUT /api/policy` |
 
 ## Autonomy tiers
 
@@ -1020,13 +1053,11 @@ tiers](#autonomy-tiers).
 
 Cron jobs are an exception: they do not use the `confirm=true` gate because
 they are pre-authorized fleet records, persisted ahead of time and reviewed
-like any other YAML. They are limited to a fixed set of v1 actions
+like any other fleet record. They are limited to a fixed set of v1 actions
 (`restart`, `status`, `push_config`) to keep the blast radius bounded.
 
 ## Limitations
 
-- **Single writer.** `fleet/*.yaml` has no locking — fine for one operator,
-  not safe for two people editing the fleet at once.
 - **One driver.** Hermes is the only agent type implemented. The driver
   interface is designed to support others; nothing has exercised that yet.
 - **Workflow governance is scoped to the web-first request layer.** Typed
@@ -1080,7 +1111,7 @@ curl -X PUT http://localhost:8642/api/cron-jobs/nightly-restart \
   }'
 ```
 
-A job's last-run status and output are persisted back to its YAML file, so
+A job's last-run status and output are persisted back to its record, so
 `GET /api/cron-jobs/{id}` and the scheduler list show history.
 
 ### Deployment hook examples
@@ -1143,8 +1174,8 @@ WantedBy=timers.target
 .venv/bin/pytest -q
 ```
 
-No real SSH, no real filesystem outside a tmp dir: `tests/conftest.py`
-redirects `fleet/` into a throwaway directory per test and swaps
+No real SSH, no real store: `tests/conftest.py`
+points the store at a throwaway directory per test and swaps
 `backend/drivers/hermes.py`'s `ssh` module for a fake that records the
 command it was asked to run and hands back a canned result. That's enough
 to catch the class of bug this project has actually shipped — a timeout too
@@ -1159,18 +1190,15 @@ backend/
   app.py          FastAPI routes
   auth.py         Zitadel OIDC login (PKCE) + the auth-gating middleware
   tiers.py        capability -> autonomy tier registry
-  store.py        fleet/ YAML read/write
+  store.py        the fleet in the operational store (hosts, agents, templates, cron, policy) + history
+  fleet.py        YAML import/export and the first-start import (`python -m backend.fleet`)
   ssh.py          the one place that shells out to `ssh`
   schemas.py      Host/Agent pydantic models
   templates.py    config templates: load, validate, deep-merge under `desired`
   drivers/
     hermes.py     the only driver so far
-fleet/
+fleet/            the YAML form of the fleet, for import and export (real files gitignored)
   hosts.yaml.example
-  agents/         one YAML file per agent (gitignored — real inventory)
-  templates/      config fragments merged under many agents (gitignored)
-  cron_jobs/      scheduled Beacon actions (gitignored)
-  decommissioned/ archived agent records (gitignored)
 frontend/
   index.html, app.js, styles.css   no build step
 tbot/
