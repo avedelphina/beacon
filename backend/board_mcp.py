@@ -118,11 +118,20 @@ def build() -> MCPServer:
     @server.tool()
     def workflow_create(ctx: Context, card_id: int, kind: str, eligible_responder: str,
                         capability: str, tier: int, title: str, summary: str,
-                        plan_revision: str, plan_hash: str, options: list[str] | None = None,
-                        target: dict | None = None, expires_at: float | None = None) -> dict:
-        """Create a pending typed workflow request attached to a board card."""
+                        options: list[str] | None = None, target: dict | None = None,
+                        expires_at: float | None = None, plan_revision: str | None = None,
+                        plan_hash: str | None = None) -> dict:
+        """Create a pending typed workflow request attached to a board card. Leave out
+        plan_revision and plan_hash and Beacon binds the request to its own text: a
+        response then has to name that exact plan, and an edited plan cannot be approved."""
         workflow.validate_kind_for_tier(kind, tier)
         workflow.validate_participants(_author(ctx), eligible_responder)
+        if (plan_revision is None) != (plan_hash is None):
+            raise workflow.WorkflowError("give both plan_revision and plan_hash, or neither")
+        if plan_revision is None:
+            plan_revision, plan_hash = workflow.plan_binding(
+                {"capability": capability, "tier": tier, "title": title, "summary": summary,
+                 "options": options or [], "target": target or {}}).values()
         return workflow.create(
             card_id=card_id, kind=kind, requester=_author(ctx), eligible_responder=eligible_responder,
             capability=capability, tier=tier, title=title, summary=summary, options=options,
