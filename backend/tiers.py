@@ -85,6 +85,14 @@ CAPABILITY_TIERS: dict[str, tuple[Tier, str]] = {
         "Reversible from the history; what it implies still passes through push_config's "
         "own T3 gate before it reaches a host.",
     ),
+    "enroll_agent": (
+        Tier.T4,
+        "Mints a single-use code that makes Beacon hand the agent's pull token (inside its "
+        "install script) to whoever presents it within 15 minutes. That is the agent's "
+        "identity for the mesh, so the LLM-facing MCP token must not be able to mint one. "
+        "The board's enroll_request/enroll_claim reach the same code only through an approval "
+        "a person gave in a browser session.",
+    ),
     "set_policy": (
         Tier.T4,
         "Changes who may call whom across the whole fleet, and restarts every agent whose "

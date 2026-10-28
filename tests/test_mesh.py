@@ -187,8 +187,13 @@ def test_install_script_bootstraps_without_scheduling(two_agents, host, monkeypa
     assert "-p alpha tools enable a2a --platform a2a" in argv
     assert '"token": "${env:A2A_TOKEN_BRAVO}"' in argv
     assert mesh.token("alpha", "bravo") not in argv and mesh.token("alpha", "beacon") not in argv
-    # It prints the schedule; adding it is the operator's step.
-    assert "*/5 * * * *" in out and "crontab" not in script
+    # It prints the schedule; adding it is the operator's step, unless the
+    # operator passes --schedule (the enrollment command does): crontab is
+    # reached only behind that flag.
+    assert "*/5 * * * *" in out
+    from backend.drivers import hermes
+    block = hermes._schedule_lines("alpha", "for this user")
+    assert [l for l in script.splitlines() if "crontab" in l] == [l for l in block if "crontab" in l]
 
 
 def _load_sync():

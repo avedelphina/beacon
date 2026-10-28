@@ -295,7 +295,47 @@ BEACON_PUBLIC_URL=http://100.64.0.1:8642  # the URL their sync calls
 The UI and MCP keep their own bindings (`BEACON_BIND_HOST`). The extra
 binding serves the whole app, so configure OIDC before you set it.
 
-**Joining an agent (one time per agent).** Run this where Beacon's
+**Bringing in an agent that already runs (the Agents tab).** Add the agent
+with its A2A endpoint and network (the form has a section for it), or press
+**Enroll** on an agent that has them. Beacon makes a code that works once,
+for 15 minutes, and shows one command to run on the agent's host:
+
+```bash
+curl -fsS https://beacon.example/enroll/<code> | bash -s -- --schedule
+```
+
+Run it as the user that runs the agent (for an agent in Docker, on its host
+with `sudo`; the wizard asks for the container name). The command fetches the
+agent's install script, which holds its pull token, so the token never passes
+through the browser, the clipboard or a terminal history, and it works on hosts
+Beacon cannot SSH into. The host must trust Beacon's certificate for `curl`.
+Only a person in the web UI can create a code (T4); the MCP token cannot. A
+code is stored only as a hash, and an expired, used, or unknown code all
+answer the same 404. Beacon's own access log shows the code in the request
+path, which is harmless once it is used or expired.
+
+**Asked for through the board.** The second way: an agent (for itself) or an
+MCP client (for any agent) calls `enroll_request` on `/board/mcp`, which makes
+a T4 approval on a board card. A person approves it in the web UI, and the
+requester calls `enroll_claim` once to get the same command. Nothing needs a
+browser session at claim time, because the person's approval was the session.
+The tools need a credential, so this serves a client with the MCP bearer, or an
+agent that already syncs and needs its sync re-installed; a new agent with no
+token still takes the command from the Enroll dialog. A request that is not
+Beacon's own text for its target is refused at claim.
+
+A checklist fills in while the host catches up: the command ran, the first
+sync pulled, a second pull arrived (so the schedule works), the agent answers
+over A2A, and its chat status was reported. `GET /api/agents/{id}/onboarding`
+returns the same.
+
+`--schedule` is opt-in. It adds the 5-minute sync to the crontab of whoever
+runs the script, replacing an earlier line for the same sync and keeping every
+other line, and the script says so. Without it, or with no `crontab` command,
+the script only prints the line, as before. Hosts that use another scheduler
+(launchd, a NAS task scheduler) leave the flag out and add the line there.
+
+**Joining from the command line.** The same script, from where Beacon's
 environment is. The output contains the agent's pull token, so pipe it to
 the host and do not save it:
 
@@ -310,8 +350,9 @@ The script does these things on the host:
 2. It turns on the `a2a` toolset for the `a2a` platform. Without it, an
    agent cannot pass a peer's task on to another peer.
 3. It runs one sync.
-4. It prints a cron line. **Add the schedule yourself:** the script does
-   not install a cron job, a systemd timer, or a launchd agent on its own.
+4. It prints a cron line. **Add the schedule yourself:** unless you pass
+   `--schedule` (above), the script does not install a cron job, a systemd
+   timer, or a launchd agent on its own.
 
 **Updating the sync on an existing agent.** An agent installed before
 `managed.json` existed treats Beacon's current entries as the owner's, so a
@@ -654,7 +695,8 @@ Cards live in the operational store, not in fleet YAML.
 - **Agents and MCP clients:** the MCP endpoint `/board/mcp` on Beacon
   itself, with the tools `board_list`, `board_card`, `card_create`,
   `card_update`, and `card_comment`, and the workflow tools
-  `workflow_create`, `workflow_list`, `workflow_get`, and `workflow_respond`
+  `workflow_create`, `workflow_list`, `workflow_get`, and `workflow_respond`,
+  plus `enroll_request` and `enroll_claim` for enrollment
   (decisions, reviews, and approvals attached to a card; the agent skill
   explains when to use them, and an agent may leave out `plan_revision` and
   `plan_hash` so that Beacon binds the request to its own text). It is served at the address agents
@@ -1041,6 +1083,9 @@ this one credential.
 | `POST` | `/api/agents/{id}/plugins/{name}/update?confirm=true` | Update one plugin (git pull) — T3 |
 | `POST` | `/api/agents/{id}/restart?confirm=true` | Restart the gateway — T2 |
 | `POST` | `/api/agents/{id}/restart-agent?confirm=true` | Hard-restart the container or systemd unit — T3 |
+| `POST` | `/api/agents/{id}/enroll` | One-time enrollment command for an existing agent (`{"docker": "...", "schedule": true, "confirm": true}`) — T4, human session only |
+| `GET` | `/api/agents/{id}/onboarding` | The enrollment checklist: command run, first sync, schedule, A2A, chat status |
+| `GET` | `/enroll/{code}` | The install script for a valid code, once. No session: the code is the credential |
 | `POST` | `/api/agents/{id}/update?confirm=true` | `hermes update` on the shared install (streamed) — T4 |
 | `POST` | `/api/agents/{id}/decommission` | Tear down (`{"purge": bool, "remove_user": bool, "confirm": true}`, streamed) — T4, T5 if purge/remove_user |
 | `GET`/`PUT`/`DELETE` | `/api/cron-jobs/{id}` | Cron job CRUD |

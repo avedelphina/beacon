@@ -191,7 +191,8 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
   the API — except `GET /mesh/{agent}`, which returns only that agent's
   config and accepts only its own derived pull token (no session, no MCP
   bearer). `mesh install` output contains a token: pipe it, don't keep it.
-  The install script never schedules itself; that stays an operator step.
+  The install script schedules itself only when the operator passes `--schedule`
+  (the enrollment command does); otherwise it prints the cron line.
 - **SSH host-key checking is strict.** Static-key hosts require a reviewed
   known-hosts file (`BEACON_KNOWN_HOSTS`); Beacon fails closed and never
   trusts a new key automatically. `config_file` hosts defer to that file's

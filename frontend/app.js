@@ -260,9 +260,10 @@ function renderAgentTable() {
       <td>${esc(a.owner ?? "")}</td>
       <td class="row-actions">
         <button class="link-btn" data-inspect="${esc(a.id)}">Inspect</button>
+        ${a.reach ? `<button class="link-btn" data-enroll="${esc(a.id)}">Enroll</button>` : ""}
         <button class="link-btn" data-edit="${esc(a.id)}">Edit</button>
         <button class="link-btn danger" data-del="${esc(a.id)}">Delete</button>
-      </td>`, { inspect: openInspect, edit: editAgent, del: deleteAgent });
+      </td>`, { inspect: openInspect, enroll: openEnroll, edit: editAgent, del: deleteAgent });
   document.querySelectorAll("#agents-body [data-select]").forEach((cb) => cb.addEventListener("change", () => {
     if (cb.checked) agentSelection.add(cb.dataset.select); else agentSelection.delete(cb.dataset.select);
     updateBulkBar();
@@ -770,6 +771,10 @@ async function fillAgentForm(a) {
   f.notes.value = a?.notes ?? "";
   f.tags.value = (a?.tags ?? []).join(", ");
   f.templates.value = (a?.templates ?? []).join(", ");
+  f.reach_endpoint.value = a?.reach?.endpoint ?? "";
+  f.reach_network.value = a?.reach?.network ?? "";
+  f.reach_bind.value = a?.reach?.bind ?? "";
+  f.reach_board.checked = !!a?.reach?.board;
   // The record as loaded: saving must keep what the form doesn't show
   // (reach, and whatever fields come later), not rebuild the agent from scratch.
   f.dataset.original = JSON.stringify(a ?? {});
@@ -809,8 +814,10 @@ document.getElementById("agent-form").addEventListener("submit", async (e) => {
     alert("Desired config must be valid JSON.");
     return;
   }
+  const original = JSON.parse(f.dataset.original || "{}");
+  const endpoint = f.reach_endpoint.value.trim();
   const body = {
-    ...JSON.parse(f.dataset.original || "{}"),
+    ...original,
     id: f.id.value,
     type: f.type.value,
     host: f.host.value,
@@ -820,14 +827,78 @@ document.getElementById("agent-form").addEventListener("submit", async (e) => {
     tags: splitList(f.tags.value),
     templates: splitList(f.templates.value),
     desired,
+    // Keeps what the form doesn't show (callers, capabilities); no endpoint means not in the mesh.
+    reach: endpoint ? {
+      ...(original.reach ?? {}),
+      endpoint,
+      network: f.reach_network.value.trim() || null,
+      bind: f.reach_bind.value.trim() || null,
+      board: f.reach_board.checked,
+    } : null,
   };
   try {
     await api.put("agents", body.id, body);
     closeModal("agent-modal");
     renderAgents();
     renderTemplates();
+    if (body.reach && !original.reach) openEnroll(body.id);  // a new member of the mesh: bring it in
   } catch (err) {
     alert(err.message);
+  }
+});
+
+// ---- enrolling an existing agent ----
+let enrollId = null;
+let enrollTimer = null;
+
+function openEnroll(id) {
+  enrollId = id;
+  document.getElementById("enroll-form").reset();
+  document.getElementById("enroll-command").hidden = true;
+  document.getElementById("enroll-title").textContent = `Bring ${id} into the mesh`;
+  openModal("enroll-modal");
+  clearInterval(enrollTimer);
+  enrollTimer = setInterval(refreshEnroll, 5000);
+  refreshEnroll();
+}
+
+async function refreshEnroll() {
+  const modal = document.getElementById("enroll-modal");
+  if (!modal.classList.contains("open")) { clearInterval(enrollTimer); return; }
+  const el = document.getElementById("enroll-steps");
+  try {
+    const r = await json(`/api/agents/${encodeURIComponent(enrollId)}/onboarding`);
+    el.innerHTML = r.steps.map((s) => finding(s.done ? "ok" : "info", `${esc(s.label)}${s.detail ? ` <span class="hint">— ${esc(s.detail)}</span>` : ""}`)).join("")
+      + (r.done ? finding("ok", "<strong>Done.</strong> The agent is in the mesh.") : "");
+  } catch (err) {
+    el.innerHTML = finding("critical", esc(err.message));
+  }
+}
+
+document.getElementById("enroll-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const docker = f.docker.value.trim();
+  try {
+    const r = await json(`/api/agents/${encodeURIComponent(enrollId)}/enroll`, "POST", {
+      docker: docker || null, docker_user: f.docker_user.value.trim() || "hermes", schedule: f.schedule.checked, confirm: true,
+    });
+    document.getElementById("enroll-cmd").textContent = r.command;
+    document.getElementById("enroll-who").textContent = docker ? " as root" : ", as the user that runs the agent";
+    document.getElementById("enroll-expires").textContent = new Date(r.expires_at * 1000).toLocaleTimeString();
+    document.getElementById("enroll-command").hidden = false;
+    refreshEnroll();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+document.getElementById("enroll-copy").addEventListener("click", async (e) => {
+  try {
+    await navigator.clipboard.writeText(document.getElementById("enroll-cmd").textContent);
+    e.target.textContent = "Copied";
+  } catch {
+    e.target.textContent = "Select and copy it by hand";
   }
 });
 

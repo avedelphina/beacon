@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-10-28
+
+### Added
+
+- **Onboarding for agents that already run.** The agent form now has an A2A
+  mesh section (endpoint, network, bind, board), and an **Enroll** button
+  creates a one-time command for the agent's host:
+  `curl .../enroll/<code> | bash -s -- --schedule`. The code works once, for
+  15 minutes, and only its hash is stored. It fetches the agent's install
+  script, so the pull token never passes through the browser, and it works for
+  hosts Beacon cannot SSH into. Creating a code is a human-session action
+  (`enroll_agent`, T4).
+- **Checklist.** `GET /api/agents/{id}/onboarding` and the Enroll dialog show
+  the command run, first sync, schedule (a second pull), A2A answer, and chat
+  status, live.
+- **`--schedule` for the install scripts.** With the flag, the script adds
+  the 5-minute sync to the crontab of whoever runs it, replacing an earlier
+  line for the same sync and keeping the rest. Without it, nothing changes.
+- Beacon counts pulls per agent (`agent_seen.pulls`), which the checklist
+  uses to see the schedule work.
+- **Enrollment asked for by an agent or an MCP client.** Two board tools,
+  `enroll_request` and `enroll_claim`: the requester makes a T4 approval on a
+  card, a person approves it in the web UI, and the requester then claims the
+  same one-time command once. An agent can ask only for itself; an MCP client
+  (the bearer) for any agent. Claiming checks that the request is Beacon's
+  own text for its target, so one made by hand with `workflow_create` is
+  refused. The tools need a token, so for an agent that is not yet enrolled
+  they serve a client holding the MCP bearer; an agent that already syncs can
+  use them to re-install. The agent skill is 1.3.0.
+
 ## [0.24.0] — 2026-10-28
 
 ### Changed

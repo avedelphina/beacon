@@ -33,8 +33,9 @@ MAX_PROBES = 16
 
 def record_pull(agent_id: str) -> None:
     with opstore.connect() as conn:
-        conn.execute("INSERT INTO agent_seen (agent, last_pull) VALUES (?, ?) "
-                     "ON CONFLICT (agent) DO UPDATE SET last_pull = excluded.last_pull", (agent_id, time.time()))
+        conn.execute("INSERT INTO agent_seen (agent, last_pull, pulls) VALUES (?, ?, 1) "
+                     "ON CONFLICT (agent) DO UPDATE SET last_pull = excluded.last_pull, pulls = pulls + 1",
+                     (agent_id, time.time()))
 
 
 def last_pulls() -> dict[str, float]:

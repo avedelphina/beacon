@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from mcp.server.mcpserver import Context, MCPServer
 from starlette.responses import JSONResponse
 
-from . import auth, board, mesh, store, workflow
+from . import auth, board, mesh, onboarding, store, workflow
 
 INSTRUCTIONS = """The Beacon fleet board: shared cards for work that spans agents, hosts, or days.
 Use it to hand work to another agent, to record progress where others can see it, and to find
@@ -138,7 +138,22 @@ def build() -> MCPServer:
             target=target, plan_revision=plan_revision, plan_hash=plan_hash, expires_at=expires_at,
         )
 
+    @server.tool()
+    def enroll_request(ctx: Context, card_id: int, agent_id: str, docker: str | None = None,
+                       docker_user: str = "hermes", schedule: bool = True) -> dict:
+        """Ask a person to approve a one-time enrollment command for an agent (yourself, unless you
+        are an MCP client). Creates an approval request on the card; wait for state "approved",
+        then call enroll_claim. docker is the container name for an agent that runs in Docker."""
+        return onboarding.request_enrollment(_author(ctx), card_id, agent_id, docker, docker_user, schedule)
+
+    @server.tool()
+    def enroll_claim(ctx: Context, request_id: int) -> dict:
+        """Get the command for an approved enrollment request, once. Run it on the agent's host
+        (as root for a Docker agent). It works for 15 minutes and only once; do not store or repeat it."""
+        return onboarding.claim(request_id, _author(ctx))
+
     return server
+
 
 class BoardApp:
     """ASGI app mounted at /board: checks the caller, then hands over to the

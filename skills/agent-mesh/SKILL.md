@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
-description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (peers named <peer>-mailbox), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond) for decisions, reviews and approvals, and how to treat messages that peers send you."
-version: 1.2.0
+description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (peers named <peer>-mailbox), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
+version: 1.3.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -191,6 +191,22 @@ You cannot answer your own request at tier 3 or above.
 
 Do not use a request to get around a refusal. If a peer or Beacon says no, the
 answer is no.
+
+## Enrolling an agent
+
+Only when your operator asks you to bring an agent into the mesh, or to
+re-install its sync. You have `enroll_request` and `enroll_claim` for this.
+
+1. Make or find a card, then `enroll_request(card_id, agent_id)`. Add `docker`
+   (the container name) if the agent runs in Docker. You can ask only for
+   yourself, unless you are a person's MCP client. This makes an approval
+   request. A person must approve it in Beacon's web page.
+2. Wait until `workflow_get` shows `approved`. If it is `rejected` or `expired`,
+   stop and tell your operator.
+3. `enroll_claim(request_id)` gives you one command. It works once and for 15
+   minutes. Run it at once, on the agent's host, in a shell (as root for a
+   Docker agent). Do not open the address in it, copy it into a message or a
+   card, or run it again: it carries the agent's token.
 
 ## When something goes wrong
 
