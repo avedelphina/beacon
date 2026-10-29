@@ -74,14 +74,15 @@ def test_sync_sends_the_report_with_its_pull(sync, tmp_path, monkeypatch):
     sent = []
 
     def urlopen(request, timeout=None):
-        sent.append(request.get_header("X-beacon-open-chat"))
+        sent.append((request.get_header("X-beacon-open-chat"), request.get_header("X-beacon-restart")))
         raise urllib.error.URLError("offline")
 
     monkeypatch.setattr(sync.urllib.request, "urlopen", urlopen)
     sync.sync(state)
     env.write_text("")
+    (state / "restart.pending").touch()  # an earlier run asked for a restart that has not gone through
     sync.sync(state)
-    assert sent == ["GATEWAY_ALLOW_ALL_USERS", "none"]
+    assert sent == [("GATEWAY_ALLOW_ALL_USERS", "none"), ("none", "pending")]
 
 
 # --- what Beacon does with it -----------------------------------------------

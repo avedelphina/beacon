@@ -127,7 +127,8 @@ CREATE TABLE IF NOT EXISTS fleet_meta (
 CREATE TABLE IF NOT EXISTS agent_seen (
     agent       TEXT PRIMARY KEY,
     last_pull   REAL NOT NULL,     -- the agent's host sync last pulled /mesh/{agent}
-    pulls       INTEGER NOT NULL DEFAULT 1
+    pulls       INTEGER NOT NULL DEFAULT 1,
+    restart_pending INTEGER        -- 1 while the host sync still owes the agent a gateway restart; NULL = not reported
 );
 
 -- Single-use codes that hand an agent's install script to its host (backend/onboarding.py).
@@ -173,6 +174,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     seen = {row[1] for row in conn.execute("PRAGMA table_info(agent_seen)")}
     if "pulls" not in seen:
         conn.execute("ALTER TABLE agent_seen ADD COLUMN pulls INTEGER NOT NULL DEFAULT 1")
+    if "restart_pending" not in seen:
+        conn.execute("ALTER TABLE agent_seen ADD COLUMN restart_pending INTEGER")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(card_events)")}
     if "notice_id" not in columns:
         conn.execute("ALTER TABLE card_events ADD COLUMN notice_id INTEGER REFERENCES mailbox (id)")
