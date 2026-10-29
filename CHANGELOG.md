@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.25.2] — 2026-10-29
+
+### Added
+
+- **A pending gateway restart is visible.** Hermes reads its A2A listen
+  address only when the gateway starts, so an agent enrolled with a new
+  address keeps listening on its old one (the default is 127.0.0.1) until the
+  restart that the sync asks for goes through, and that restart waits for idle
+  chats and is retried on every run. The sync now reports whether a restart is
+  still owed (`X-Beacon-Restart`), and when the agent does not answer, its
+  availability detail and the enroll checklist say the restart is pending and
+  that `hermes gateway restart` on the host does it at once. Hosts need the new
+  sync to report it; an older one says nothing and nothing changes.
+
 ## [0.25.1] — 2026-10-28
 
 ### Fixed

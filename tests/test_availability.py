@@ -87,3 +87,34 @@ def test_the_api_and_a_mesh_pull_feed_it(fleet_with_ports):
         pull = c.get("/mesh/dead", headers={"Authorization": f"Bearer {mesh.token('dead', mesh.BEACON_PEER)}"})
         assert pull.status_code == 200
         assert c.get("/api/availability").json()["dead"]["state"] == "sync-only"
+
+
+# --- a gateway restart the host still owes ----------------------------------
+
+
+def _pull(c, restart=None):
+    headers = {"Authorization": f"Bearer {mesh.token('dead', mesh.BEACON_PEER)}"}
+    if restart is not None:
+        headers["X-Beacon-Restart"] = restart
+    assert c.get("/mesh/dead", headers=headers).status_code == 200
+
+
+def test_a_pending_restart_explains_an_agent_that_does_not_answer(fleet_with_ports):
+    with TestClient(app) as c:
+        _pull(c, "pending")
+        down = availability.check_all(store.list_agents())["dead"]
+        assert down["state"] == "sync-only" and "restart is still pending" in down["detail"]
+        assert "hermes gateway restart" in down["detail"]
+
+        _pull(c, "none")  # the restart went through
+        assert "restart" not in availability.check_all(store.list_agents())["dead"]["detail"]
+
+        _pull(c)  # an older sync says nothing: the last report stands, here "none"
+        assert availability.restart_pending() == set()
+
+
+def test_a_pending_restart_says_nothing_about_an_agent_that_answers(fleet_with_ports):
+    with TestClient(app) as c:
+        headers = {"Authorization": f"Bearer {mesh.token('alpha', mesh.BEACON_PEER)}", "X-Beacon-Restart": "pending"}
+        assert c.get("/mesh/alpha", headers=headers).status_code == 200
+    assert availability.check_all(store.list_agents())["alpha"] == {"last_pull_seconds_ago": 0, "state": "online", "detail": ""}

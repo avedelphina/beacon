@@ -38,6 +38,19 @@ def record_pull(agent_id: str) -> None:
                      (agent_id, time.time()))
 
 
+def record_restart(agent_id: str, pending: bool) -> None:
+    """What the host sync says about its gateway restart (it asks for one when
+    the listen address or a token changes, and retries until Hermes allows it).
+    The agent keeps its old address until then, which looks like a dead agent."""
+    with opstore.connect() as conn:
+        conn.execute("UPDATE agent_seen SET restart_pending = ? WHERE agent = ?", (int(pending), agent_id))
+
+
+def restart_pending() -> set[str]:
+    with opstore.connect() as conn:
+        return {r["agent"] for r in conn.execute("SELECT agent FROM agent_seen WHERE restart_pending = 1")}
+
+
 def last_pulls() -> dict[str, float]:
     with opstore.connect() as conn:
         return {r["agent"]: r["last_pull"] for r in conn.execute("SELECT agent, last_pull FROM agent_seen")}
@@ -60,7 +73,19 @@ def probe(agent: Agent) -> tuple[bool, str]:
     return (True, "") if isinstance(body, dict) and body.get("status") == "ok" else (False, "not an A2A health answer")
 
 
-def classify(agent: Agent, answered: bool | None, detail: str, pulled: float | None, now: float) -> dict:
+RESTART_HINT = (" Its gateway restart is still pending, and until it happens the agent listens on its old address: "
+                "the sync retries it on every run, or run `hermes gateway restart` on the host.")
+
+
+def classify(agent: Agent, answered: bool | None, detail: str, pulled: float | None, now: float,
+             restarting: bool = False) -> dict:
+    result = _classify(agent, answered, detail, pulled, now)
+    if restarting and result["state"] in ("sync-only", "offline"):
+        result["detail"] += RESTART_HINT
+    return result
+
+
+def _classify(agent: Agent, answered: bool | None, detail: str, pulled: float | None, now: float) -> dict:
     age = None if pulled is None else max(0, int(now - pulled))
     base = {"last_pull_seconds_ago": age}
     if agent.reach is None:
@@ -77,8 +102,9 @@ def classify(agent: Agent, answered: bool | None, detail: str, pulled: float | N
 def check_all(agents: list[Agent]) -> dict[str, dict]:
     """agent id -> availability, probing in parallel so one dead endpoint
     costs one timeout, not one per agent."""
-    now, pulls = time.time(), last_pulls()
+    now, pulls, restarting = time.time(), last_pulls(), restart_pending()
     reachable = [a for a in agents if a.reach is not None]
     with ThreadPoolExecutor(max_workers=min(MAX_PROBES, len(reachable) or 1)) as pool:
         results = dict(zip((a.id for a in reachable), pool.map(probe, reachable)))
-    return {a.id: classify(a, *results.get(a.id, (None, "")), pulls.get(a.id), now) for a in agents}
+    return {a.id: classify(a, *results.get(a.id, (None, "")), pulls.get(a.id), now, a.id in restarting)
+            for a in agents}

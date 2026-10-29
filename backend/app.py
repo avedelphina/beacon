@@ -81,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.25.1"
+VERSION = "0.25.2"
 
 
 async def _record_actor(request: Request) -> None:
@@ -728,7 +728,8 @@ class InboxReport(BaseModel):
 @app.get("/mesh/{id_}")
 def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None = Header(None),
                 x_beacon_sync_version: str | None = Header(None),
-                x_beacon_open_chat: str | None = Header(None, max_length=2048)) -> dict:
+                x_beacon_open_chat: str | None = Header(None, max_length=2048),
+                x_beacon_restart: str | None = Header(None, max_length=16)) -> dict:
     """An agent's own A2A mesh config, pulled by its host's sync job. Outside
     /api/ on purpose: the only credential is that agent's derived pull token —
     not a session, not the MCP bearer — because the body holds tokens no one
@@ -739,6 +740,8 @@ def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None
     if not mesh.may_pull(id_, authorization):
         raise HTTPException(401, "not authorized for this agent's mesh config")
     availability.record_pull(id_)
+    if x_beacon_restart in ("pending", "none"):
+        availability.record_restart(id_, x_beacon_restart == "pending")
     if x_beacon_open_chat is not None:
         mesh.record_open_chat(id_, x_beacon_open_chat)
     config = mesh.config(id_)

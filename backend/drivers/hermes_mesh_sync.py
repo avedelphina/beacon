@@ -399,7 +399,9 @@ def sync(state: Path) -> int:
                                          headers={"Authorization": f"Bearer {pull_token}",
                                                   "X-Beacon-Sync-Version": SYNC_VERSION,
                                                   # "none", not empty: a proxy may drop an empty header.
-                                                  "X-Beacon-Open-Chat": ",".join(open_chats(cfg)) or "none"})
+                                                  "X-Beacon-Open-Chat": ",".join(open_chats(cfg)) or "none",
+                                                  # Whether an earlier run's gateway restart is still owed.
+                                                  "X-Beacon-Restart": "pending" if (state / "restart.pending").exists() else "none"})
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
                 mesh = json.load(response)
