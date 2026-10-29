@@ -285,3 +285,10 @@ def test_mcp_bearer_cannot_execute_human_only_actions(mcp_client, fake_ssh, path
     assert r.status_code == 403
     assert tier in r.json()["detail"]
     assert fake_ssh.calls == []
+
+
+def test_the_page_and_the_api_are_revalidated_not_reused_blindly(client):
+    """An upgrade must not leave a browser running an old app.js beside a new index.html."""
+    for path in ("/", "/app.js", "/styles.css", "/api/version"):
+        assert client.get(path).headers["cache-control"] == "no-cache", path
+    assert client.get("/app.js").headers["etag"]  # so revalidating is a cheap 304

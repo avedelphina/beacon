@@ -81,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.26.1"
+VERSION = "0.26.2"
 
 
 async def _record_actor(request: Request) -> None:
@@ -148,6 +148,12 @@ async def _csp(request, call_next):
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com"
     )
+    # The page is static files with an ETag but no lifetime, so a browser may
+    # reuse an old app.js for a while next to a new index.html (a form with a
+    # field the old script does not send). no-cache: ask every time, and get a
+    # cheap 304 when nothing changed. API answers are never reused either.
+    if request.method == "GET" and not request.url.path.startswith(("/a2a/", "/mesh/", "/board/", "/enroll/")):
+        response.headers.setdefault("Cache-Control", "no-cache")
     return response
 
 
