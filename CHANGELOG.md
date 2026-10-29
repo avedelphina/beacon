@@ -6,9 +6,10 @@
 
 ### Added
 
-- **Members: owners see their agents.** A login in the new
-  `BEACON_MEMBER_EMAILS` list sees only the agents whose `owner` is their
-  email, in a trimmed form (no endpoint, config, templates or host details),
+- **Members: owners see their agents.** Write a person's email as an agent's
+  `owner` and that person can log in (their provider must report the email as
+  verified); there is no list in the environment. A member sees only the
+  agents whose `owner` is their email, in a trimmed form (no endpoint, config, templates or host details),
   and can see whether each answers over A2A, restart its gateway (with the
   usual confirm step), work the board for it (cards assigned to it or made by
   them, comments, state), and answer what their agents ask a person or an
@@ -22,8 +23,9 @@
 ### Changed
 
 - **The login is checked on every request**, not only at login: taking an
-  email off `BEACON_ALLOWED_EMAILS` or `BEACON_MEMBER_EMAILS` ends its session
-  at once. An email in both lists is an operator.
+  email off `BEACON_ALLOWED_EMAILS`, or changing the owner of a member's last
+  agent, ends that session at once. An operator who also owns agents stays an
+  operator.
 - **`owner` and `member_logs` are access fields**: changing them needs a human
   browser session, not the MCP token, as for tags and `reach.board`, because an
   owner now gives a person access. `/auth/me` reports the role. Set each

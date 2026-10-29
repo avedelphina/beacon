@@ -1,8 +1,10 @@
 """Members: people who see, and do a little with, the agents they own.
 
-An operator (BEACON_ALLOWED_EMAILS) runs the fleet. A member (BEACON_MEMBER_EMAILS)
-owns agents, the `owner` field of the record holding their email, and gets a
-short list of things to do with them. The list is the whole design: auth.py
+An operator (BEACON_ALLOWED_EMAILS) runs the fleet. A member is anyone whose
+email an operator wrote as the `owner` of an agent: that field is the whole
+list of members, so there is nothing to configure beside the agents, and
+changing an owner changes who may log in. A member gets a short list of things
+to do with their agents. The list is the whole design: auth.py
 lets a member's session reach only the routes below, so a route added later is
 closed to members until someone adds it here. Everything per-agent is also an
 ownership check, answered 404 for another person's agent so a member cannot tell
@@ -50,6 +52,10 @@ _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject i
 
 def owns(email: str, agent) -> bool:
     return bool(agent.owner) and agent.owner.casefold() == email.casefold()
+
+
+def owns_any(email: str) -> bool:
+    return any(owns(email, a) for a in store.list_agents())
 
 
 def owned_ids(email: str) -> set[str]:

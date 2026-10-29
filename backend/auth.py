@@ -28,13 +28,6 @@ ALLOWED_EMAILS = frozenset(
 )
 if AUTH_ENABLED and not ALLOWED_EMAILS:
     raise RuntimeError("BEACON_ALLOWED_EMAILS must contain at least one email when OIDC auth is enabled")
-# People who may see and do a little with the agents they own (backend/members.py).
-# An email in both lists is an operator.
-MEMBER_EMAILS = frozenset(
-    email.strip().casefold()
-    for email in os.environ.get("BEACON_MEMBER_EMAILS", "").split(",")
-    if email.strip()
-)
 
 
 def is_allowed_email(email: object) -> bool:
@@ -42,13 +35,30 @@ def is_allowed_email(email: object) -> bool:
 
 
 def role_for_email(email: object) -> str | None:
-    """"operator", "member", or None. Asked on every request, not only at login,
-    so taking someone off a list ends their session's access at once."""
+    """"operator" for the allowlist, "member" for anyone an operator named as
+    the owner of an agent, else None. Asked on every request, not only at
+    login, so taking an email off the list, or changing an agent's owner, ends
+    that session's access at once."""
     if is_allowed_email(email):
         return "operator"
-    if isinstance(email, str) and email.casefold() in MEMBER_EMAILS:
-        return "member"
+    if isinstance(email, str):
+        from . import members
+        if members.owns_any(email):
+            return "member"
     return None
+
+
+def admit(claims: dict) -> str | None:
+    """The role to give a verified OIDC login, or None to refuse it. A member's
+    email is only a name an operator typed into an agent record, so the provider
+    must say it checked it: without that, anyone who could register that address
+    there would be that person."""
+    email = claims.get("email")
+    role = role_for_email(email)
+    if role == "member" and claims.get("email_verified") is not True:
+        return None
+    return role
+
 
 # The same static token the MCP server requires of its own callers doubles
 # as its credential for calling *this* API — a service has no browser to
@@ -170,7 +180,7 @@ def callback(request: Request, code: str = "", state: str = "", error: str = "")
     )
 
     email = claims.get("email")
-    if role_for_email(email) is None:
+    if admit(claims) is None:
         raise HTTPException(403, "this Beacon instance is not configured to admit that account")
 
     request.session["user"] = {

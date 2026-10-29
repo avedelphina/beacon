@@ -30,7 +30,6 @@ def people(fleet, fake_ssh, monkeypatch):
     monkeypatch.setenv(mesh.SECRET_ENV, "test-mesh-secret")
     monkeypatch.setattr(auth, "AUTH_ENABLED", True)
     monkeypatch.setattr(auth, "ALLOWED_EMAILS", frozenset({TOM}))
-    monkeypatch.setattr(auth, "MEMBER_EMAILS", frozenset({ANN, BOB}))
     store.upsert_host(make_host("h1"))
     reach = {"endpoint": "http://100.64.0.9:9900", "network": "tailnet", "board": True}
     for id_, owner, logs in (("a1", ANN, False), ("a2", "Ann@Example.com", True), ("b1", BOB, False), ("n1", None, False)):
@@ -160,17 +159,38 @@ def test_a_member_sees_what_an_approval_is_about_but_not_the_hosts_settings(peop
     assert _ask("a1", eligible="b1")["id"] not in [r["id"] for r in people["ann"].get("/api/workflows").json()]  # asked of an agent, not a person
 
 
-def test_taking_someone_off_the_list_ends_their_session(people, monkeypatch):
-    assert people["ann"].get("/api/agents").status_code == 200
-    monkeypatch.setattr(auth, "MEMBER_EMAILS", frozenset({BOB}))
-    assert people["ann"].get("/api/agents").status_code == 401
-    assert as_person("stranger@example.com").get("/api/agents").status_code == 401
+def test_the_owner_field_is_the_list_of_members(people):
+    """No setting beside the agents: whoever is named as an owner may log in, and
+    changing the owner changes who may."""
+    carl = as_person("carl@example.com")
+    assert carl.get("/api/agents").status_code == 401                      # owns nothing: not admitted
+    n1 = store.get_agent("n1")
+    n1.owner = "carl@example.com"
+    store.upsert_agent(n1)
+    assert [a["id"] for a in carl.get("/api/agents").json()] == ["n1"]     # named an owner: a member
+
+    for agent_id in ("a1", "a2"):                                          # Ann's agents go to Bob
+        agent = store.get_agent(agent_id)
+        agent.owner = BOB
+        store.upsert_agent(agent)
+    assert people["ann"].get("/api/agents").status_code == 401             # owns nothing now: session over
+    assert [a["id"] for a in people["bob"].get("/api/agents").json()] == ["a1", "a2", "b1"]
+
+
+def test_a_member_must_have_a_verified_email_to_log_in(people):
+    assert auth.admit({"email": ANN, "email_verified": True}) == "member"
+    assert auth.admit({"email": ANN, "email_verified": False}) is None      # anyone could register that address
+    assert auth.admit({"email": ANN}) is None
+    assert auth.admit({"email": "stranger@example.com", "email_verified": True}) is None
+    assert auth.admit({"email": TOM}) == "operator"                         # the allowlist is unchanged
 
 
 def test_the_page_learns_the_role_and_the_operator_stays_one(people, monkeypatch):
     assert people["ann"].get("/auth/me").json()["role"] == "member"
     assert people["tom"].get("/auth/me").json()["role"] == "operator"
-    monkeypatch.setattr(auth, "MEMBER_EMAILS", frozenset({ANN, TOM}))  # in both lists: an operator
+    tom_owns = store.get_agent("n1")
+    tom_owns.owner = TOM                                                    # an operator who also owns an agent
+    store.upsert_agent(tom_owns)
     assert people["tom"].get("/auth/me").json()["role"] == "operator"
     assert people["ann"].get("/").status_code == 200 and people["ann"].get("/app.js").status_code == 200  # the page itself
 
