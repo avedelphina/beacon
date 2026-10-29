@@ -13,7 +13,7 @@ from pydantic import BaseModel, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, availability, board, bus, cron_store, fleet, mailbox, mesh, onboarding, opstore, policy, scheduler, store, templates, workflow
+from . import auth, availability, board, bus, cron_store, fleet, mailbox, members, mesh, onboarding, opstore, policy, scheduler, store, templates, workflow
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, CronJob, Host
@@ -81,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.25.2"
+VERSION = "0.26.0"
 
 
 async def _record_actor(request: Request) -> None:
@@ -318,19 +318,30 @@ def delete_host(id_: str) -> dict:
     return {"ok": True}
 
 
+def _member(request: Request) -> str | None:
+    """The email of the member making this request, None for anyone else.
+    Set by the auth middleware, which let only a member's few routes through."""
+    return getattr(request.state, "member", None)
+
+
 @app.get("/api/agents")
-def list_agents() -> list[dict]:
+def list_agents(request: Request) -> list[dict]:
     # chat_open is what the agent's host last reported (display-only, like
     # effective_desired): the settings that open its chat to anyone, [] for
     # none, null when its sync never reported. Open withholds the board.
     exposure = mesh.open_chats()
+    if member := _member(request):
+        return [members.agent_view(a, exposure.get(a.id)) for a in store.list_agents() if members.owns(member, a)]
     return [a.model_dump() | {"chat_open": exposure.get(a.id)} for a in store.list_agents()]
 
 
 @app.get("/api/availability")
-def get_availability() -> dict[str, dict]:
+def get_availability(request: Request) -> dict[str, dict]:
     """Every agent's availability over A2A (backend/availability.py), in one
     call: the Agents tab polls this instead of one SSH call per agent."""
+    if member := _member(request):
+        mine = [a for a in store.list_agents() if members.owns(member, a)]
+        return {k: members.availability_view(v) for k, v in availability.check_all(mine).items()}
     return availability.check_all(store.list_agents())
 
 
@@ -558,10 +569,20 @@ def _board_author(request: Request) -> str:
     return (user or {}).get("email") or mesh.BEACON_PEER
 
 
+def _member_may_assign(request: Request, assignee: str | None) -> None:
+    """A member hands work only to their own agents, so a card never reaches an
+    agent that is someone else's. Unassigning is theirs to do."""
+    if (member := _member(request)) and assignee and assignee not in members.owned_ids(member):
+        raise HTTPException(403, "a member can assign cards only to their own agents")
+
+
 @app.get("/api/board")
-def board_list(project: str | None = None, assignee: str | None = None, state: str | None = None,
+def board_list(request: Request, project: str | None = None, assignee: str | None = None, state: str | None = None,
                include_done: bool = False) -> list[dict]:
-    return board.list_cards(project, assignee, state, include_done)
+    cards = board.list_cards(project, assignee, state, include_done)
+    if member := _member(request):
+        return [c for c in cards if members.card_visible(member, c)]
+    return cards
 
 
 @app.get("/api/board/cards/{card_id}")
@@ -571,11 +592,13 @@ def board_card(card_id: int) -> dict:
 
 @app.post("/api/board/cards")
 def board_create(body: CardCreate, request: Request) -> dict:
+    _member_may_assign(request, body.assignee)
     return board.create_card(_board_author(request), body.title, body.body, body.project, body.assignee)
 
 
 @app.patch("/api/board/cards/{card_id}")
 def board_update(card_id: int, body: CardUpdate, request: Request) -> dict:
+    _member_may_assign(request, body.assignee)
     return board.update_card(_board_author(request), card_id, **body.model_dump())
 
 
@@ -598,13 +621,17 @@ def create_card_workflow(card_id: int, body: WorkflowCreateRequest, request: Req
 @app.get("/api/workflows")
 def workflows_list(request: Request, card_id: int | None = None, state: str | None = None,
                    include_done: bool = True) -> list[dict]:
-    return workflow.list_requests(card_id=card_id, state=state, include_done=include_done,
-                                  actor=_workflow_view_actor(request), human=_workflow_human(request))
+    found = workflow.list_requests(card_id=card_id, state=state, include_done=include_done,
+                                   actor=_workflow_view_actor(request), human=_workflow_human(request))
+    if member := _member(request):
+        return [members.workflow_view(r) for r in found if members.workflow_visible(member, r)]
+    return found
 
 
 @app.get("/api/workflows/{request_id}")
 def workflow_get(request_id: int, request: Request) -> dict:
-    return workflow.get(request_id, actor=_workflow_view_actor(request), human=_workflow_human(request))
+    found = workflow.get(request_id, actor=_workflow_view_actor(request), human=_workflow_human(request))
+    return members.workflow_view(found) if _member(request) else found
 
 
 @app.post("/api/workflows/{request_id}/respond")
@@ -791,20 +818,23 @@ def _settle_push(agent_id: str, message_id: int, payload: dict) -> None:
 
 
 @app.get("/api/agents/{id_}")
-def get_agent(id_: str) -> dict:
+def get_agent(id_: str, request: Request) -> dict:
     # Raw record (own overrides only) plus the template-merged view. PUT
     # sends back the raw `desired`; `effective_desired` is display-only.
     agent = store.get_agent(id_)
+    if _member(request):  # the middleware already checked it is theirs
+        return members.agent_view(agent, mesh.open_chats().get(id_))
     return agent.model_dump() | {"effective_desired": templates.resolve(agent),
                                  "chat_open": mesh.open_chats().get(id_)}
 
 
 def _access_fields(agent: Agent | None) -> tuple:
     """What on an agent record decides who may reach what: its tags (policy
-    groups), who may call it, and its board access."""
+    groups), who may call it, its board access, and who owns it and may read
+    its logs (a member gets the agent through `owner`, backend/members.py)."""
     reach = agent.reach if agent else None
     return (sorted(agent.tags) if agent else [], sorted(reach.callers) if reach and reach.callers is not None else None,
-            bool(reach and reach.board))
+            bool(reach and reach.board), agent.owner if agent else None, bool(agent and agent.member_logs))
 
 
 @app.put("/api/agents/{id_}")
@@ -911,13 +941,15 @@ def apply_template(name: str, body: TemplateApplyRequest) -> dict:
 
 
 @app.get("/api/agents/{id_}/status")
-def get_agent_status(id_: str) -> dict:
+def get_agent_status(id_: str, request: Request) -> dict:
     try:
         agent, host, driver = for_agent(id_)
     except NoSSH as exc:
         # Not a failure: Beacon just has no way to look. The UI polls this.
-        return {"state": "unknown", "detail": str(exc)}
-    return driver.status(agent, host)
+        return {"state": "unknown", "detail": str(exc)} if not _member(request) else {"state": "unknown"}
+    status = driver.status(agent, host)
+    # The detail is the host's own error text: paths, addresses, SSH settings.
+    return members.status_view(status) if _member(request) else status
 
 
 @app.get("/api/agents/{id_}/logs")
@@ -941,9 +973,10 @@ def update_agent_plugin(id_: str, plugin: str, confirm: bool = False) -> dict:
 
 
 @app.post("/api/agents/{id_}/restart")
-def restart_agent(id_: str, confirm: bool = False) -> dict:
+def restart_agent(id_: str, request: Request, confirm: bool = False) -> dict:
     if (gate := _confirm_gate("restart", confirm, f"restart the gateway for {id_!r}")) is not None:
         return gate
+    logger.warning("gateway restart of %s by %s", id_, _board_author(request))
     agent, host, driver = for_agent(id_)
     return driver.restart(agent, host)
 

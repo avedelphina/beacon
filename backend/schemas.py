@@ -162,8 +162,12 @@ class Agent(BaseModel):
     # happens on read, never written back to the file.
     templates: list[str] = Field(default_factory=list)
     desired: dict = Field(default_factory=dict)
+    # A member's email gives that person this agent in the UI (backend/members.py).
     owner: str | None = None
     notes: str | None = None
+    # Lets the owner read this agent's logs. Off by default: logs of a shared
+    # household agent hold other people's chats. Operator-set, like the owner.
+    member_logs: bool = False
     # Groups for the access policy (fleet/policy.yaml, backend/policy.py).
     # On the agent, not the host: several agents often share one host.
     tags: list[str] = Field(default_factory=list)

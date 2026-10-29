@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-10-29
+
+### Added
+
+- **Members: owners see their agents.** A login in the new
+  `BEACON_MEMBER_EMAILS` list sees only the agents whose `owner` is their
+  email, in a trimmed form (no endpoint, config, templates or host details),
+  and can see whether each answers over A2A, restart its gateway (with the
+  usual confirm step), work the board for it (cards assigned to it or made by
+  them, comments, state), and answer what their agents ask a person or an
+  approval about them. Logs are open to the owner only where an operator
+  turned on `member_logs`, because logs of a shared household agent hold other
+  people's chats. The UI shows members the Agents, Board and Workflows tabs.
+- The server is what refuses: a member's session reaches only the routes in
+  `backend/members.py`, and any route not on that list, including one added
+  later, is closed to them. Another person's agent answers 404.
+
+### Changed
+
+- **The login is checked on every request**, not only at login: taking an
+  email off `BEACON_ALLOWED_EMAILS` or `BEACON_MEMBER_EMAILS` ends its session
+  at once. An email in both lists is an operator.
+- **`owner` and `member_logs` are access fields**: changing them needs a human
+  browser session, not the MCP token, as for tags and `reach.board`, because an
+  owner now gives a person access. `/auth/me` reports the role. Set each
+  agent's owner to the person's email; an old name like `tom` matches nobody.
+
 ## [0.25.2] — 2026-10-29
 
 ### Added

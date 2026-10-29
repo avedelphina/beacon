@@ -392,6 +392,11 @@ td[data-label="ID"] .chip { margin-left: 0.4rem; }
 .policy-matrix .pm-gone { background: color-mix(in srgb, var(--crit) 28%, transparent); font-weight: 600; }
 .policy-matrix .pm-self { color: var(--slate-2); }
 
+/* ---- members ---- */
+/* A member sees only their agents and board; the server refuses the rest, this
+   only keeps the page from offering it. */
+body.member .op-only { display: none !important; }
+
 /* ---- tags ---- */
 .chip {
   display: inline-block; font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.5;

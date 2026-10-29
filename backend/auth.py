@@ -28,10 +28,27 @@ ALLOWED_EMAILS = frozenset(
 )
 if AUTH_ENABLED and not ALLOWED_EMAILS:
     raise RuntimeError("BEACON_ALLOWED_EMAILS must contain at least one email when OIDC auth is enabled")
+# People who may see and do a little with the agents they own (backend/members.py).
+# An email in both lists is an operator.
+MEMBER_EMAILS = frozenset(
+    email.strip().casefold()
+    for email in os.environ.get("BEACON_MEMBER_EMAILS", "").split(",")
+    if email.strip()
+)
 
 
 def is_allowed_email(email: object) -> bool:
     return isinstance(email, str) and email.casefold() in ALLOWED_EMAILS
+
+
+def role_for_email(email: object) -> str | None:
+    """"operator", "member", or None. Asked on every request, not only at login,
+    so taking someone off a list ends their session's access at once."""
+    if is_allowed_email(email):
+        return "operator"
+    if isinstance(email, str) and email.casefold() in MEMBER_EMAILS:
+        return "member"
+    return None
 
 # The same static token the MCP server requires of its own callers doubles
 # as its credential for calling *this* API — a service has no browser to
@@ -153,7 +170,7 @@ def callback(request: Request, code: str = "", state: str = "", error: str = "")
     )
 
     email = claims.get("email")
-    if not is_allowed_email(email):
+    if role_for_email(email) is None:
         raise HTTPException(403, "this Beacon instance is not configured to admit that account")
 
     request.session["user"] = {
@@ -175,7 +192,7 @@ def me(request: Request) -> dict:
     user = request.session.get("user")
     if not user:
         raise HTTPException(401, "not logged in")
-    return user
+    return user | {"role": role_for_email(user.get("email"))}
 
 
 def same_origin_request(request: Request) -> bool:
@@ -206,6 +223,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """Gates every request except /auth/*, /mesh/*, /a2a/*, /board/* and /enroll/* behind a logged-in session.
+    A member's session reaches only the few routes in backend/members.py.
     JSON API paths get a 401; anything else (the GUI) gets redirected to
     /auth/login — a plain GET to `/` shouldn't have to know it needs auth,
     it should just land on the login page.
@@ -236,8 +254,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if not AUTH_ENABLED:
             return await call_next(request)
-        if request.session.get("user"):
-            return await call_next(request)
+        user = request.session.get("user")
+        if user:
+            role = role_for_email(user.get("email"))
+            if role == "operator":
+                return await call_next(request)
+            if role == "member":
+                from . import members
+                denied = members.check(request.method, request.url.path, user["email"])
+                if denied is not None:
+                    return JSONResponse({"detail": denied[1]}, status_code=denied[0])
+                request.state.member = user["email"].casefold()
+                return await call_next(request)
+            request.session.clear()  # taken off the lists since it logged in
         if request.url.path.startswith("/api/"):
             return JSONResponse({"detail": "not authenticated"}, status_code=401)
         return RedirectResponse("/auth/login")
