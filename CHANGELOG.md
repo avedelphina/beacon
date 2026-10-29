@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.26.2] — 2026-10-29
+
+### Fixed
+
+- **The page no longer runs an old script next to a new page.** The static
+  files carried an ETag but no `Cache-Control`, so after an upgrade a browser
+  could keep an old `app.js` with the new `index.html`: the new host form
+  showed its SSH config file field while the old script ignored it and the
+  old error handler printed "[object Object]". Beacon now sends
+  `Cache-Control: no-cache` (revalidate on each load, usually a 304) on the
+  page, its scripts and API answers.
+
 ## [0.26.1] — 2026-10-29
 
 ### Fixed
