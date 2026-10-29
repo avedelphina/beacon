@@ -141,7 +141,12 @@
       <label>SSH user <span class="hint">(empty: no SSH, A2A only)</span> <input name="ssh_user" placeholder="deploy"></label>
       <label>SSH port <input name="ssh_port" type="number" value="22" required></label>
     </div>
-    <label>SSH key path <input name="ssh_key" placeholder="~/.ssh/fleet_ed25519"></label>
+    <label>SSH key path <span class="hint">(or a config file below, not both)</span>
+      <input name="ssh_key" placeholder="~/.ssh/fleet_ed25519">
+    </label>
+    <label>SSH config file <span class="hint">(a Teleport tbot host: /tbot-data/ssh_config)</span>
+      <input name="ssh_config_file" placeholder="/tbot-data/ssh_config">
+    </label>
     <label>Tags <span class="hint">(comma separated)</span> <input name="tags" placeholder="prod, edge, eu"></label>
     <div class="modal-actions">
       <button type="button" class="btn" data-close>Cancel</button>

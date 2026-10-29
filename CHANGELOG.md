@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.26.1] — 2026-10-29
+
+### Fixed
+
+- **The host form can set an SSH config file.** It had only a key path, so a
+  host reached through Teleport tbot (which uses `/tbot-data/ssh_config`, not a
+  key) could not be created or switched to SSH in the UI, and saving an existing
+  one with the form dropped its config file and failed. The form now has the
+  field, fills it in, and sends exactly one of key and config file.
+- **Validation errors are readable.** The page showed "[object Object]" for any
+  error the server sent as a list (every validation failure). It now says which
+  field and why, for example `ssh: ssh needs exactly one of key or config_file,
+  not both or neither`.
+
 ## [0.26.0] — 2026-10-29
 
 ### Added
