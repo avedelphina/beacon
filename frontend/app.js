@@ -10,6 +10,18 @@ function esc(value) {
 
 // Every API call goes through here: JSON body in, a non-2xx response's
 // `detail` out as a thrown Error.
+// A validation failure comes as a list of {loc, msg}, not a string: say which
+// field and why, instead of "[object Object]".
+function describe(detail) {
+  if (typeof detail === "string" || detail == null) return detail;
+  if (!Array.isArray(detail)) return JSON.stringify(detail);
+  return detail.map((d) => {
+    const field = (d.loc ?? []).filter((p) => p !== "body").join(".");
+    const msg = String(d.msg ?? JSON.stringify(d)).replace(/^Value error, /, "");
+    return field ? `${field}: ${msg}` : msg;
+  }).join("\n");
+}
+
 async function request(path, method = "GET", body) {
   const init = { method };
   if (body !== undefined) {
@@ -20,7 +32,7 @@ async function request(path, method = "GET", body) {
   if (!r.ok) {
     // An unhandled server exception is a plain-text 500, not JSON.
     const detail = await r.json().then((b) => b.detail, () => null);
-    throw new Error(detail || r.statusText);
+    throw new Error(describe(detail) || r.statusText);
   }
   return r;
 }
@@ -152,6 +164,7 @@ function fillHostForm(h) {
   f.ssh_user.value = h?.ssh?.user ?? "";
   f.ssh_port.value = h?.ssh?.port ?? 22;
   f.ssh_key.value = h?.ssh?.key ?? "";
+  f.ssh_config_file.value = h?.ssh?.config_file ?? "";
   f.tags.value = h?.tags.join(", ") ?? "";
   document.getElementById("host-modal-title").textContent = h ? `Edit ${h.id}` : "Add host";
 }
@@ -179,7 +192,11 @@ document.getElementById("host-form").addEventListener("submit", async (e) => {
     id: f.id.value,
     address: f.address.value,
     // No SSH user: a host Beacon only reaches its agents on over A2A.
-    ssh: f.ssh_user.value ? { user: f.ssh_user.value, key: f.ssh_key.value, port: Number(f.ssh_port.value) } : null,
+    // Exactly one of key and config file (a Teleport tbot host has the file); empty means none.
+    ssh: f.ssh_user.value ? {
+      user: f.ssh_user.value, key: f.ssh_key.value.trim() || null,
+      config_file: f.ssh_config_file.value.trim() || null, port: Number(f.ssh_port.value),
+    } : null,
     tags: splitList(f.tags.value),
   };
   try {
