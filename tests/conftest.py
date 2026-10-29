@@ -116,9 +116,12 @@ def client(fleet, fake_ssh):
 
 
 @pytest.fixture
-def human_client(fleet, fake_ssh):
+def human_client(fleet, fake_ssh, monkeypatch):
     """A separate TestClient carrying a real signed browser session."""
     from backend import auth
+
+    # Login is re-checked on every request, so this person is an operator.
+    monkeypatch.setattr(auth, "ALLOWED_EMAILS", frozenset({"tom@example.com"}))
 
     payload = base64.b64encode(json.dumps({"user": {"email": "tom@example.com"}}).encode()).decode()
     cookie = TimestampSigner(auth.SESSION_SECRET).sign(payload.encode()).decode()

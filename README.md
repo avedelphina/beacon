@@ -995,6 +995,37 @@ same-origin `Origin`/`Referer` header; MCP bearer calls are exempt because they 
 browser cookies. Sessions are Secure by default, expire after 8 hours, and `POST /auth/logout`
 clears them. Set `BEACON_SESSION_HTTPS_ONLY=false` only for local HTTP development.
 
+**Members (owners).** There is no list to configure: write a person's email as an
+agent's **Owner** (Agents tab, Edit) and that person can log in, without
+running the fleet. Their provider must say the email is verified
+(`email_verified`). A member sees only the agents whose `owner` is their email
+(case does not matter), in a trimmed form: no endpoint, desired config,
+templates, hosts or caller lists. They can:
+
+- see whether each of their agents answers over A2A, and its status;
+- restart an agent's gateway (T2: the same `confirm` step as for an operator);
+- read its logs, only for agents an operator set **Owner may read its logs** on
+  (`member_logs`): logs of a shared household agent hold other people's chats;
+- work the board for their agents: cards assigned to one of them or made by
+  them (a member can create a card, for one of their agents or for no agent),
+  comments and state changes, handing cards only to their own agents, and the
+  agent assigned hears about it as for any assignment;
+- answer what their agents ask "a human" (decisions, reviews, approvals) and
+  approvals about their agents. The host's address and SSH settings are left
+  out of what they see.
+
+Nothing else: no hosts, templates, policy, cron jobs, config, deploy,
+enrollment, or any other person's agent (answered "no such agent", so which
+agents exist stays unknown). `backend/members.py` holds the whole list of
+routes a member may reach, and any route not on it is refused, so a new route
+is closed to members until someone adds it there. Changing an agent's `owner`
+or `member_logs` is an access change (human browser session only, never the
+MCP token), and the login is checked on every request, so changing the owner of
+a person's last agent, or taking an operator off the allowlist, ends that
+session at once. A name that is not an email, such as `tom`, matches nobody, so
+set each agent's owner to the person's email once. An email in both places is
+an operator.
+
 **Zitadel setup:**
 
 1. Create a **Web** application, auth method **PKCE** (public client — no

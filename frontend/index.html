@@ -13,13 +13,13 @@
 <header class="topbar">
   <div class="brand"><span class="dot"></span>BEACON <span class="hint" id="beacon-version"></span></div>
   <nav class="tabs">
-    <button class="tab active" data-tab="hosts">Hosts</button>
+    <button class="tab op-only active" data-tab="hosts">Hosts</button>
     <button class="tab" data-tab="agents">Agents</button>
     <button class="tab" data-tab="board">Board</button>
     <button class="tab" data-tab="workflows">Workflows</button>
-    <button class="tab" data-tab="policy">Policy</button>
-    <button class="tab" data-tab="templates">Templates</button>
-    <button class="tab" data-tab="cron-jobs">Cron jobs</button>
+    <button class="tab op-only" data-tab="policy">Policy</button>
+    <button class="tab op-only" data-tab="templates">Templates</button>
+    <button class="tab op-only" data-tab="cron-jobs">Cron jobs</button>
   </nav>
   <div class="whoami" id="whoami" hidden>
     <span id="whoami-name"></span>
@@ -46,7 +46,7 @@
   <section id="agents-view" class="view">
     <div class="view-head">
       <h1>Agents</h1>
-      <button class="btn primary" id="add-agent">+ Add agent</button>
+      <button class="btn primary op-only" id="add-agent">+ Add agent</button>
     </div>
     <div class="tag-bar" id="agent-tag-bar"></div>
     <div class="bulk-bar" id="agent-bulk-bar" hidden>
@@ -56,7 +56,7 @@
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th class="sel"></th><th>Status</th><th>ID</th><th>Tags</th><th>Type</th><th>Host</th><th>Profile</th><th>Owner</th><th></th></tr></thead>
+        <thead><tr><th class="sel op-only"></th><th>Status</th><th>ID</th><th>Tags</th><th>Type</th><th>Host</th><th>Profile</th><th>Owner</th><th></th></tr></thead>
         <tbody id="agents-body"></tbody>
       </table>
     </div>
@@ -164,7 +164,12 @@
     <label>Tags <span class="hint">(comma separated; groups for the access policy)</span>
       <input name="tags" placeholder="family-a">
     </label>
-    <label>Owner <input name="owner" placeholder="tom"></label>
+    <label>Owner <span class="hint">(an email: that person can log in and sees this agent)</span>
+      <input name="owner" placeholder="tom@example.com">
+    </label>
+    <label class="check"><input type="checkbox" name="member_logs"> Owner may read its logs
+      <span class="hint">(off for a shared household agent: logs hold other people's chats)</span>
+    </label>
     <label>Notes <input name="notes"></label>
     <fieldset class="mesh-fields">
       <legend>A2A mesh <span class="hint">(empty endpoint: not in the mesh)</span></legend>
@@ -232,19 +237,22 @@
   <div class="modal">
     <h2 id="inspect-title">Inspect</h2>
     <div id="inspect-status" class="inspect-status"></div>
-    <div class="inspect-logs-head">
-      <span class="hint">Logs</span>
-      <button type="button" class="link-btn" id="inspect-load-logs">Load logs</button>
+    <div id="inspect-logs-section">
+      <div class="inspect-logs-head">
+        <span class="hint">Logs</span>
+        <button type="button" class="link-btn" id="inspect-load-logs">Load logs</button>
+      </div>
+      <pre id="inspect-logs" class="inspect-logs">—</pre>
     </div>
-    <pre id="inspect-logs" class="inspect-logs">—</pre>
 
     <div class="inspect-logs-head">
       <span class="hint">Operate</span>
       <button type="button" class="link-btn" id="inspect-restart">Restart gateway</button>
-      <button type="button" class="link-btn" id="inspect-restart-agent">Restart agent</button>
+      <button type="button" class="link-btn op-only" id="inspect-restart-agent">Restart agent</button>
     </div>
     <div id="inspect-restart-output" class="inspect-status" hidden></div>
 
+    <div class="op-only">
     <div class="inspect-logs-head">
       <span class="hint">Plugins</span>
       <button type="button" class="link-btn" id="inspect-plugins-list">List plugins</button>
@@ -284,6 +292,7 @@
       <button type="button" class="link-btn danger" id="inspect-decommission">Decommission…</button>
     </div>
     <pre id="inspect-decommission-output" class="inspect-logs" hidden></pre>
+    </div>
 
     <div class="modal-actions">
       <button type="button" class="btn" data-close>Close</button>

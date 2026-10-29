@@ -250,7 +250,7 @@ function renderAgentTable() {
   renderTagBar();
   const shown = allAgents.filter((a) => agentFilter === null || (agentFilter === "" ? !tagsOf(a).length : tagsOf(a).includes(agentFilter)));
   renderRows("agents", shown, (a) => `
-      <td class="sel"><input type="checkbox" data-select="${esc(a.id)}" aria-label="Select ${esc(a.id)}"${agentSelection.has(a.id) ? " checked" : ""}></td>
+      <td class="sel op-only"><input type="checkbox" data-select="${esc(a.id)}" aria-label="Select ${esc(a.id)}"${agentSelection.has(a.id) ? " checked" : ""}></td>
       <td id="status-${esc(a.id)}">${statusPill("loading")}</td>
       <td>${esc(a.id)}${openChatChip(a)}</td>
       <td>${tagChips(tagsOf(a))}</td>
@@ -260,9 +260,9 @@ function renderAgentTable() {
       <td>${esc(a.owner ?? "")}</td>
       <td class="row-actions">
         <button class="link-btn" data-inspect="${esc(a.id)}">Inspect</button>
-        ${a.reach ? `<button class="link-btn" data-enroll="${esc(a.id)}">Enroll</button>` : ""}
-        <button class="link-btn" data-edit="${esc(a.id)}">Edit</button>
-        <button class="link-btn danger" data-del="${esc(a.id)}">Delete</button>
+        ${a.reach ? `<button class="link-btn op-only" data-enroll="${esc(a.id)}">Enroll</button>` : ""}
+        <button class="link-btn op-only" data-edit="${esc(a.id)}">Edit</button>
+        <button class="link-btn danger op-only" data-del="${esc(a.id)}">Delete</button>
       </td>`, { inspect: openInspect, enroll: openEnroll, edit: editAgent, del: deleteAgent });
   document.querySelectorAll("#agents-body [data-select]").forEach((cb) => cb.addEventListener("change", () => {
     if (cb.checked) agentSelection.add(cb.dataset.select); else agentSelection.delete(cb.dataset.select);
@@ -340,6 +340,8 @@ async function openInspect(id) {
   for (const panel of ["plugins", "reconcile", "config"]) {
     document.getElementById(`inspect-${panel}-results`).innerHTML = "";
   }
+  const mine = isMember ? allAgents.find((x) => x.id === id) : null;
+  document.getElementById("inspect-logs-section").hidden = !!mine && !mine.member_logs;
   openModal("inspect-modal");
   const [s, avail] = await Promise.all([api.agentStatus(id), api.availability().then((all) => all[id]).catch(() => null)]);
   document.getElementById("inspect-status").textContent = [
@@ -712,7 +714,8 @@ document.getElementById("cron-job-form").addEventListener("submit", async (e) =>
     timezone: f.timezone.value || "UTC",
     command: { action: f.action.value },
     target_agent_ids: splitList(f.target_agent_ids.value),
-    owner: f.owner.value || null,
+    owner: f.owner.value.trim() || null,
+    member_logs: f.member_logs.checked,
     notes: f.notes.value || null,
   };
   const timeout = f.timeout.value.trim();
@@ -768,6 +771,7 @@ async function fillAgentForm(a) {
   f.profile.value = a?.profile ?? "";
   f.host.value = a?.host ?? f.host.value;
   f.owner.value = a?.owner ?? "";
+  f.member_logs.checked = !!a?.member_logs;
   f.notes.value = a?.notes ?? "";
   f.tags.value = (a?.tags ?? []).join(", ");
   f.templates.value = (a?.templates ?? []).join(", ");
@@ -923,7 +927,9 @@ async function renderBoard() {
       </button>`).join("")}</div>`;
   }).join("");
   el.querySelectorAll("[data-card]").forEach((b) => b.addEventListener("click", () => openCard(b.dataset.card)));
-  json("/api/agents/registry").then((agents) => {
+  // A member hands cards only to their own agents; the registry is the operator's.
+  (isMember ? json("/api/agents").then((agents) => agents.map((a) => ({ ...a, callable: !!a.reach })))
+            : json("/api/agents/registry")).then((agents) => {
     document.getElementById("agent-ids").innerHTML = agents.filter((a) => a.callable)
       .map((a) => `<option value="${esc(a.id)}">`).join("");
   }, () => {});
@@ -1133,18 +1139,30 @@ document.getElementById("policy-save").addEventListener("click", async () => {
 
 document.querySelector('[data-tab="policy"]').addEventListener("click", renderPolicy);
 
-renderHosts();
-renderAgents();
-renderBoard();
-renderTemplates();
-renderCronJobs();
-populateHostSelect();
+// Who is looking decides what is drawn: a member (backend/members.py) sees their
+// own agents and board and nothing else, and the server refuses the rest anyway.
+let isMember = false;
 
-fetch("/auth/me").then((r) => (r.ok ? r.json() : null)).then((user) => {
-  if (!user) return; // auth disabled — nothing to show
-  document.getElementById("whoami-name").textContent = user.name || user.email || user.sub;
-  document.getElementById("whoami").hidden = false;
-});
+async function start() {
+  const user = await fetch("/auth/me").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  isMember = user?.role === "member";  // no login (auth off): an operator
+  if (user) {
+    document.getElementById("whoami-name").textContent = user.name || user.email || user.sub;
+    document.getElementById("whoami").hidden = false;
+  }
+  if (isMember) {
+    document.body.classList.add("member");
+    document.querySelector('[data-tab="agents"]').click();
+  } else {
+    renderHosts();
+    renderTemplates();
+    renderCronJobs();
+    populateHostSelect();
+  }
+  renderAgents();
+  renderBoard();
+}
+start();
 
 setInterval(() => {
   if (document.getElementById("agents-view").classList.contains("active")) renderAgents();

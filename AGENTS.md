@@ -42,6 +42,8 @@ follows Keep a Changelog; update it when changing behavior.
 backend/
   app.py          FastAPI routes; confirm-gate and tier enforcement
   auth.py         Zitadel OIDC login (authorization code + PKCE) + auth/CSRF middleware
+  members.py      what a member (anyone named as an agent's owner) may reach: one default-deny
+                  route list, ownership checks, and the trimmed views they get
   store.py        the fleet in the operational store: records + change history
   fleet.py        YAML import/export, first-start import, `python -m backend.fleet`
   cron_store.py   cron job records
@@ -201,6 +203,11 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
   `ZITADEL_ISSUER`/`ZITADEL_CLIENT_ID` unset, every route is open. When set,
   all routes except `/auth/*` need a session (8h signed cookie, Secure by
   default) and `BEACON_ALLOWED_EMAILS` (exact email allowlist) is required.
+  An agent's `owner` (an email) makes that person a member, with a verified
+  email from the provider; there is no member list in the environment:
+  `backend/members.py` is the one list of routes they may reach, default deny,
+  so a new route needs a deliberate entry there before a member can use it.
+  The role is read on every request, not stored in the cookie.
   Browser mutations require a same-origin `Origin`/`Referer` header (CSRF
   middleware). `BEACON_MCP_TOKEN` is a static bearer accepted as an
   alternative credential, scoped to that one token.

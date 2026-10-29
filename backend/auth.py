@@ -33,6 +33,33 @@ if AUTH_ENABLED and not ALLOWED_EMAILS:
 def is_allowed_email(email: object) -> bool:
     return isinstance(email, str) and email.casefold() in ALLOWED_EMAILS
 
+
+def role_for_email(email: object) -> str | None:
+    """"operator" for the allowlist, "member" for anyone an operator named as
+    the owner of an agent, else None. Asked on every request, not only at
+    login, so taking an email off the list, or changing an agent's owner, ends
+    that session's access at once."""
+    if is_allowed_email(email):
+        return "operator"
+    if isinstance(email, str):
+        from . import members
+        if members.owns_any(email):
+            return "member"
+    return None
+
+
+def admit(claims: dict) -> str | None:
+    """The role to give a verified OIDC login, or None to refuse it. A member's
+    email is only a name an operator typed into an agent record, so the provider
+    must say it checked it: without that, anyone who could register that address
+    there would be that person."""
+    email = claims.get("email")
+    role = role_for_email(email)
+    if role == "member" and claims.get("email_verified") is not True:
+        return None
+    return role
+
+
 # The same static token the MCP server requires of its own callers doubles
 # as its credential for calling *this* API — a service has no browser to
 # complete a PKCE redirect with, so it can't hold a session cookie the
@@ -153,7 +180,7 @@ def callback(request: Request, code: str = "", state: str = "", error: str = "")
     )
 
     email = claims.get("email")
-    if not is_allowed_email(email):
+    if admit(claims) is None:
         raise HTTPException(403, "this Beacon instance is not configured to admit that account")
 
     request.session["user"] = {
@@ -175,7 +202,7 @@ def me(request: Request) -> dict:
     user = request.session.get("user")
     if not user:
         raise HTTPException(401, "not logged in")
-    return user
+    return user | {"role": role_for_email(user.get("email"))}
 
 
 def same_origin_request(request: Request) -> bool:
@@ -206,6 +233,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """Gates every request except /auth/*, /mesh/*, /a2a/*, /board/* and /enroll/* behind a logged-in session.
+    A member's session reaches only the few routes in backend/members.py.
     JSON API paths get a 401; anything else (the GUI) gets redirected to
     /auth/login — a plain GET to `/` shouldn't have to know it needs auth,
     it should just land on the login page.
@@ -236,8 +264,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if not AUTH_ENABLED:
             return await call_next(request)
-        if request.session.get("user"):
-            return await call_next(request)
+        user = request.session.get("user")
+        if user:
+            role = role_for_email(user.get("email"))
+            if role == "operator":
+                return await call_next(request)
+            if role == "member":
+                from . import members
+                denied = members.check(request.method, request.url.path, user["email"])
+                if denied is not None:
+                    return JSONResponse({"detail": denied[1]}, status_code=denied[0])
+                request.state.member = user["email"].casefold()
+                return await call_next(request)
+            request.session.clear()  # taken off the lists since it logged in
         if request.url.path.startswith("/api/"):
             return JSONResponse({"detail": "not authenticated"}, status_code=401)
         return RedirectResponse("/auth/login")

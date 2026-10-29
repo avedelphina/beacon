@@ -123,13 +123,14 @@ def test_the_mcp_token_cannot_change_tags_callers_or_board_but_can_edit_the_rest
     monkeypatch.setattr(auth, "MCP_TOKEN", "test-mcp-token")
     mcp = TestClient(app, headers={"Authorization": "Bearer test-mcp-token"})
 
-    for change in ({"tags": ["family-b"]}, {"tags": []}, {"reach": {"callers": ["a-2"]}}, {"reach": {"board": True}}):
+    for change in ({"tags": ["family-b"]}, {"tags": []}, {"reach": {"callers": ["a-2"]}}, {"reach": {"board": True}},
+                   {"owner": "someone"}, {"member_logs": True}):  # an owner is a member's way in
         refused = mcp.put("/api/agents/a-1", json=_record(**change))
         assert refused.status_code == 403, change
         assert "human browser session" in refused.json()["detail"]
 
-    assert mcp.put("/api/agents/a-1", json=_record(owner="someone", notes="edited")).status_code == 200  # not access-related
-    assert store.get_agent("a-1").tags == ["family-a"] and store.get_agent("a-1").owner == "someone"
+    assert mcp.put("/api/agents/a-1", json=_record(notes="edited")).status_code == 200  # not access-related
+    assert store.get_agent("a-1").tags == ["family-a"] and store.get_agent("a-1").notes == "edited"
     assert mcp.put("/api/agents/new-one", json={**_record(), "id": "new-one"}).status_code == 403  # a new agent arrives with tags
 
 
