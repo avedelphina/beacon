@@ -85,7 +85,7 @@ def _target_agent(request: dict) -> str | None:
 def workflow_visible(email: str, request: dict) -> bool:
     """A request that asks a person, about one of the member's agents or from one."""
     if request["eligible_responder"] != "human":
-        return request["requester"].casefold() == email.casefold()
+        return email.casefold() in {request["requester"].casefold(), request["eligible_responder"].casefold()}
     return request["requester"].casefold() == email.casefold() or bool({request["requester"], _target_agent(request)} & owned_ids(email))
 
 

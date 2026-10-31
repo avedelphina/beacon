@@ -68,11 +68,17 @@ def _decode(row: Any) -> dict:
     return result
 
 
+def _is_responder(actor: str, eligible_responder: str) -> bool:
+    """`actor` is the named responder. Emails differ only in case between a
+    login and an owner field, so they compare without case; agent ids are lowercase."""
+    return eligible_responder != "human" and actor.casefold() == eligible_responder.casefold()
+
+
 def _visible(request: dict, actor: str, human: bool = False) -> bool:
     eligible_responder = request["eligible_responder"]
     return (
         actor == request["requester"]
-        or (eligible_responder != "human" and actor == eligible_responder)
+        or _is_responder(actor, eligible_responder)
         or (human and eligible_responder == "human")
     )
 
@@ -126,8 +132,8 @@ def _eligible(request: dict, actor: str, human: bool) -> bool:
     # session is required even if an untrusted caller uses the same string.
     if eligible_responder == "human":
         return human and not (request["tier"] >= 3 and actor == request["requester"])
-    if eligible_responder == actor:
-        return not (request["tier"] >= 3 and actor == request["requester"])
+    if _is_responder(actor, eligible_responder):
+        return not (request["tier"] >= 3 and actor.casefold() == request["requester"].casefold())
     return False
 
 
@@ -138,23 +144,47 @@ def _validate_requester_responder(requester: str, eligible_responder: str, tier:
         raise WorkflowError("T3+ workflow requester and responder must be different actors")
 
 
-def validate_participants(requester: str, eligible_responder: str) -> None:
-    """Apply the same mesh/board boundary as the board MCP path."""
-    if requester == mesh.BEACON_PEER:
-        return
+def known_people() -> set[str]:
+    """Who a request can be addressed to by email: the operators, and every
+    agent's owner. Lowercase."""
+    from . import auth  # not at import: auth reads its settings when it loads
+    return set(auth.ALLOWED_EMAILS) | {a.owner.casefold() for a in store.list_agents() if a.owner}
+
+
+def owner_of(agent_id: str) -> str | None:
     try:
-        source = store.get_agent(requester)
+        return store.get_agent(agent_id).owner or None
     except (store.NotFound, store.InvalidId):
-        return
-    if not source.reach or not source.reach.board:
+        return None
+
+
+def validate_participants(requester: str, eligible_responder: str) -> None:
+    """Who may ask, and whom. The responder must be one a request can reach:
+    before, any string was accepted, so a request addressed to a name nobody
+    has (a first name, say) sat pending where no person and no agent could see
+    or answer it until it expired."""
+    try:
+        source = store.get_agent(requester) if requester != mesh.BEACON_PEER else None
+    except (store.NotFound, store.InvalidId):
+        source = None  # a person (a REST call from the page), not an agent
+    if source is not None and (not source.reach or not source.reach.board):
         raise UnauthorizedWorkflowAccess(f"{requester} is not authorized for workflow board access")
     if eligible_responder in {"human", requester}:
+        return
+    if "@" in eligible_responder:
+        if eligible_responder.casefold() not in known_people():
+            raise WorkflowError(
+                f"{eligible_responder!r} is neither an operator nor an agent's owner. Use \"human\" for any "
+                "operator, or the owner's email (agent_owner tells you whose it is)")
         return
     try:
         target = store.get_agent(eligible_responder)
     except (store.NotFound, store.InvalidId):
-        return
-    if not mesh.may_call(requester, target):
+        raise WorkflowError(
+            f"{eligible_responder!r} is not someone a request can be addressed to. Use \"human\" for any "
+            "operator, an agent id, or the email of an operator or of an agent's owner (agent_owner tells "
+            "you who owns an agent)") from None
+    if source is not None and not mesh.may_call(requester, target):
         raise UnauthorizedWorkflowAccess(f"{eligible_responder} does not accept workflow requests from {requester}")
 
 
@@ -168,6 +198,8 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
         raise WorkflowError(f"kind must be one of {', '.join(REQUEST_KINDS)}")
     requester = _validate_actor(requester)
     eligible_responder = _validate_actor(eligible_responder)
+    if "@" in eligible_responder:
+        eligible_responder = eligible_responder.casefold()
     if not isinstance(capability, str) or not capability.strip():
         raise WorkflowError("capability must not be empty")
     if not isinstance(tier, int) or tier < 0 or tier > 5:
@@ -231,9 +263,9 @@ def list_requests(*, card_id: int | None = None, state: str | None = None,
             clauses.append("state NOT IN ('executed', 'verified', 'failed', 'execution_uncertain', 'rejected', 'withdrawn', 'expired', 'stale')")
         if actor is not None:
             if human:
-                clauses.append("(requester = ? OR eligible_responder = ? OR eligible_responder = 'human')")
+                clauses.append("(requester = ? OR lower(eligible_responder) = lower(?) OR eligible_responder = 'human')")
             else:
-                clauses.append("(requester = ? OR (eligible_responder != 'human' AND eligible_responder = ?))")
+                clauses.append("(requester = ? OR (eligible_responder != 'human' AND lower(eligible_responder) = lower(?)))")
             params.extend((actor, actor))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = db.execute(f"SELECT * FROM workflow_requests {where} ORDER BY updated_at DESC, id DESC", params).fetchall()
@@ -329,7 +361,7 @@ def authorize(*, request_id: int | None, capability: str, tier: int, actor: str,
         request = _decode(row)
         if not (
             actor == request["requester"]
-            or (request["eligible_responder"] != "human" and actor == request["eligible_responder"])
+            or _is_responder(actor, request["eligible_responder"])
             or (human and request["eligible_responder"] == "human")
         ):
             raise UnauthorizedWorkflowAccess(f"{actor} cannot execute workflow request {request_id}")
