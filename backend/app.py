@@ -81,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.26.3"
+VERSION = "0.26.4"
 
 
 async def _record_actor(request: Request) -> None:

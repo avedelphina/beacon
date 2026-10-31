@@ -765,6 +765,27 @@ where no one could see it). There are three kinds of answer:
 Tier 4 and 5 answers still need a person in the web page, and the claim of an
 enrollment request still needs `human`.
 
+**Notices.** Nobody has to poll. Beacon tells the other side, best-effort (a
+failed notice is logged and never stops the request):
+
+- **Agents** get a mailbox notice, like a board assignment: the responder when
+  it is asked, and the requester when the request is answered, with the new
+  state and any note. It arrives on the agent's next sync.
+- **People** get an email, if you configure a mail server. Without
+  `BEACON_SMTP_HOST` nothing is sent. For `human` that is every operator and
+  the owners of the agents the request is from or about; for an email
+  responder, only that person. The email says who is asking, the tier, the
+  title, the expiry, and the first 800 characters of the summary (marked as
+  written by the requester), then one link to Beacon's own page. It carries
+  no plan hash and no link the agent supplied. At most 10 emails go to one
+  address per hour, so an agent cannot fill an inbox; the rest are logged.
+
+Settings, all in `.env`: `BEACON_SMTP_HOST`, `BEACON_SMTP_PORT` (587),
+`BEACON_SMTP_USER`, `BEACON_SMTP_PASSWORD`, `BEACON_SMTP_FROM` (defaults to the
+user). STARTTLS is on by default; `BEACON_SMTP_SECURITY=ssl` (or port 465)
+uses TLS from the start, and `none` is for a plain relay on a trusted network.
+Set `BEACON_PUBLIC_URL` so the link points at the right address.
+
 To connect Claude Code:
 
 ```bash
