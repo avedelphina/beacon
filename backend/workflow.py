@@ -13,7 +13,7 @@ import json
 import time
 from typing import Any
 
-from . import mesh, opstore, store
+from . import mesh, notify, opstore, store
 
 REQUEST_KINDS = ("decision", "review", "approval")
 STATES = (
@@ -243,7 +243,9 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
         _event(db, request_id, requester, "created", None, "pending", {
             "kind": kind, "capability": capability.strip(), "tier": tier,
         })
-    return get(request_id)
+    created = get(request_id)
+    notify.workflow_created(created)  # after the commit: a notice must never undo the request
+    return created
 
 
 def list_requests(*, card_id: int | None = None, state: str | None = None,
@@ -338,7 +340,9 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
         _event(db, request_id, actor, "responded", "pending", state, {
             "action": action, "plan_revision": plan_revision, "plan_hash": plan_hash, "response": response,
         })
-    return get(request_id)
+    answered = get(request_id)
+    notify.workflow_answered(answered, actor)
+    return answered
 
 
 def authorize(*, request_id: int | None, capability: str, tier: int, actor: str,

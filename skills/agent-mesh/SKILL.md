@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (peers named <peer>-mailbox), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.4.0
+version: 1.5.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -183,14 +183,21 @@ only then.
 Leave out `plan_revision` and `plan_hash`. Beacon ties the request to its own
 text. Then wait: do not do the thing until the state is `approved`.
 
+**You are told.** When the request is answered, Beacon sends you a notice
+(a mailbox message from Beacon, on your next sync, so within minutes) with the
+new state and the answer. You do not need to poll. End your turn, or do other
+work, and carry on when the notice comes. People are told by email, if the
+operator set that up, so an answer can take as long as a person takes: up to
+the request's expiry, 24 hours by default.
+
 **Follow up:** `workflow_get(request_id)` shows the state and the answer.
 `workflow_list(card_id=N)` shows the requests on a card. States: `pending`,
 `approved`, `rejected`, `changes_requested` (read the answer, change the plan,
 and ask again), `expired`, `withdrawn`. An `approved` answer is for that exact
 text only. If you want something different, make a new request.
 
-**When you are the one asked:** `workflow_list(state="pending")` shows what is
-waiting for you. Read it with `workflow_get`, then `workflow_respond` with
+**When you are the one asked:** you get a notice when it is made. `workflow_list(state="pending")`
+shows everything waiting for you. Read it with `workflow_get`, then `workflow_respond` with
 `action` (`approved`, `rejected`, `changes_requested`, or `choose_option` with
 the option in `response`), and give `plan_revision` and `plan_hash` exactly as
 `workflow_get` shows them. If the plan changed since, it is refused: read it again.

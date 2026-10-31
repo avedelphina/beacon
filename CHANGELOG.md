@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [0.26.4] — 2026-10-31
+
+### Added
+
+- **Workflow requests notify.** Before, an agent that asked for an approval had
+  to poll for the answer, and the person asked had to open the Workflows tab.
+  Now an agent responder is told when it is asked, and the requester agent is
+  told when its request is answered (a mailbox notice, with the state and any
+  note). Failures are logged and never stop the request.
+- **Email to people**, when a mail server is configured (`BEACON_SMTP_HOST`,
+  `_PORT`, `_USER`, `_PASSWORD`, `_FROM`, `_SECURITY`; off by default). A
+  `human` request emails every operator and the owners of the agents involved;
+  a request addressed to an email goes to that person. The text is plain, marks
+  the agent's words as the requester's, is cut at 800 characters, carries one
+  link to Beacon's own page and no plan hash, and is limited to 10 per address
+  per hour. The agent skill (1.5.0) says that an answer comes as a notice, so
+  agents do not poll.
+
 ## [0.26.3] — 2026-10-31
 
 ### Fixed

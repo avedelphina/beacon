@@ -55,6 +55,7 @@ backend/
   policy.py       the access policy (YAML text in the store): tag rules
                   (Tailscale-style) behind may_call; preview/save for the Policy
                   tab (T4, history in fleet_history)
+  notify.py       workflow notices: mailbox to agents, email to people (opt-in SMTP)
   mailbox.py      relay + voicemail behind POST /a2a/{agent}; delivers on the
                   recipient's /mesh pull (no scheduler); slow answers come back
                   by A2A push to /a2a/{agent}/push/{id} (long work)
