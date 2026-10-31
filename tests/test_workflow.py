@@ -5,8 +5,20 @@ import time
 
 import pytest
 
-from backend import board, opstore, workflow
+from backend import auth, board, opstore, store, workflow
+from backend.schemas import Agent, Host
 from backend.ssh import SSHResult
+
+
+@pytest.fixture(autouse=True)
+def _people(fleet, monkeypatch):
+    """A request can only be addressed to someone who exists: an operator, or an
+    agent. Most tests here address `reviewer@example.com` and `agent-b`."""
+    monkeypatch.setattr(auth, "ALLOWED_EMAILS", frozenset({"reviewer@example.com"}))
+    if not any(h.id == "wf-host" for h in store.list_hosts()):
+        store.upsert_host(Host.model_validate({"id": "wf-host", "address": "10.0.0.9",
+                                               "ssh": {"user": "u", "key": "/k"}}))
+    store.upsert_agent(Agent.model_validate({"id": "agent-b", "type": "hermes", "host": "wf-host"}))
 
 
 def _card():
@@ -18,7 +30,7 @@ def _binding():
 
 
 def test_existing_operational_database_gets_workflow_tables(tmp_path, monkeypatch):
-    state = tmp_path / "state"
+    state = tmp_path / "old-state"  # not the fixture's own state dir, which already exists
     state.mkdir()
     db_path = state / "beacon.db"
     with sqlite3.connect(db_path) as db:
@@ -103,9 +115,9 @@ def test_expiry_and_stale_plan_are_visible():
     request = workflow.create(
         card_id=_card()["id"], kind="review", requester="beacon", eligible_responder="human",
         capability="push_config", tier=3, title="Expired review", summary="Short-lived review",
-        options=[], target={"agent_id": "a1"}, expires_at=time.time() + 0.01, **binding,
+        options=[], target={"agent_id": "a1"}, expires_at=time.time() + 0.5, **binding,
     )
-    time.sleep(0.02)
+    time.sleep(0.6)  # a margin that the lookups in create() cannot eat
     assert workflow.get(request["id"])["state"] == "expired"
 
     fresh = workflow.create(
@@ -390,9 +402,9 @@ def test_expired_response_persists_expiry_event():
     request = workflow.create(
         card_id=_card()["id"], kind="review", requester="beacon", eligible_responder="reviewer@example.com",
         capability="push_config", tier=3, title="Expiring review", summary="Short-lived review",
-        options=[], target={"agent_id": "a1"}, expires_at=time.time() + 0.01, **binding,
+        options=[], target={"agent_id": "a1"}, expires_at=time.time() + 0.5, **binding,
     )
-    time.sleep(0.02)
+    time.sleep(0.6)  # a margin that the lookups in create() cannot eat
     import pytest
     with pytest.raises(workflow.WorkflowError, match="expired"):
         workflow.respond(request["id"], actor="reviewer@example.com", human=True,
@@ -450,3 +462,65 @@ def test_driver_stream_exception_consumes_approval(client, human_client, fake_ss
     response = client.post(f"/api/agents/a1/config-diff?confirm=true&workflow_request_id={request['id']}")
     assert response.status_code == 502
     assert workflow.get(request["id"])["state"] == "execution_uncertain"
+
+
+# --- who a request can be addressed to -------------------------------------
+
+
+def _ask(requester, responder, **extra):
+    return workflow.create(
+        card_id=_card()["id"], kind="approval", requester=requester, eligible_responder=responder,
+        capability="ask", tier=extra.pop("tier", 2), title="Expose the dashboard", summary="On the tailnet only",
+        options=[], target={}, **_binding(), **extra,
+    )
+
+
+def test_a_name_nobody_has_is_refused_with_advice():
+    """The bug: a request addressed to a first name sat pending, answerable by no one and visible to no one."""
+    for name in ("alex", "Alex", "someone@nowhere.example"):
+        with pytest.raises(workflow.WorkflowError, match='Use "human"'):
+            _ask("beacon", name)
+    assert workflow.list_requests() == []
+
+
+def test_a_person_can_be_addressed_by_email_if_an_operator_or_an_owner(monkeypatch):
+    store.upsert_agent(Agent.model_validate({"id": "family-bot", "type": "hermes", "host": "wf-host",
+                                             "owner": "Owner@Example.com"}))
+    for email in ("reviewer@example.com", "Owner@Example.com"):
+        request = _ask("beacon", email)
+        assert request["eligible_responder"] == email.casefold()  # stored one way, whatever the case typed
+
+    # The person it names sees it and answers it, whichever case their login uses.
+    binding = _binding()
+    mine = workflow.list_requests(actor="OWNER@example.com", human=True)
+    assert [r["eligible_responder"] for r in mine] == ["owner@example.com"]
+    done = workflow.respond(mine[0]["id"], actor="OWNER@example.com", human=True, action="approved",
+                            response={}, **binding)
+    assert done["state"] == "approved"
+    # Nobody else's request is theirs.
+    assert workflow.list_requests(actor="stranger@example.com", human=True) == []
+
+
+def test_human_still_means_any_operator(human_client):
+    request = _ask("beacon", "human")
+    assert [r["id"] for r in workflow.list_requests(actor="reviewer@example.com", human=True)] == [request["id"]]
+
+
+def test_an_agent_looks_up_owners_only_of_agents_it_may_reach(client, monkeypatch):
+    from backend import board_mcp, mesh, policy
+    for agent_id, owner in (("family-bot", "owner@example.com"), ("other-bot", "private@example.com"), ("alpha", None)):
+        store.upsert_agent(Agent.model_validate({"id": agent_id, "type": "hermes", "host": "wf-host", "owner": owner,
+                                                 "reach": {"endpoint": f"http://{agent_id}.test:9900"}}))
+    # alpha may call family-bot only.
+    monkeypatch.setattr(policy, "load", lambda: policy.parse(
+        'rules:\n  - {from: [alpha], to: [family-bot]}\n'))
+
+    assert board_mcp.owner_lookup("alpha", "family-bot") == {
+        "agent": "family-bot", "owner": "owner@example.com", "ask_with": "owner@example.com"}
+    assert board_mcp.owner_lookup("family-bot")["owner"] == "owner@example.com"  # its own, by default
+    assert board_mcp.owner_lookup("alpha")["ask_with"] == "human"  # no owner: ask any operator
+    with pytest.raises(PermissionError):
+        board_mcp.owner_lookup("alpha", "other-bot")  # may not call it, so may not learn its owner
+    with pytest.raises(PermissionError):
+        board_mcp.owner_lookup("alpha", "no-such-agent")
+    assert board_mcp.owner_lookup(mesh.BEACON_PEER, "other-bot")["owner"] == "private@example.com"

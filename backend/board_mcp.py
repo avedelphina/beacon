@@ -61,6 +61,22 @@ def _author(ctx: Context) -> str:
     return author
 
 
+def owner_lookup(caller: str, agent_id: str | None = None) -> dict:
+    """The owner of `agent_id` (the caller's own by default), for a caller allowed
+    to know: its own owner, or the owner of an agent it may call. Anyone else's
+    owner is not for an agent to learn. Beacon (an operator's MCP) may ask any."""
+    target = agent_id or caller
+    if caller != mesh.BEACON_PEER and target != caller:
+        try:
+            allowed = mesh.may_call(caller, store.get_agent(target))
+        except (store.NotFound, store.InvalidId):
+            allowed = False
+        if not allowed:
+            raise PermissionError(f"you may not look up {target!r}")
+    owner = workflow.owner_of(target)
+    return {"agent": target, "owner": owner, "ask_with": owner or "human"}
+
+
 def build() -> MCPServer:
     server = MCPServer("beacon-board", instructions=INSTRUCTIONS)
 
@@ -96,6 +112,13 @@ def build() -> MCPServer:
     def card_comment(ctx: Context, card_id: int, text: str, context_id: str | None = None) -> dict:
         """Add progress or a question to a card's history. context_id links an A2A thread."""
         return board.comment(_author(ctx), card_id, text, context_id)
+
+    @server.tool()
+    def agent_owner(ctx: Context, agent_id: str | None = None) -> dict:
+        """Who owns an agent: its owner's email, or null. Leave agent_id out for your own. Use
+        the email as workflow_create's eligible_responder to ask that person; "human" asks any
+        operator instead. You may look up your own owner and the owners of agents you may call."""
+        return owner_lookup(_author(ctx), agent_id)
 
     @server.tool()
     def workflow_list(ctx: Context, card_id: int | None = None, state: str | None = None) -> list[dict]:

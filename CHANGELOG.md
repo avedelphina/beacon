@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## [0.26.3] — 2026-10-31
+
+### Fixed
+
+- **A workflow request addressed to a name nobody has was accepted, and then
+  nobody could see or answer it.** An agent asked for approvals with
+  `eligible_responder` set to a first name. Beacon took any string, the request
+  sat pending, and no operator saw it in the Workflows tab, because that shows
+  requests for `human` or for your own login. Beacon now refuses a responder
+  that is not `human`, an agent id, or the email of an operator or an agent's
+  owner, and the error says what to use.
+
+### Added
+
+- **Ask a particular person.** A request can be addressed to the email of an
+  operator or of an agent's owner. That person sees it and answers it (the
+  case of the email does not matter). `human` still means any operator, plus the
+  owners involved.
+- **`agent_owner`** (board MCP): an agent looks up its own owner, or the owner
+  of an agent it may call, and gets the value to use as `eligible_responder`.
+  The agent skill (1.4.0) explains when to ask the owner and when `human`.
+
 ## [0.26.2] — 2026-10-29
 
 ### Fixed

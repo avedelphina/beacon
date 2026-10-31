@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (peers named <peer>-mailbox), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.3.0
+version: 1.4.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -159,8 +159,15 @@ only then.
 - `card_id`: the card this belongs to;
 - `kind`: `decision` (pick one of `options`, at least one), `review` (check
   work) or `approval` (permission to do something);
-- `eligible_responder`: who may answer. `human` means a person using Beacon's
-  web page. Or an agent id, if that agent's operator lets you ask it;
+- `eligible_responder`: who may answer. Beacon refuses any name that is not one
+  of these three, so a first name on its own does not work:
+  - `human`: any operator using Beacon's web page. Use it when it does not
+    matter which person answers;
+  - the email of one person: call `agent_owner` first. It gives you your own
+    owner, or the owner of an agent you may call, and the exact value to use
+    (`ask_with`). When the agent has no owner, it says `human`. Ask the owner
+    about their own agent; ask `human` for anything about the fleet;
+  - an agent id, if that agent's operator lets you ask it;
 - `capability`: a short name for what you want to do, for example `ask`,
   `publish-report` or `delete-old-logs`;
 - `tier`: how risky it is, from 0 to 5. Use `1` for a plain question. Use `3`

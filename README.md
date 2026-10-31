@@ -696,7 +696,7 @@ Cards live in the operational store, not in fleet YAML.
   itself, with the tools `board_list`, `board_card`, `card_create`,
   `card_update`, and `card_comment`, and the workflow tools
   `workflow_create`, `workflow_list`, `workflow_get`, and `workflow_respond`,
-  plus `enroll_request` and `enroll_claim` for enrollment
+  plus `agent_owner` (below) and `enroll_request` and `enroll_claim` for enrollment
   (decisions, reviews, and approvals attached to a card; the agent skill
   explains when to use them, and an agent may leave out `plan_revision` and
   `plan_hash` so that Beacon binds the request to its own text). It is served at the address agents
@@ -747,6 +747,23 @@ decides alone. The sync does not see variables that a systemd unit or a
 launchd plist sets itself. The report comes from the agent's own host, so
 it catches a chat that someone opened later by mistake. It does not
 protect against a host that lies.
+
+**Asking a person.** A workflow request names who may answer in
+`eligible_responder`, and Beacon refuses a name nobody can answer (before, an
+unknown name such as a first name was accepted, and the request sat pending
+where no one could see it). There are three kinds of answer:
+
+- `human`: any operator, and the owner of an agent that the request is from or
+  about. Use it when it does not matter which person answers.
+- A person's **email**: that person only. It must be an operator's, or the
+  `owner` of an agent (the owner field is the list of members). An agent finds
+  its own owner, or the owner of an agent it may call, with `agent_owner`.
+  That person sees the request in the Workflows tab and may answer it, whatever
+  case their login uses.
+- An **agent id**, if that agent's access policy lets the asker call it.
+
+Tier 4 and 5 answers still need a person in the web page, and the claim of an
+enrollment request still needs `human`.
 
 To connect Claude Code:
 
