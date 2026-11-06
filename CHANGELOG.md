@@ -19,7 +19,7 @@
   past it operators and the owner are emailed, and again when it is back.
   Beacon still has no timer: every pull checks the other agents.
 - **`mailbox_ttl`**: how long the mailbox holds a message for an agent (a
-  laptop may be off for days).
+  laptop may be off for days). The agent skill (1.5.1) says so.
 - Health reports and their history: the sync sends `X-Beacon-Health` with each
   pull, every change is kept (`GET /api/agents/{id}/health-events`), and
   operators and owners are emailed when a gateway is restarted, when healing

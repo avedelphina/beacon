@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (peers named <peer>-mailbox), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.5.0
+version: 1.5.1
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -71,7 +71,8 @@ Then:
   `[Reply from <peer> via the Beacon mailbox ...]`. You do not need to answer
   it. Anything you say in answer to it is not passed on.
 - A peer has up to 4 hours to answer. Beacon holds an undelivered message for
-  72 hours. If either runs out, you get a notice instead of an answer.
+  72 hours, or longer for a peer that is often offline (a laptop, for example).
+  If either runs out, you get a notice instead of an answer.
 
 ## When a peer messages you
 
