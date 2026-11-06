@@ -72,7 +72,7 @@ const splitList = (value) => value.split(",").map((t) => t.trim()).filter(Boolea
 function statusPill(state, title = "") {
   const labels = { "not-installed": "not installed", crashlooping: "crash-looping", "sync-only": "sync only", "no-a2a": "no A2A" };
   const safeState = ["loading", "active", "inactive", "failed", "unreachable", "not-installed", "crashlooping", "starting", "stopping",
-    "online", "sync-only", "offline", "no-a2a"].includes(state) ? state : "unknown";
+    "online", "sync-only", "away", "offline", "no-a2a"].includes(state) ? state : "unknown";
   const label = labels[safeState] || safeState;
   return `<span class="status-pill ${safeState}"${title ? ` title="${esc(title)}"` : ""}><span class="dot"></span>${esc(label)}</span>`;
 }
@@ -1107,6 +1107,17 @@ function showPolicyResult(r, extra = "") {
   }
   out.innerHTML = parts.join("");
   document.getElementById("policy-matrix-wrap").innerHTML = r.matrix ? policyMatrixHtml(r.matrix, r.added, r.removed) : "";
+  document.getElementById("policy-health-wrap").innerHTML = r.health ? policyHealthHtml(r.health) : "";
+}
+
+// What each agent ends up with from the policy's `health` list.
+function policyHealthHtml(health) {
+  const ids = Object.keys(health).sort();
+  if (!ids.length) return "";
+  const span = (s) => s == null ? "never" : s % 86400 === 0 ? `${s / 86400} d` : s % 3600 === 0 ? `${s / 3600} h` : `${Math.round(s / 60)} min`;
+  return `<table class="policy-health"><thead><tr><th>agent</th><th>self-healing</th><th>tell people after</th><th>mailbox holds</th></tr></thead><tbody>${
+    ids.map((id) => `<tr><td>${esc(id)}</td><td>${health[id].heal ? "on" : "off"}</td><td>${esc(span(health[id].quiet_after))}</td><td>${esc(span(health[id].mailbox_ttl))}</td></tr>`).join("")
+  }</tbody></table>`;
 }
 
 async function renderPolicyTags() {
@@ -1125,7 +1136,7 @@ async function renderPolicy() {
     const p = await json("/api/policy");
     document.getElementById("policy-text").value = p.text;
     policyHash = p.hash;
-    showPolicyResult({ errors: [], problems: p.problems, matrix: p.matrix, added: [], removed: [], restarts: [] });
+    showPolicyResult({ errors: [], problems: p.problems, matrix: p.matrix, health: p.health, added: [], removed: [], restarts: [] });
   } catch (err) {
     document.getElementById("policy-result").textContent = `Could not load the policy: ${err.message}`;
   }
@@ -1143,7 +1154,8 @@ document.getElementById("policy-save").addEventListener("click", async () => {
   const text = document.getElementById("policy-text").value;
   try {
     const first = await json("/api/policy", "PUT", { text, base_hash: policyHash, confirm: false });
-    showPolicyResult({ errors: [], problems: first.problems, matrix: (await json("/api/policy/preview", "POST", { text })).matrix,
+    const checked = await json("/api/policy/preview", "POST", { text });
+    showPolicyResult({ errors: [], problems: first.problems, matrix: checked.matrix, health: checked.health,
                        added: first.added, removed: first.removed, restarts: first.restarts });
     if (!confirm(`${first.detail}\n\nSave this policy?`)) return;
     const done = await json("/api/policy", "PUT", { text, base_hash: policyHash, confirm: true });

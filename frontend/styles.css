@@ -271,6 +271,7 @@ td[data-label="ID"] .chip { margin-left: 0.4rem; }
 .status-pill.online .dot { background: var(--good); }
 .status-pill.sync-only .dot { background: var(--warn); }
 .status-pill.offline .dot { background: var(--crit); }
+.status-pill.away .dot { background: var(--slate-2); }
 .status-pill.no-a2a .dot { background: var(--slate-2); }
 .status-pill.not-installed .dot { background: var(--slate-2); }
 .status-pill.loading .dot { background: var(--line-soft); }
@@ -493,3 +494,7 @@ td.sel input { width: 1.05rem; height: 1.05rem; cursor: pointer; }
   .policy-editor { min-height: 45vh; }
   .board-card, .board-col { min-width: 0; }
 }
+
+.policy-health { border-collapse: collapse; font-size: 0.85rem; }
+.policy-health th, .policy-health td { border: 1px solid var(--line-soft); padding: 0.3rem 0.6rem; text-align: left; }
+.policy-health td:first-child { font-family: var(--font-mono); }

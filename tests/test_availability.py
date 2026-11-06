@@ -67,10 +67,14 @@ def test_an_unreachable_agent_is_offline_until_its_host_syncs(fleet_with_ports):
     availability.record_pull("dead")
     result = availability.check_all(store.list_agents())["dead"]
     assert result["state"] == "sync-only" and "synced 0 min ago" in result["detail"]
-    # A pull that is too old stops counting.
+    # A pull that is too old stops counting: first the agent is away (still
+    # within its quiet_after, 30 minutes by default), then offline.
     with opstore.connect() as db:
         db.execute("UPDATE agent_seen SET last_pull = ? WHERE agent = 'dead'",
                    (time.time() - availability.SYNC_FRESH_SECONDS - 60,))
+    assert availability.check_all(store.list_agents())["dead"]["state"] == "away"
+    with opstore.connect() as db:
+        db.execute("UPDATE agent_seen SET last_pull = ? WHERE agent = 'dead'", (time.time() - 31 * 60,))
     assert availability.check_all(store.list_agents())["dead"]["state"] == "offline"
 
 
@@ -117,4 +121,4 @@ def test_a_pending_restart_says_nothing_about_an_agent_that_answers(fleet_with_p
     with TestClient(app) as c:
         headers = {"Authorization": f"Bearer {mesh.token('alpha', mesh.BEACON_PEER)}", "X-Beacon-Restart": "pending"}
         assert c.get("/mesh/alpha", headers=headers).status_code == 200
-    assert availability.check_all(store.list_agents())["alpha"] == {"last_pull_seconds_ago": 0, "state": "online", "detail": ""}
+    assert availability.check_all(store.list_agents())["alpha"] == {"last_pull_seconds_ago": 0, "state": "online", "detail": "", "health": None}

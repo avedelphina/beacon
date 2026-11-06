@@ -128,8 +128,22 @@ CREATE TABLE IF NOT EXISTS agent_seen (
     agent       TEXT PRIMARY KEY,
     last_pull   REAL NOT NULL,     -- the agent's host sync last pulled /mesh/{agent}
     pulls       INTEGER NOT NULL DEFAULT 1,
-    restart_pending INTEGER        -- 1 while the host sync still owes the agent a gateway restart; NULL = not reported
+    restart_pending INTEGER,       -- 1 while the host sync still owes the agent a gateway restart; NULL = not reported
+    health      TEXT,              -- the host sync's last probe: ok | failing | healing | gave-up | network
+    health_detail TEXT,
+    quiet_notified INTEGER NOT NULL DEFAULT 0  -- 1 once people were told it went quiet; cleared on its next pull
 );
+
+-- Every change of an agent's health as its host sync reports it, kept as the
+-- record of what self-healing did and why (backend/availability.py).
+CREATE TABLE IF NOT EXISTS health_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent       TEXT NOT NULL,
+    state       TEXT NOT NULL,
+    detail      TEXT,
+    at          REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS health_events_by_agent ON health_events (agent, id);
 
 -- Single-use codes that hand an agent's install script to its host (backend/onboarding.py).
 CREATE TABLE IF NOT EXISTS enrollments (
@@ -176,6 +190,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE agent_seen ADD COLUMN pulls INTEGER NOT NULL DEFAULT 1")
     if "restart_pending" not in seen:
         conn.execute("ALTER TABLE agent_seen ADD COLUMN restart_pending INTEGER")
+    for column, decl in (("health", "TEXT"), ("health_detail", "TEXT"),
+                         ("quiet_notified", "INTEGER NOT NULL DEFAULT 0")):
+        if column not in seen:
+            conn.execute(f"ALTER TABLE agent_seen ADD COLUMN {column} {decl}")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(card_events)")}
     if "notice_id" not in columns:
         conn.execute("ALTER TABLE card_events ADD COLUMN notice_id INTEGER REFERENCES mailbox (id)")

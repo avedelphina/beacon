@@ -200,6 +200,9 @@ def _load_sync():
     spec = importlib.util.spec_from_file_location("hermes_mesh_sync", SYNC_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    # These tests are about config, not health: a probe of their made-up
+    # endpoints would only wait for its timeout (test_self_healing.py covers it).
+    module.probe_agent = lambda endpoint, token: ("ok", "")
     return module
 
 

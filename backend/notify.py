@@ -88,6 +88,65 @@ def _agent_notice(agent_id: str, request: dict, text: str, skip: str) -> None:
     threading.Thread(target=mailbox.deliver_pending, args=(agent_id,), daemon=True).start()
 
 
+# --- agent health (self-healing and quiet agents) ---------------------------
+
+# What people hear about, by the state the agent's host sync reports.
+_HEALTH_NEWS = {
+    "healing": "{agent} stopped answering on its own host, so its gateway is being restarted",
+    "gave-up": "{agent} still does not answer after restarts; it needs a person",
+}
+
+
+def agent_health(agent_id: str, state: str, previous: str, detail: str) -> None:
+    """Email operators and the owner when an agent's host restarted its gateway,
+    gave up, or the agent recovered after either. Nothing for an agent that
+    merely failed one probe, or for a network problem (no restart helps)."""
+    try:
+        if state in _HEALTH_NEWS:
+            news = _HEALTH_NEWS[state].format(agent=agent_id)
+        elif state == "ok" and previous in ("healing", "gave-up"):
+            news = f"{agent_id} answers again"
+        else:
+            return
+        body = f"{news}.\n" + (f"\nWhat its host found: {detail[:300]}\n" if detail else "") + _footer()
+        _email(_people_for(agent_id), f"Beacon: {news}", body)
+    except Exception:
+        logger.exception("health notice for %s failed", agent_id)
+
+
+def agent_quiet(agent_id: str, seconds: int) -> None:
+    try:
+        hours = seconds // 3600
+        when = f"{hours} h" if hours else f"{seconds // 60} min"
+        _email(_people_for(agent_id), f"Beacon: {agent_id} has not synced for {when}",
+               f"{agent_id}'s host has not checked in with Beacon for {when}, longer than its policy allows "
+               f"(quiet_after). The host may be off, or its sync job stopped.\n" + _footer())
+    except Exception:
+        logger.exception("quiet notice for %s failed", agent_id)
+
+
+def agent_back(agent_id: str) -> None:
+    try:
+        _email(_people_for(agent_id), f"Beacon: {agent_id} is syncing again",
+               f"{agent_id}'s host checks in with Beacon again.\n" + _footer())
+    except Exception:
+        logger.exception("back notice for %s failed", agent_id)
+
+
+def _people_for(agent_id: str) -> set[str]:
+    from . import auth
+    owner = None
+    try:
+        owner = store.get_agent(agent_id).owner
+    except (store.NotFound, store.InvalidId):
+        pass
+    return {p.casefold() for p in set(auth.ALLOWED_EMAILS) | ({owner} if owner else set())}
+
+
+def _footer() -> str:
+    return f"\nThe Agents tab shows its state: {mesh.public_url() or 'your Beacon page'}\n"
+
+
 # --- email -----------------------------------------------------------------
 
 

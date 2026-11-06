@@ -210,6 +210,8 @@ def config(agent_id: str) -> dict:
         # The agent signs in to the board with its pull token, which it has.
         "board": {"url": f"{beacon_url}/board/mcp"} if beacon_url and board_allowed(agent) else None,
         "skills": skills(),
+        # How the host sync looks after this agent (fleet policy `health`).
+        "health": policy.health_for(policy.load(), agent),
     }
 
 

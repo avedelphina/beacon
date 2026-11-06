@@ -13,7 +13,7 @@ from pydantic import BaseModel, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, availability, board, bus, cron_store, fleet, mailbox, members, mesh, onboarding, opstore, policy, scheduler, store, templates, workflow
+from . import auth, availability, board, bus, cron_store, fleet, mailbox, members, mesh, notify, onboarding, opstore, policy, scheduler, store, templates, workflow
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, CronJob, Host
@@ -81,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.26.4"
+VERSION = "0.27.0"
 
 
 async def _record_actor(request: Request) -> None:
@@ -377,6 +377,7 @@ def get_policy() -> dict:
         "policy": loaded.model_dump(by_alias=True) if loaded else None,
         "problems": policy.problems(loaded, fleet),
         "matrix": policy.matrix(loaded, fleet),
+        "health": policy.health_table(loaded, fleet),
     }
 
 
@@ -762,7 +763,9 @@ class InboxReport(BaseModel):
 def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None = Header(None),
                 x_beacon_sync_version: str | None = Header(None),
                 x_beacon_open_chat: str | None = Header(None, max_length=2048),
-                x_beacon_restart: str | None = Header(None, max_length=16)) -> dict:
+                x_beacon_restart: str | None = Header(None, max_length=16),
+                x_beacon_health: str | None = Header(None, max_length=16),
+                x_beacon_health_detail: str | None = Header(None, max_length=512)) -> dict:
     """An agent's own A2A mesh config, pulled by its host's sync job. Outside
     /api/ on purpose: the only credential is that agent's derived pull token —
     not a session, not the MCP bearer — because the body holds tokens no one
@@ -772,7 +775,16 @@ def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None
     """
     if not mesh.may_pull(id_, authorization):
         raise HTTPException(401, "not authorized for this agent's mesh config")
-    availability.record_pull(id_)
+    if availability.record_pull(id_):
+        background.add_task(notify.agent_back, id_)
+    if x_beacon_health is not None:
+        # The sync's own probe of its agent, and what self-healing did about it.
+        previous = availability.record_health(id_, x_beacon_health, x_beacon_health_detail or "")
+        if previous is not None:
+            background.add_task(notify.agent_health, id_, x_beacon_health, previous, x_beacon_health_detail or "")
+    # Every pull also looks for agents that stopped pulling: no timer needed
+    # while any agent still syncs.
+    background.add_task(_tell_about_quiet_agents)
     if x_beacon_restart in ("pending", "none"):
         availability.record_restart(id_, x_beacon_restart == "pending")
     if x_beacon_open_chat is not None:
@@ -787,6 +799,19 @@ def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None
         # by calling the agent, after this response.
         background.add_task(mailbox.deliver_pending, id_)
     return config
+
+
+def _tell_about_quiet_agents() -> None:
+    for agent, seconds in availability.went_quiet(store.list_agents()):
+        notify.agent_quiet(agent.id, seconds)
+
+
+@app.get("/api/agents/{id_}/health-events")
+def agent_health_events(id_: str, limit: int = 50) -> list[dict]:
+    """What the agent's host sync reported about it over time: the record of
+    what self-healing found and did (backend/availability.py)."""
+    store.get_agent(id_)
+    return availability.health_events(id_, min(max(limit, 1), 500))
 
 
 @app.post("/mesh/{id_}/inbox/{message_id}")

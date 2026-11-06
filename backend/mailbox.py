@@ -77,12 +77,22 @@ def enqueue(sender: str, recipient: str, kind: str, body: str, context_id: str |
         return _insert(db, sender, recipient, kind, body, context_id, reply_to, state)
 
 
+def _ttl(recipient: str) -> int:
+    """How long a message waits for `recipient`: its `mailbox_ttl` in the fleet
+    policy (a laptop may be off for days), else TTL_SECONDS."""
+    from . import policy  # policy reads the store; not needed at import
+    try:
+        return policy.health_for(policy.load(), store.get_agent(recipient))["mailbox_ttl"]
+    except (store.NotFound, store.InvalidId):
+        return TTL_SECONDS  # Beacon itself, or no longer in the fleet
+
+
 def _insert(db, sender, recipient, kind, body, context_id=None, reply_to=None, state="queued") -> int:
     now = time.time()
     return db.execute(
         "INSERT INTO mailbox (sender, recipient, kind, body, context_id, reply_to, state, created_at,"
         " updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (sender, recipient, kind, body, context_id, reply_to, state, now, now, now + TTL_SECONDS),
+        (sender, recipient, kind, body, context_id, reply_to, state, now, now, now + _ttl(recipient)),
     ).lastrowid
 
 
