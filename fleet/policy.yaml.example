@@ -8,7 +8,7 @@
 
 # Optional: declare the tags in use, so a typo is reported instead of
 # silently matching nothing.
-tags: [family-a, family-b]
+tags: [family-a, family-b, mobile]
 
 rules:
   # Each family talks within itself ...
@@ -22,3 +22,10 @@ rules:
 
 # Checked first; always wins.
 deny: []
+
+# How agents are looked after. Same selectors; later entries win, field by
+# field. Without a matching entry: no healing, 30m, 72h.
+health:
+  - {for: ["*"], heal: true, quiet_after: 30m}
+  # Laptops sleep: say nothing for three days, and hold their mail for a week.
+  - {for: ["tag:mobile"], quiet_after: 3d, mailbox_ttl: 7d}

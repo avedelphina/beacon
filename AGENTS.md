@@ -55,7 +55,9 @@ backend/
   policy.py       the access policy (YAML text in the store): tag rules
                   (Tailscale-style) behind may_call; preview/save for the Policy
                   tab (T4, history in fleet_history)
-  notify.py       workflow notices: mailbox to agents, email to people (opt-in SMTP)
+  notify.py       workflow and health notices: mailbox to agents, email to people (opt-in SMTP)
+  availability.py A2A availability (probe + last pull), health reports from the
+                  host sync, quiet-agent detection
   mailbox.py      relay + voicemail behind POST /a2a/{agent}; delivers on the
                   recipient's /mesh pull (no scheduler); slow answers come back
                   by A2A push to /a2a/{agent}/push/{id} (long work)
@@ -226,5 +228,7 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 
 - Hermes is the only implemented driver.
 - Audit trail is partial: fleet changes keep who made them (`fleet_history`); actions on hosts (deploy, push, restart) are not recorded yet.
-- Pull-based only: nothing polls or alerts on its own. (The mailbox delivers
-  when an agent's own sync pulls, not on a Beacon timer.)
+- Mostly pull-based: Beacon has no timer. What happens on its own rides on
+  agents' syncs: the mailbox delivers on a pull, each host's sync probes and
+  heals its own agent (`health` in the policy), and every pull checks for
+  agents that went quiet. If no agent syncs, nothing notices.

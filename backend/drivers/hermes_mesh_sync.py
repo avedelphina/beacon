@@ -37,12 +37,14 @@ import hashlib
 import json
 import os
 import re
+import errno
 import shlex
 import socket
 import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -62,6 +64,12 @@ LOCAL_REPLY_TIMEOUT = 60
 # A restart still marked as running after this long is assumed dead
 # (longer than Hermes 0.21's 30-minute graceful drain cap).
 RESTART_STALE_SECONDS = 40 * 60
+# Self-healing (fleet policy `health`, `heal: true`). Two failed probes count
+# as "in a row" only this close together: a laptop that slept between two runs
+# has not failed twice. Restarts are capped so a broken setup can't loop.
+PROBE_TIMEOUT = 8
+HEAL_WINDOW_SECONDS = 15 * 60
+HEALS_PER_HOUR, HEALS_PER_DAY = 1, 3
 
 
 def log(message: str) -> None:
@@ -384,6 +392,131 @@ def run_pending_restart(cfg: dict, state: Path) -> None:
     log(f"restart requested: {' '.join(command)}")
 
 
+def probe_agent(endpoint: str, token: str) -> tuple:
+    """Does the agent on this host answer A2A? ("ok" | "agent" | "network", detail).
+    Neither check costs a model turn. /health says its A2A server answers.
+    GetTask for a task that doesn't exist, with Beacon's token, must come back
+    "not found": that proves the gateway accepts today's tokens, which a
+    gateway still running on old settings (a restart it never got) refuses.
+    "network" is a failure no restart fixes: the name doesn't resolve, there is
+    no route, or the call timed out to an address that isn't this machine's (a
+    laptop whose VPN is down)."""
+    try:
+        with urllib.request.urlopen(endpoint.rstrip("/") + "/health", timeout=PROBE_TIMEOUT) as response:
+            body = json.load(response)
+    except Exception as exc:
+        return probe_failure(endpoint, exc)
+    if not (isinstance(body, dict) and body.get("status") == "ok"):
+        return "agent", "/health gave an unexpected answer"
+    rpc = json.dumps({"jsonrpc": "2.0", "id": "beacon-probe", "method": "GetTask",
+                      "params": {"id": "beacon-probe-" + uuid.uuid4().hex}}).encode()
+    request = urllib.request.Request(endpoint, data=rpc, method="POST", headers={
+        "Authorization": f"Bearer {token}", "Content-Type": "application/json", "A2A-Version": "1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=PROBE_TIMEOUT) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as exc:
+        try:
+            payload = json.load(exc)
+        except Exception:
+            payload = None
+        if exc.code == 401 or not isinstance(payload, dict):
+            return "agent", f"A2A refused Beacon's token (HTTP {exc.code}): the gateway runs on old settings"
+    except Exception as exc:
+        return probe_failure(endpoint, exc)
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(error, dict) and error.get("code") in (-32050, -32052):
+        return "agent", "A2A refused Beacon's token: the gateway runs on old settings"
+    if isinstance(payload, dict) and ("error" in payload or "result" in payload):
+        return "ok", ""
+    return "agent", "A2A gave an unreadable answer"
+
+
+def probe_failure(endpoint: str, exc: Exception) -> tuple:
+    if isinstance(exc, urllib.error.HTTPError):
+        return "agent", f"HTTP {exc.code}"
+    reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    if isinstance(reason, ConnectionRefusedError):
+        return "agent", "nothing listens on the A2A port"
+    if isinstance(reason, socket.gaierror):
+        return "network", f"cannot resolve the endpoint: {reason}"
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        if is_local_address(urllib.parse.urlsplit(endpoint).hostname or ""):
+            return "agent", "the A2A server does not answer (timed out)"
+        return "network", "timed out reaching an address that is not this machine's"
+    if isinstance(reason, OSError) and reason.errno in (errno.ENETUNREACH, errno.EHOSTUNREACH, errno.EADDRNOTAVAIL):
+        return "network", f"no route to the endpoint: {reason}"
+    return "agent", str(reason)[:200]
+
+
+def is_local_address(host: str) -> bool:
+    """Whether `host` is an address of this machine (one it could listen on)."""
+    try:
+        family, _, _, _, address = socket.getaddrinfo(host, None)[0]
+        with socket.socket(family, socket.SOCK_STREAM) as sock:
+            sock.bind((address[0], 0))
+        return True
+    except OSError:
+        return False
+
+
+def load_health(state: Path) -> dict:
+    path = state / "health.json"
+    base = {"fails": [], "heals": [], "state": "", "detail": ""}
+    return {**base, **json.loads(path.read_text())} if path.exists() else base
+
+
+def check_health(cfg: dict, state: Path, mesh: dict) -> None:
+    """Probe the agent and, where the policy says `heal`, restart a gateway that
+    failed twice in a row: gracefully, through the same retrying restart as a
+    config change, at most HEALS_PER_HOUR an hour and HEALS_PER_DAY a day.
+    After that it stops and says so ("gave-up"), and a person takes over. The
+    result travels to Beacon with the next pull."""
+    endpoint, token = mesh.get("endpoint"), (mesh.get("inbound") or {}).get("beacon")
+    if not endpoint or not token or (state / "restart.pending").exists():
+        return  # nothing to probe, or a restart is already on its way
+    health, now = load_health(state), time.time()
+    heal = bool((mesh.get("health") or {}).get("heal"))
+    health["heals"] = [t for t in health["heals"] if now - t < 86400]
+    verdict, detail = probe_agent(endpoint, token)
+    if verdict == "ok":
+        health.update(fails=[], state="ok", detail="")
+    elif verdict == "network":
+        health.update(fails=[], state="network", detail=detail)
+    else:
+        if health["fails"] and now - health["fails"][-1] > HEAL_WINDOW_SECONDS:
+            health["fails"] = []
+        health["fails"].append(now)
+        recent = [t for t in health["heals"] if now - t < 3600]
+        if len(health["fails"]) < 2:
+            health.update(state="failing", detail=detail)
+        elif not heal:
+            health.update(state="failing", detail=detail + "; healing is off for this agent")
+        elif len(health["heals"]) >= HEALS_PER_DAY:
+            health.update(state="gave-up", detail=f"{detail}; {HEALS_PER_DAY} restarts today did not help")
+        elif len(recent) >= HEALS_PER_HOUR:
+            wait = int(3600 - (now - recent[-1])) // 60 + 1
+            health.update(state="failing", detail=f"{detail}; next restart allowed in {wait} min")
+        else:
+            log(f"self-healing: {detail}; restarting the gateway")
+            restart(cfg, state)
+            health["heals"].append(now)
+            health.update(fails=[], state="healing", detail=detail)
+    previous = load_health(state)["state"]
+    if health["state"] != previous:
+        log(f"health: {health['state']}" + (f" ({health['detail']})" if health["detail"] else ""))
+    (state / "health.json").write_text(json.dumps(health))
+
+
+def health_headers(state: Path) -> dict:
+    """The last probe's result, for Beacon. Header-safe: one line of ASCII."""
+    health = load_health(state)
+    if not health["state"]:
+        return {}
+    detail = " ".join(health["detail"].split()).encode("ascii", "replace").decode()[:400]
+    return {"X-Beacon-Health": health["state"], "X-Beacon-Health-Detail": detail or "-"}
+
+
 def sync(state: Path) -> int:
     cfg = json.loads((state / "sync.json").read_text())
     log_file = state / "sync.log"
@@ -401,7 +534,8 @@ def sync(state: Path) -> int:
                                                   # "none", not empty: a proxy may drop an empty header.
                                                   "X-Beacon-Open-Chat": ",".join(open_chats(cfg)) or "none",
                                                   # Whether an earlier run's gateway restart is still owed.
-                                                  "X-Beacon-Restart": "pending" if (state / "restart.pending").exists() else "none"})
+                                                  "X-Beacon-Restart": "pending" if (state / "restart.pending").exists() else "none",
+                                                  **health_headers(state)})
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
                 mesh = json.load(response)
@@ -464,6 +598,9 @@ def sync(state: Path) -> int:
             log(f"held message {item['id']}: " + ("delivered" if report["ok"] else
                 ("handed back" if report["transient"] else "working, answer by push" if report.get("working")
                  else "uncertain" if report.get("uncertain") else "failed") + f" ({report['error']})"))
+
+        if not restarting:
+            check_health(cfg, state, mesh)
     return 0
 
 

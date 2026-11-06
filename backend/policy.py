@@ -18,6 +18,19 @@ to everyone" has to be written down: `{from: ["*"], to: ["*"]}`.
 
 Replies are not governed here: an answer to a call that was allowed is always
 allowed (backend/mailbox.py delivers late ones as Beacon).
+
+The same file says how agents are looked after, in a `health` list with the
+same selectors (Tailscale's node attributes, in effect):
+
+    health:
+      - {for: ["*"],          heal: true,  quiet_after: 30m}
+      - {for: ["tag:mobile"], quiet_after: 3d, mailbox_ttl: 7d}
+
+`heal` lets the agent's host sync restart a gateway that stopped answering;
+`quiet_after` is how long an agent may go without syncing before Beacon tells
+people (`never` for none); `mailbox_ttl` is how long the mailbox holds a message
+for it. Later entries win, field by field. Without a matching entry: no
+healing, 30 minutes, 72 hours.
 """
 
 import fnmatch
@@ -57,12 +70,59 @@ class Rule(BaseModel):
         return [check_selector(s) for s in v]
 
 
+_DURATION_RE = re.compile(r"^(\d+)([smhd])$")
+_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def parse_duration(value: str | int) -> int:
+    """`30m`, `3d`, `12h`, `90s` (or plain seconds) as seconds."""
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    match = _DURATION_RE.fullmatch(str(value).strip()) if isinstance(value, str) else None
+    if not match or int(match[1]) <= 0:
+        raise ValueError(f"{value!r} is not a duration like 30m, 12h or 3d")
+    return int(match[1]) * _UNIT_SECONDS[match[2]]
+
+
+class HealthRule(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    for_: list[str] = Field(alias="for", min_length=1)
+    heal: bool | None = None
+    quiet_after: str | int | None = None
+    mailbox_ttl: str | int | None = None
+
+    @field_validator("for_")
+    @classmethod
+    def _selectors(cls, v: list[str]) -> list[str]:
+        return [check_selector(s) for s in v]
+
+    @field_validator("quiet_after")
+    @classmethod
+    def _quiet(cls, v):
+        if v is not None and v != "never":
+            parse_duration(v)
+        return v
+
+    @field_validator("mailbox_ttl")
+    @classmethod
+    def _ttl(cls, v):
+        if v is not None:
+            parse_duration(v)
+        return v
+
+
+# What an agent gets when no health entry says otherwise.
+HEALTH_DEFAULTS = {"heal": False, "quiet_after": 30 * 60, "mailbox_ttl": 72 * 3600}
+
+
 class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tags: list[str] = Field(default_factory=list)
     rules: list[Rule] = Field(default_factory=list)
     deny: list[Rule] = Field(default_factory=list)
+    health: list[HealthRule] = Field(default_factory=list)
 
     @field_validator("tags")
     @classmethod
@@ -110,6 +170,28 @@ def allows(policy: Policy | None, caller: Agent, target: Agent) -> bool:
     return any(_any(r.from_, caller) and _any(r.to, target) for r in policy.rules)
 
 
+def health_for(policy: Policy | None, agent: Agent) -> dict:
+    """The agent's effective health settings: defaults, then every matching
+    entry in order, each overriding only the fields it sets. `quiet_after`
+    is None for `never`."""
+    result = dict(HEALTH_DEFAULTS)
+    for rule in policy.health if policy else []:
+        if not _any(rule.for_, agent):
+            continue
+        if rule.heal is not None:
+            result["heal"] = rule.heal
+        if rule.quiet_after is not None:
+            result["quiet_after"] = None if rule.quiet_after == "never" else parse_duration(rule.quiet_after)
+        if rule.mailbox_ttl is not None:
+            result["mailbox_ttl"] = parse_duration(rule.mailbox_ttl)
+    return result
+
+
+def health_table(policy: Policy | None, fleet: list[Agent]) -> dict[str, dict]:
+    """agent id -> effective health settings, for agents with a reach block."""
+    return {a.id: health_for(policy, a) for a in fleet if a.reach is not None}
+
+
 def problems(policy: Policy | None, fleet: list[Agent]) -> list[str]:
     """What is probably a mistake, for `mesh policy` and the API: undeclared
     tags, selectors that match nothing, and a missing file."""
@@ -122,9 +204,9 @@ def problems(policy: Policy | None, fleet: list[Agent]) -> list[str]:
     used = {t for a in fleet for t in a.tags}
     if declared:
         found += [f"agent {a.id!r} has undeclared tag {t!r}" for a in fleet for t in a.tags if t not in declared]
-    for kind, rules in (("rule", policy.rules), ("deny", policy.deny)):
+    for kind, rules in (("rule", policy.rules), ("deny", policy.deny), ("health", policy.health)):
         for i, rule in enumerate(rules, 1):
-            for selector in [*rule.from_, *rule.to]:
+            for selector in (rule.for_ if kind == "health" else [*rule.from_, *rule.to]):
                 if selector == "*":
                     continue
                 if selector.startswith("tag:"):
@@ -188,7 +270,8 @@ def preview(text: str, fleet: list[Agent]) -> dict:
     an agent whose set of allowed callers changes restarts on its next sync)."""
     current = load()
     old = matrix(current, fleet)
-    result: dict = {"errors": [], "problems": [], "matrix": None, "added": [], "removed": [], "restarts": []}
+    result: dict = {"errors": [], "problems": [], "matrix": None, "added": [], "removed": [], "restarts": [],
+                    "health": None}
     try:
         new_policy = parse(text)
     except ValueError as exc:
@@ -196,6 +279,7 @@ def preview(text: str, fleet: list[Agent]) -> dict:
         return result
     new = matrix(new_policy, fleet)
     result["matrix"] = new
+    result["health"] = health_table(new_policy, fleet)
     result["problems"] = problems(new_policy, fleet)
     pairs = lambda grid: {(c, t) for c, ts in grid.items() for t in ts}  # noqa: E731
     result["added"] = sorted(pairs(new) - pairs(old))

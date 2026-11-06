@@ -583,6 +583,53 @@ authors all use the id. An id is unique within a Beacon, and `beacon` is
 reserved. Renaming an agent means a new id, with new tokens; cards and held
 messages keep the old id as text.
 
+### Self-healing and quiet agents
+
+The policy's `health` list says how each agent is looked after, with the same
+selectors as the access rules:
+
+```yaml
+health:
+  - {for: ["*"], heal: true, quiet_after: 30m}
+  - {for: ["tag:mobile"], quiet_after: 3d, mailbox_ttl: 7d}
+  - {for: ["tag:family-*"], heal: false}
+```
+
+Later entries win, field by field. An agent that no entry matches gets no
+healing, 30 minutes, and 72 hours. Saving the policy is human-only, so an agent
+cannot switch its own healing on or off. The Policy tab's **Check** shows what
+each agent ends up with.
+
+- **`heal`.** On every run (every 5 minutes) the agent's host sync probes the
+  agent on its own host. It asks `/health`, then sends `GetTask` for a task
+  that doesn't exist, using Beacon's token. The answer must be "not found",
+  which proves the gateway accepts today's tokens; a gateway still running on
+  old settings refuses it. Neither check costs a model turn. Two failures in a
+  row, no more than 15 minutes apart, restart the gateway, through the same
+  graceful, retrying restart as a configuration change: it never cuts a running
+  session, and Docker agents restart their container. There is at most one such
+  restart an hour and three a day. After that the sync stops and reports
+  `gave-up`, and a person takes over. A failure that no restart fixes is
+  reported as `network` and left alone: the name doesn't resolve, there is no
+  route, or the call timed out to an address that isn't this machine's (a
+  laptop whose VPN is down). Without `heal`, the sync still probes and reports;
+  it only doesn't restart. Healing never changes configuration.
+- **`quiet_after`** (`30m`, `12h`, `3d`, or `never`) is how long an agent may
+  go without syncing. Within it, the Agents tab shows **away** in grey instead
+  of **offline** in red. Past it, operators and the agent's owner get an email
+  (when mail is set up), and another when it syncs again. Beacon has no timer:
+  every agent's pull also checks the others, so while any agent still syncs,
+  Beacon notices the ones that stopped.
+- **`mailbox_ttl`** is how long the mailbox holds a message for the agent. For
+  a laptop that is off over a long weekend, use `7d`.
+
+The sync's findings arrive with its next pull, so a few minutes after the
+fact. Beacon keeps every change (`GET /api/agents/{id}/health-events`) and
+shows the latest on the Agents tab. Operators and the owner get an email when a
+gateway is restarted, when healing gives up, and when the agent answers again;
+not for a single failed probe, and not for a network problem. These need the
+new sync (0.27.0); an older one reports nothing and heals nothing.
+
 ### Mailbox: relay and voicemail
 
 `POST /a2a/{agent}` is an A2A endpoint that Beacon serves for each agent.
@@ -935,7 +982,7 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 | **Troubleshoot** | Recent log tail — the app-level log file, falling back to `journalctl` when a unit has never started successfully. | `GET /api/agents/{id}/logs` |
 | **Reconcile** | Diagnoses drift patterns found in the wild — an orphaned unit (profile dir deleted, unit left behind), a unit stuck `failed`, installed-but-not-started, linger disabled. Dry run by default; each finding names a `fix` to apply individually. | `GET` (dry run) / `POST` (apply one fix) `/api/agents/{id}/reconcile` |
 | **Config** | Compares `desired.config`/`desired.env_keys` against the live `config.yaml` and `.env` **key names only** (secret values never leave the host). Push validates every declared path against the known Hermes config schema first — an unknown subkey of a known section is refused (the CLI would write it silently), unknown top-level keys push with a warning — then runs `hermes config set` per declared key and restarts the gateway if it's active. Both sides see the template-merged `desired`. | `GET`/`POST /api/agents/{id}/config-diff` |
-| **Availability** | Whether the agent answers over A2A, not over SSH: Beacon GETs the agent's `/health` (no token), and also records when the agent's host last pulled its mesh config. `online` = answered; `sync-only` = Beacon cannot reach it but its host synced in the last 15 minutes; `offline` = neither; `no-a2a` = no `reach` block. When the agent does not answer and its sync still owes it a gateway restart (the gateway reads its listen address only at start), the detail says so, so a freshly enrolled agent that listens on the wrong address is not a mystery. SSH status (the systemd unit) is separate and shown in Inspect. | `GET /api/availability` |
+| **Availability** | Whether the agent answers over A2A, not over SSH: Beacon GETs the agent's `/health` (no token), and also records when the agent's host last pulled its mesh config. `online` = answered; `sync-only` = Beacon cannot reach it but its host synced in the last 15 minutes; `away` = not answering, but still within its `quiet_after` (a sleeping laptop); `offline` = neither; `no-a2a` = no `reach` block. When the agent does not answer and its sync still owes it a gateway restart (the gateway reads its listen address only at start), the detail says so, so a freshly enrolled agent that listens on the wrong address is not a mystery. SSH status (the systemd unit) is separate and shown in Inspect. | `GET /api/availability` |
 | **Templates** | A config fragment (`config` + `env_keys` only) merged under many agents' `desired` at once — model stacks, fallbacks, and auxiliary-task models declared once. Apply adds a template name to a batch of agent records; save and delete are T2. | `GET /api/templates`, `GET`/`PUT`/`DELETE /api/templates/{name}`, `POST /api/templates/{name}/apply` |
 | **Plugins** | Lists installed plugins with version, enabled/disabled state, and source. Updating one (git pull) can trip Hermes's own security scan and auto-disable it — that's surfaced as a `disabled_by_scan` flag rather than left buried in scan-report text, since an auto-disabled plugin can mean a messaging platform silently goes offline. | `GET /api/agents/{id}/plugins`, `POST /api/agents/{id}/plugins/{name}/update` |
 | **Restart** | Plain `gateway restart` — the everyday operate action, works regardless of current state. Distinct from Reconcile's problem-triggered fixes. | `POST /api/agents/{id}/restart` |
@@ -1185,8 +1232,10 @@ like any other fleet record. They are limited to a fixed set of v1 actions
   Beacon operations.
 - **No audit trail.** Every logged-in user has full deploy/config/
   decommission power, and no record persists of who did what.
-- **Pull-based only.** Status and Reconcile run when requested — nothing
-  polls or alerts on its own.
+- **Mostly pull-based.** Status and Reconcile run when requested. The only
+  things that happen on their own ride on agents' syncs: self-healing on each
+  host, and the quiet-agent check on every pull. If no agent syncs at all,
+  nothing notices.
 - **`ssh.config_file` paths are absolute and machine-specific** — see
   [Teleport / tbot](#teleport--tbot).
 

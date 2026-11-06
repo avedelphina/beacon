@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-11-06
+
+### Added
+
+- **Self-healing.** The fleet policy gets a `health` list (same selectors as
+  the access rules, later entries win field by field). With `heal: true` the
+  agent's host sync probes the agent on every run: `/health`, then `GetTask`
+  for a missing task with Beacon's token, which proves the gateway accepts
+  today's tokens. Two failures in a row (within 15 minutes, so a laptop's sleep
+  doesn't count) restart the gateway gracefully: at most once an hour and three
+  times a day, then `gave-up` and a person takes over. A network problem is
+  reported, never restarted. Without `heal` the sync only reports.
+- **Quiet agents.** `quiet_after` (`30m`, `3d`, `never`) is how long an agent
+  may go without syncing. Within it the Agents tab shows the new `away` state,
+  past it operators and the owner are emailed, and again when it is back.
+  Beacon still has no timer: every pull checks the other agents.
+- **`mailbox_ttl`**: how long the mailbox holds a message for an agent (a
+  laptop may be off for days).
+- Health reports and their history: the sync sends `X-Beacon-Health` with each
+  pull, every change is kept (`GET /api/agents/{id}/health-events`), and
+  operators and owners are emailed when a gateway is restarted, when healing
+  gives up, and when the agent answers again. The Policy tab shows each agent's
+  effective health settings. `auto_heal` is registered as a T2 capability.
+
+### Changed
+
+- **New host sync.** Healing and health reports need it; an older sync keeps
+  working and reports nothing.
+- Defaults when no `health` entry matches: no healing, `quiet_after: 30m`,
+  `mailbox_ttl: 72h`. An agent silent for 15 to 30 minutes now shows `away`
+  instead of `offline`.
+
 ## [0.26.4] — 2026-10-31
 
 ### Added

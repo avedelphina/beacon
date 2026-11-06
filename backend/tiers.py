@@ -105,6 +105,13 @@ CAPABILITY_TIERS: dict[str, tuple[Tier, str]] = {
         "the board, so changing them is a policy change by another route. Human browser "
         "session only, like the policy editor.",
     ),
+    "auto_heal": (
+        Tier.T2,
+        "The host sync restarts a gateway that stopped answering its own probe: the everyday fix, "
+        "reversible, gracefully (never cutting a running session), at most once an hour and three "
+        "times a day, then it stops and tells a person. Runs only where the fleet policy says `heal`, "
+        "and saving the policy is human-only (T4): that choice is the standing approval.",
+    ),
     "update_agent": (
         Tier.T4,
         "Escalated above deploy/update_plugin's T3: this touches the shared code checkout, "
