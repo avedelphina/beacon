@@ -261,12 +261,11 @@ Related foundation work, in Horizon 0:
    - login without a browser cookie: a Zitadel native client (PKCE through
      `ASWebAuthenticationSession`), and Beacon accepting Zitadel access tokens
      as `Bearer`, with the role read on every request as for sessions;
-   - the app's login counts as a human for approvals (decided 2026-11-07):
-     a person who logged in through the app answers workflow requests,
-     T4/T5 ones included, as a browser session does. `_workflow_human` must
-     accept that login and never the MCP token or an agent's token. Whether
-     the app may also run T4/T5 actions directly (policy, access, enrollment,
-     decommission) is not decided yet;
+   - the app's login counts as a human, as a browser session does (decided
+     2026-11-07): it answers workflow requests, T4/T5 ones included, and runs
+     T4/T5 actions directly (policy, access, enrollment, decommission).
+     `_workflow_human` and `_require_human_session` must accept that login
+     and never the MCP token or an agent's token;
    - an APNs sender (HTTP/2 with token auth) next to `backend/push.py`;
    - a stable API contract that the app can check with `/api/version`.
 
