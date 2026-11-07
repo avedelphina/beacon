@@ -596,7 +596,7 @@ health:
 ```
 
 Later entries win, field by field. An agent that no entry matches gets no
-healing, 30 minutes, and 72 hours. Saving the policy is human-only, so an agent
+healing, 30 minutes, 72 hours, and 24 hours. Saving the policy is human-only, so an agent
 cannot switch its own healing on or off. The Policy tab's **Check** shows what
 each agent ends up with.
 
@@ -622,6 +622,8 @@ each agent ends up with.
   Beacon notices the ones that stopped.
 - **`mailbox_ttl`** is how long the mailbox holds a message for the agent. For
   a laptop that is off over a long weekend, use `7d`.
+- **`remind_after`** (default `24h`, or `never`) is how long a board card may
+  wait on the agent before Beacon reminds it (see **Fleet board**).
 
 The sync's findings arrive with its next pull, so a few minutes after the
 fact. Beacon keeps every change (`GET /api/agents/{id}/health-events`) and
@@ -759,6 +761,21 @@ tools. **A comment on a card assigned to an agent** (from a person, another
 agent, or a note on a card update) reaches that agent the same way, unless the
 assignee wrote it. Only the assignee is told: comments on an unassigned card,
 and state or field changes, send nothing.
+
+**A card that nothing happens on is brought up again.** An agent acts only in a
+turn, so a card it was told about once can sit for days. When nothing has
+changed on a card for the agent's `remind_after` (the policy's `health` list,
+default `24h`, `never` to turn it off), Beacon reminds whoever has to move it
+next: the assignee; for a card in `review`, or one nobody is assigned to, the
+agent that made it. The reminder comes on that agent's own pull, so it is
+online, and one notice lists all its waiting cards, so it costs one turn. It
+asks the agent to do the next step, or to make the card say what is true
+(`blocked`, and on what). Each card gets two reminders, a `remind_after`
+apart; if nothing changes, operators and the owners involved get one email.
+People are emailed at once when only a person can move the card: one in
+`review` that its own assignee made, one assigned to a person, or one whose
+agent has no board tools. Any change to the card starts over. The card's
+history records each reminder and email.
 
 **Board tools are opt-in per agent**, with `reach.board: true`. Hermes
 offers an MCP server on every chat platform. For an agent whose chat is

@@ -1115,8 +1115,8 @@ function policyHealthHtml(health) {
   const ids = Object.keys(health).sort();
   if (!ids.length) return "";
   const span = (s) => s == null ? "never" : s % 86400 === 0 ? `${s / 86400} d` : s % 3600 === 0 ? `${s / 3600} h` : `${Math.round(s / 60)} min`;
-  return `<table class="policy-health"><thead><tr><th>agent</th><th>self-healing</th><th>tell people after</th><th>mailbox holds</th></tr></thead><tbody>${
-    ids.map((id) => `<tr><td>${esc(id)}</td><td>${health[id].heal ? "on" : "off"}</td><td>${esc(span(health[id].quiet_after))}</td><td>${esc(span(health[id].mailbox_ttl))}</td></tr>`).join("")
+  return `<table class="policy-health"><thead><tr><th>agent</th><th>self-healing</th><th>tell people after</th><th>mailbox holds</th><th>card reminder after</th></tr></thead><tbody>${
+    ids.map((id) => `<tr><td>${esc(id)}</td><td>${health[id].heal ? "on" : "off"}</td><td>${esc(span(health[id].quiet_after))}</td><td>${esc(span(health[id].mailbox_ttl))}</td><td>${esc(span(health[id].remind_after))}</td></tr>`).join("")
   }</tbody></table>`;
 }
 

@@ -24,7 +24,8 @@ rules:
 deny: []
 
 # How agents are looked after. Same selectors; later entries win, field by
-# field. Without a matching entry: no healing, 30m, 72h.
+# field. Without a matching entry: no healing, 30m, 72h, and board reminders
+# after 24h (remind_after).
 health:
   - {for: ["*"], heal: true, quiet_after: 30m}
   # Laptops sleep: say nothing for three days, and hold their mail for a week.

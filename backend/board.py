@@ -10,6 +10,12 @@ Every change is recorded with its author: an agent (through its own token
 on /board/mcp), "beacon" (MCP bearer), or a logged-in person. Assigning a
 card to an agent sends that agent a notice through the mailbox, so it
 hears about the work even while offline.
+
+A notice alone was not enough: an agent acts only during a turn, so a card it
+was told about once could sit in todo (or doing, blocked, review) for days.
+remind() runs on every pull and asks whoever has to move a card that nothing
+has changed on for the agent's `remind_after`, then tells people by email when
+reminders did not help (see remind()).
 """
 
 import threading
@@ -209,3 +215,117 @@ def _required(value: str, what: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{what} must not be empty")
     return value.strip()
+
+
+# --- reminders: cards nobody moves -------------------------------------------
+
+REMINDERS = 2  # reminders to an agent before people are told
+
+
+def _responsible(card: dict) -> str | None:
+    """Who has to move the card next: the assignee while it is being worked on;
+    in review, or with nobody assigned, whoever made it (to check it, or to give
+    it to someone). None for a card its own assignee made and put in review:
+    only a person can check that."""
+    if card["state"] != "review" and card["assignee"]:
+        return card["assignee"]
+    if card["state"] == "review" and card["created_by"] == card["assignee"]:
+        return None
+    return card["created_by"]
+
+
+def remind(puller: str, now: float | None = None) -> None:
+    """Called on every mesh pull: the puller is online right now, so a reminder
+    to it starts a turn soon (it rides this very pull's inbox). Each stale card
+    gets at most REMINDERS reminders, one per `remind_after` of no change, and
+    all of one agent's cards go in one notice, so a reminder costs one turn.
+    After that, or when no agent can move the card (a person has to, or the
+    agent has no board tools), people are told by email, once until the card
+    changes. Any change to the card (state, comment, edit) starts over.
+
+    Cards waiting on an agent that never pulls wait too: its quiet notice
+    already tells people it is gone."""
+    from . import notify, policy
+    now = time.time() if now is None else now
+    rules, fleet, exposure = policy.load(), {a.id: a for a in store.list_agents()}, mesh.open_chats()
+    with opstore.connect() as db:
+        cards = [dict(row) for row in db.execute("SELECT * FROM cards WHERE state != 'done' ORDER BY id")]
+    mine, stuck = [], []
+    for card in cards:
+        who = _responsible(card)
+        agent = fleet.get(who or "")
+        agent = agent if agent and agent.reach else None
+        subject = agent or fleet.get(card["assignee"] or "")  # whose policy sets the wait
+        wait = (policy.health_for(rules, subject) if subject else policy.HEALTH_DEFAULTS)["remind_after"]
+        if wait is None or now - card["updated_at"] < wait:
+            continue
+        this_round = card["reminded_at"] is not None and card["reminded_at"] >= card["updated_at"]
+        sent = card["reminders"] if this_round else 0
+        if this_round and now - card["reminded_at"] < wait:
+            continue
+        if agent and sent < REMINDERS and mesh.board_allowed(agent, exposure):
+            if agent.id == puller and _claim(card, "reminded_at = ?, reminders = ?", (now, sent + 1), "reminded_at"):
+                mine.append({**card, "reminders": sent + 1})
+        elif (card["escalated_at"] is None or card["escalated_at"] < card["updated_at"]) \
+                and _claim(card, "escalated_at = ?", (now,), "escalated_at"):
+            stuck.append((card, who, _why_stuck(card, who, agent, sent)))
+    if mine:
+        notice_id = mailbox.enqueue(mesh.BEACON_PEER, puller, "notice", _reminder_text(mine, now))
+        with opstore.connect() as db:
+            for card in mine:
+                _event(db, card["id"], mesh.BEACON_PEER, "reminder",
+                       f"reminded {puller} ({card['reminders']} of {REMINDERS})", notice_id=notice_id)
+    if stuck:
+        with opstore.connect() as db:
+            for card, _, why in stuck:
+                _event(db, card["id"], mesh.BEACON_PEER, "escalation", f"people told by email: {why}")
+        notify.cards_stuck(stuck)
+
+
+def _claim(card: dict, assignments: str, values: tuple, column: str) -> bool:
+    """Only the pull that changes the row acts on it, and not if the card
+    changed since it was read."""
+    with opstore.connect() as db:
+        return db.execute(f"UPDATE cards SET {assignments} WHERE id = ? AND updated_at = ? AND {column} IS ?",
+                          (*values, card["id"], card["updated_at"], card[column])).rowcount == 1
+
+
+def _why_stuck(card: dict, who: str | None, agent, sent: int) -> str:
+    if agent and sent:
+        return f"{who} was reminded and nothing changed"
+    if agent:
+        return f"{who} has no board tools, so Beacon cannot remind it"
+    if card["state"] == "review":
+        return "it waits for a person to check it"
+    if not card["assignee"]:
+        return "nobody is assigned"
+    return f"it waits for {card['assignee']}"
+
+
+def _idle(seconds: float) -> str:
+    return f"{int(seconds // 86400)} d" if seconds >= 86400 else f"{int(seconds // 3600)} h"
+
+
+def _reminder_text(cards: list[dict], now: float) -> str:
+    lines = []
+    for card in cards:
+        title, idle = card["title"][:120], _idle(now - card["updated_at"])
+        if card["state"] == "review":
+            what = (f"{card['assignee'] or 'it'} finished it and it waits for your check: move it to done,"
+                    " or back to doing with a note that says what is missing")
+        elif not card["assignee"]:
+            what = "nobody is assigned: assign it to someone, do it yourself, or close it"
+        elif card["state"] == "todo":
+            what = "assigned to you and not started"
+        elif card["state"] == "blocked":
+            what = ("blocked: if what you waited for has come, carry on; if not, make sure whoever you wait"
+                    " for knows, and say on the card who it is")
+        else:
+            what = "in progress, with no update"
+        lines.append(f"- #{card['id']} \"{title}\" ({card['state']}, no change for {idle}): {what}.")
+    return ("Reminder from the Beacon board: nothing has changed on these cards for a while, and they wait"
+            " for you.\n\n" + "\n".join(lines) + "\n\n"
+            "For each card, do the next step now, or make the card say what is true: card_update to doing,"
+            " blocked, review or done with a note, or card_comment with what you wait for and from whom. If"
+            " you cannot do it, say so on the card. Do not close a card you did not finish. After"
+            f" {REMINDERS} reminders without a change, Beacon tells a person.")

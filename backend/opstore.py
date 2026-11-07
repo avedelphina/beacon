@@ -44,13 +44,16 @@ CREATE TABLE IF NOT EXISTS cards (
     state       TEXT NOT NULL,     -- todo | doing | blocked | review | done
     created_by  TEXT NOT NULL,
     created_at  REAL NOT NULL,
-    updated_at  REAL NOT NULL
+    updated_at  REAL NOT NULL,
+    reminded_at  REAL,                       -- last reminder to whoever has to move it (board.remind)
+    reminders    INTEGER NOT NULL DEFAULT 0, -- reminders since updated_at; counts only when reminded_at >= updated_at
+    escalated_at REAL                        -- people were told by email; again only after the card changes
 );
 CREATE TABLE IF NOT EXISTS card_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     card_id     INTEGER NOT NULL REFERENCES cards (id),
     author      TEXT NOT NULL,
-    kind        TEXT NOT NULL,     -- created | comment | state | assign | edit | assign_notice | comment_notice
+    kind        TEXT NOT NULL,     -- created | comment | state | assign | edit | assign_notice | comment_notice | reminder | escalation
     body        TEXT NOT NULL,
     context_id  TEXT,
     notice_id   INTEGER REFERENCES mailbox (id),  -- assign_notice, comment_notice: the mailbox row carrying the notice
@@ -194,6 +197,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
                          ("quiet_notified", "INTEGER NOT NULL DEFAULT 0")):
         if column not in seen:
             conn.execute(f"ALTER TABLE agent_seen ADD COLUMN {column} {decl}")
+    card_columns = {row[1] for row in conn.execute("PRAGMA table_info(cards)")}
+    for column, decl in (("reminded_at", "REAL"), ("reminders", "INTEGER NOT NULL DEFAULT 0"),
+                         ("escalated_at", "REAL")):
+        if column not in card_columns:
+            conn.execute(f"ALTER TABLE cards ADD COLUMN {column} {decl}")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(card_events)")}
     if "notice_id" not in columns:
         conn.execute("ALTER TABLE card_events ADD COLUMN notice_id INTEGER REFERENCES mailbox (id)")
