@@ -843,6 +843,9 @@ failed notice is logged and never stops the request):
   written by the requester), then one link to Beacon's own page. It carries
   no plan hash and no link the agent supplied. At most 10 emails go to one
   address per hour, so an agent cannot fill an inbox; the rest are logged.
+- **People** who turned on notifications also get the subject line as a push
+  to their browser or phone, with or without a mail server. See [App and
+  notifications](#app-and-notifications).
 
 Settings, all in `.env`: `BEACON_SMTP_HOST`, `BEACON_SMTP_PORT` (587),
 `BEACON_SMTP_USER`, `BEACON_SMTP_PASSWORD`, `BEACON_SMTP_FROM` (defaults to the
@@ -1158,6 +1161,50 @@ The MCP server has its own auth — see [MCP server](#mcp-server) — a static
 `BEACON_MCP_TOKEN` rather than OIDC, since MCP clients are typically
 configured with a fixed API key rather than walked through a browser login.
 
+## App and notifications
+
+The page installs as an app (a PWA) on a phone, a tablet or a desktop, and it
+can send notifications. There is no separate app to build or host.
+
+- **Install it.** iPhone and iPad (iOS 16.4 or later): open Beacon in Safari,
+  tap Share, then Add to Home Screen, and open Beacon from the Home Screen.
+  Mac Safari: File, then Add to Dock. Chrome and Edge: the install icon in the
+  address bar.
+- **Turn notifications on.** Log in, click **Notify me** in the header, and
+  allow notifications. Beacon sends a test notification at once. If it does not
+  arrive, the page shows what the push service answered. On iPhone and iPad the
+  button works only in the Home Screen app.
+- **What you get.** The notices that people get by email (see [Fleet
+  board](#fleet-board) and [Self-healing and quiet
+  agents](#self-healing-and-quiet-agents)): a workflow request that needs you, an agent that
+  its host restarted or gave up on, an agent that went quiet or came back, and
+  board cards that nobody moves. They go to the same people, at most 10 per
+  hour to one person, and they need no mail server. A notification holds only
+  the subject line, for example "alpha needs your answer". It never holds an
+  agent's own text. A tap opens Beacon.
+
+What it needs:
+
+- **HTTPS with a certificate that the device trusts.** Service workers and push
+  do not work without it. With a private CA, install its root certificate on
+  each device. On iOS, also turn on full trust for it in Settings, General,
+  About, Certificate Trust Settings.
+- **Login (OIDC).** A notification goes to a person. In open mode there is
+  nobody to send it to.
+- **`BEACON_A2A_SECRET`.** Beacon derives the key that signs its pushes (VAPID)
+  from it, so there is nothing new to configure. If you change the secret,
+  every subscription stops, and people click **Notify me** again.
+- **Outbound HTTPS from Beacon to the browsers' push services:**
+  `web.push.apple.com`, `fcm.googleapis.com`,
+  `updates.push.services.mozilla.com` and `*.notify.windows.com`. Beacon sends
+  to these hosts only, whatever endpoint a browser gives it.
+
+Notifications travel through the browser vendor's push service, so they arrive
+wherever the device is. The device must reach Beacon only to open the page.
+Each push is encrypted to the browser (RFC 8291), so the push service cannot
+read it. The manifest, the service worker and the icons load without a
+session: they contain nothing about the fleet.
+
 ## MCP server
 
 `mcp/server.py` exposes the fleet over the [Model Context Protocol](https://modelcontextprotocol.io)
@@ -1226,6 +1273,8 @@ this one credential.
 | `POST` | `/api/agents/{id}/decommission` | Tear down (`{"purge": bool, "remove_user": bool, "confirm": true}`, streamed) — T4, T5 if purge/remove_user |
 | `GET`/`PUT`/`DELETE` | `/api/cron-jobs/{id}` | Cron job CRUD |
 | `GET` | `/api/cron-jobs` | List cron jobs |
+| `GET` | `/api/push` | The key a browser subscribes with (`null` when Beacon cannot push) |
+| `POST`/`DELETE` | `/api/push` | Turn notifications on or off for this browser: the browser's `PushSubscription` as JSON, or `{"endpoint": "..."}` to delete. A new browser gets a test notice, and the answer holds the push service's status. Logged-in people only |
 
 Every row above marked with a tier requires `confirm=true` (query param, or
 a `confirm` field alongside an existing JSON body) — omit it and you get a
@@ -1378,12 +1427,14 @@ backend/
   ssh.py          the one place that shells out to `ssh`
   schemas.py      Host/Agent pydantic models
   templates.py    config templates: load, validate, deep-merge under `desired`
+  push.py         Web Push to people's browsers (encryption, VAPID, subscriptions)
   drivers/
     hermes.py     the only driver so far
 fleet/            the YAML form of the fleet, for import and export (real files gitignored)
   hosts.yaml.example
 frontend/
   index.html, app.js, styles.css   no build step
+  manifest.json, sw.js, icons      what installs the page as an app and shows notifications
 tbot/
   Dockerfile      the tbot sidecar image
   run.sh          starts tbot as a bare host process (local dev)

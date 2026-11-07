@@ -1,7 +1,7 @@
 """Tell people and agents that a workflow request needs them, or was answered.
 
 Nothing was sent before: an agent that asked for approval had to poll, and the
-person asked had to open the Workflows tab. Two channels, both best-effort (a
+person asked had to open the Workflows tab. Three channels, all best-effort (a
 failure is logged and never stops the request):
 
 - Agents hear through the mailbox, like a board assignment: the responder when
@@ -9,6 +9,8 @@ failure is logged and never stops the request):
   agent's next pull, so it needs nothing the agent doesn't already have.
 - People hear by email, when an operator configured a mail server
   (BEACON_SMTP_HOST). It is off otherwise.
+- People also get the subject line as a push to every browser they turned
+  notifications on in (backend/push.py), mail server or not.
 
 Email is where an agent's words reach a person's inbox, so it is kept narrow:
 plain text; a subject and body that Beacon writes, with the agent's own text
@@ -26,7 +28,7 @@ import threading
 import time
 from email.message import EmailMessage
 
-from . import mailbox, mesh, store
+from . import mailbox, mesh, push, store
 
 logger = logging.getLogger("beacon")
 
@@ -44,7 +46,7 @@ def workflow_created(request: dict) -> None:
             f"#{request['card_id']}.\nTitle: {request['title']}\nTier: T{request['tier']}\n\n"
             f"{request['summary'][:SUMMARY_CHARS]}\n\nRead it with workflow_get({request['id']}) and answer "
             f"with workflow_respond. It expires {_when(request['expires_at'])}."), skip=request["requester"])
-        _email(_people_to_ask(request), f"Beacon: {request['requester']} needs your answer",
+        _tell(_people_to_ask(request), f"Beacon: {request['requester']} needs your answer",
                _created_body(request))
     except Exception:
         logger.exception("workflow notice for request %s failed", request.get("id"))
@@ -109,7 +111,7 @@ def agent_health(agent_id: str, state: str, previous: str, detail: str) -> None:
         else:
             return
         body = f"{news}.\n" + (f"\nWhat its host found: {detail[:300]}\n" if detail else "") + _footer()
-        _email(_people_for(agent_id), f"Beacon: {news}", body)
+        _tell(_people_for(agent_id), f"Beacon: {news}", body)
     except Exception:
         logger.exception("health notice for %s failed", agent_id)
 
@@ -118,7 +120,7 @@ def agent_quiet(agent_id: str, seconds: int) -> None:
     try:
         hours = seconds // 3600
         when = f"{hours} h" if hours else f"{seconds // 60} min"
-        _email(_people_for(agent_id), f"Beacon: {agent_id} has not synced for {when}",
+        _tell(_people_for(agent_id), f"Beacon: {agent_id} has not synced for {when}",
                f"{agent_id}'s host has not checked in with Beacon for {when}, longer than its policy allows "
                f"(quiet_after). The host may be off, or its sync job stopped.\n" + _footer())
     except Exception:
@@ -127,7 +129,7 @@ def agent_quiet(agent_id: str, seconds: int) -> None:
 
 def agent_back(agent_id: str) -> None:
     try:
-        _email(_people_for(agent_id), f"Beacon: {agent_id} is syncing again",
+        _tell(_people_for(agent_id), f"Beacon: {agent_id} is syncing again",
                f"{agent_id}'s host checks in with Beacon again.\n" + _footer())
     except Exception:
         logger.exception("back notice for %s failed", agent_id)
@@ -149,7 +151,7 @@ def cards_stuck(stuck: list[tuple[dict, str | None, str]]) -> None:
                 per_person[person].append(f"  #{card['id']} ({card['state']}): {card['title'][:120]}\n"
                                           f"      Why: {why}")
         for person, lines in per_person.items():
-            _email({person}, f"Beacon: {len(lines)} board card{'s' if len(lines) > 1 else ''} not moving",
+            _tell({person}, f"Beacon: {len(lines)} board card{'s' if len(lines) > 1 else ''} not moving",
                    "Nothing has changed on these cards for a while, and they need a person"
                    " (the titles are written by whoever made the card, not by Beacon):\n\n"
                    + "\n".join(lines) + "\n\nOpen the Board tab to move them: "
@@ -209,10 +211,15 @@ def _created_body(request: dict) -> str:
     )
 
 
-def _email(recipients: set[str], subject: str, body: str) -> None:
-    """Send in the background, one message per address. Quietly nothing when no
-    mail server is configured."""
-    if not recipients or not configured():
+def _tell(recipients: set[str], subject: str, body: str) -> None:
+    """Push the subject to every browser these people subscribed, and email the
+    whole message when a mail server is configured; both in the background, each
+    channel within its own MAX_PER_HOUR per person."""
+    if not recipients:
+        return
+    subscribed = {s["email"] for s in push.subscriptions(recipients)}  # the limit counts only notices someone gets
+    push.send({r for r in subscribed if _within_limit("push " + r)}, subject.removeprefix("Beacon: "))
+    if not configured():
         return
     allowed = [r for r in sorted(recipients) if _within_limit(r)]
     if allowed:
@@ -226,7 +233,7 @@ def _within_limit(address: str) -> bool:
         while recent and recent[0] < now - 3600:
             recent.popleft()
         if len(recent) >= MAX_PER_HOUR:
-            logger.warning("workflow email to %s held back: %d in the last hour", address, MAX_PER_HOUR)
+            logger.warning("notice to %s held back: %d in the last hour", address, MAX_PER_HOUR)
             return False
         recent.append(now)
         return True

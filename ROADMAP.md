@@ -250,6 +250,25 @@ Related foundation work, in Horizon 0:
 - Allow hosts without SSH settings, for agents that Beacon only talks to
   (delivered in 0.22.0).
 
+## App track
+
+1. **PWA with notifications (delivered in 0.29.0).** The page installs as an
+   app, and the notices that people get by email also come as Web Push.
+2. **Native iOS, iPadOS and macOS app.** It adds actions on the notification
+   itself (Approve on the lock screen, which Safari's Web Push cannot do) and
+   Face ID before an approval. Prerequisites:
+   - an Apple Developer Program membership, for APNs and TestFlight;
+   - login without a browser cookie: a Zitadel native client (PKCE through
+     `ASWebAuthenticationSession`), and Beacon accepting Zitadel access tokens
+     as `Bearer`, with the role read on every request as for sessions;
+   - the app's login counts as a human, as a browser session does (decided
+     2026-11-07): it answers workflow requests, T4/T5 ones included, and runs
+     T4/T5 actions directly (policy, access, enrollment, decommission).
+     `_workflow_human` and `_require_human_session` must accept that login
+     and never the MCP token or an agent's token;
+   - an APNs sender (HTTP/2 with token auth) next to `backend/push.py`;
+   - a stable API contract that the app can check with `/api/version`.
+
 ## Horizon 0 — Protect and stabilize the foundation
 
 **Goal:** establish a trustworthy base before adding governance automation.

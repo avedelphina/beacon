@@ -1168,6 +1168,78 @@ document.getElementById("policy-save").addEventListener("click", async () => {
 
 document.querySelector('[data-tab="policy"]').addEventListener("click", renderPolicy);
 
+// Notifications (backend/push.py): the browser's own Web Push, so the same page
+// added to a phone's Home Screen gets them too. On iPhone and iPad, Safari
+// offers push only to a page on the Home Screen; the button says so there.
+const notifyButton = document.getElementById("notify");
+
+function b64urlBytes(text) {
+  return Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+}
+
+function sameKey(subscription, key) {
+  const had = new Uint8Array(subscription.options.applicationServerKey ?? new ArrayBuffer(0));
+  const want = b64urlBytes(key);
+  return had.length === want.length && had.every((b, i) => b === want[i]);
+}
+
+function showNotify(state) {
+  notifyButton.hidden = false;
+  notifyButton.disabled = state === "blocked" || state === "home-screen";
+  notifyButton.textContent = {
+    on: "Notifications on", off: "Notify me", blocked: "Notifications blocked",
+    "home-screen": "Add to Home Screen for notifications",
+  }[state];
+  notifyButton.title = state === "on" ? "Turn notifications off for this browser" : "";
+}
+
+async function sendSubscription(subscription) {
+  const result = await json("/api/push", "POST", subscription.toJSON());
+  if (result.new && !(result.sent >= 200 && result.sent < 300)) {
+    alert(`Beacon saved this browser, but its test notification did not go through: ${result.sent}`);
+  }
+}
+
+async function setupPush() {
+  if (!("serviceWorker" in navigator)) return;
+  const registration = await navigator.serviceWorker.register("/sw.js");
+  if (!("PushManager" in window)) {
+    if (navigator.standalone === false) showNotify("home-screen");  // iOS Safari, not on the Home Screen yet
+    return;
+  }
+  const { key } = await json("/api/push");
+  if (!key) return;  // this Beacon cannot push
+  let subscription = await registration.pushManager.getSubscription();
+  if (subscription && !sameKey(subscription, key)) {
+    // Beacon's key changed (BEACON_A2A_SECRET was rotated), so this one is dead.
+    // Safari subscribes only on a tap, so the person turns it on again.
+    await subscription.unsubscribe();
+    subscription = null;
+  }
+  // Sent on every open: it heals a subscription the browser renewed or Beacon lost.
+  if (subscription) await sendSubscription(subscription);
+  showNotify(subscription ? "on" : Notification.permission === "denied" ? "blocked" : "off");
+
+  notifyButton.addEventListener("click", async () => {
+    try {
+      const current = await registration.pushManager.getSubscription();
+      if (current) {
+        await json("/api/push", "DELETE", { endpoint: current.endpoint });
+        await current.unsubscribe();
+        showNotify("off");
+      } else if (await Notification.requestPermission() === "granted") {
+        const created = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlBytes(key) });
+        await sendSubscription(created);
+        showNotify("on");
+      } else {
+        showNotify(Notification.permission === "denied" ? "blocked" : "off");
+      }
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+}
+
 // Who is looking decides what is drawn: a member (backend/members.py) sees their
 // own agents and board and nothing else, and the server refuses the rest anyway.
 let isMember = false;
@@ -1178,6 +1250,7 @@ async function start() {
   if (user) {
     document.getElementById("whoami-name").textContent = user.name || user.email || user.sub;
     document.getElementById("whoami").hidden = false;
+    setupPush().catch((err) => console.warn("notifications:", err));  // optional: the page works without them
   }
   if (isMember) {
     document.body.classList.add("member");
