@@ -133,6 +133,31 @@ def agent_back(agent_id: str) -> None:
         logger.exception("back notice for %s failed", agent_id)
 
 
+# --- board cards nobody moves (board.remind) -------------------------------
+
+
+def cards_stuck(stuck: list[tuple[dict, str | None, str]]) -> None:
+    """One email per person, listing the cards that reminders did not move or
+    that only a person can move: operators, the owners of the agents involved,
+    and anyone the card names by email."""
+    try:
+        per_person: dict[str, list[str]] = collections.defaultdict(list)
+        for card, who, why in stuck:
+            named = {a for a in (card["assignee"], who) if a}
+            people = _people_for("").union(*map(_people_for, named), {p.casefold() for p in named if "@" in p})
+            for person in people:
+                per_person[person].append(f"  #{card['id']} ({card['state']}): {card['title'][:120]}\n"
+                                          f"      Why: {why}")
+        for person, lines in per_person.items():
+            _email({person}, f"Beacon: {len(lines)} board card{'s' if len(lines) > 1 else ''} not moving",
+                   "Nothing has changed on these cards for a while, and they need a person"
+                   " (the titles are written by whoever made the card, not by Beacon):\n\n"
+                   + "\n".join(lines) + "\n\nOpen the Board tab to move them: "
+                   + (mesh.public_url() or "your Beacon page") + "\n")
+    except Exception:
+        logger.exception("stuck-card notice failed")
+
+
 def _people_for(agent_id: str) -> set[str]:
     from . import auth
     owner = None

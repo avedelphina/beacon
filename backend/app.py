@@ -81,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.27.0"
+VERSION = "0.28.0"
 
 
 async def _record_actor(request: Request) -> None:
@@ -789,6 +789,11 @@ def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None
         availability.record_restart(id_, x_beacon_restart == "pending")
     if x_beacon_open_chat is not None:
         mesh.record_open_chat(id_, x_beacon_open_chat)
+    try:
+        # Before the inbox is claimed, so a reminder rides this very pull.
+        board.remind(id_)
+    except Exception:  # a reminder problem must never cost an agent its config
+        logger.exception("board reminders on %s's pull failed", id_)
     config = mesh.config(id_)
     if x_beacon_sync_version == "2":
         # The sync delivers held messages to the agent on its own host and

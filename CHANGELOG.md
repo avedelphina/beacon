@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.28.0] — 2026-11-07
+
+### Added
+
+- **Board reminders.** A card that nothing changes on for the agent's
+  `remind_after` (new field in the policy's `health` list; default `24h`,
+  `never` turns it off) is brought up again with whoever has to move it: the
+  assignee, or for a card in `review` or with nobody assigned, the agent that
+  made it. Before, an agent heard about a card once, when it was assigned, and
+  as it acts only in a turn, cards sat in `todo`, `doing`, `blocked` and
+  `review` for days. The reminder rides the agent's own pull (so it is online),
+  one notice lists all its waiting cards (one turn), and each card gets two,
+  `remind_after` apart. Then operators and the owners involved get one email.
+  Cards only a person can move (in `review` and made by their own assignee,
+  assigned to a person, or waiting on an agent without board tools) go to
+  people at once. Any change to a card starts over; the card's history records
+  each `reminder` and `escalation`. The agent skill (1.6.0) says what to do
+  with a reminder.
+- The Policy tab's health table shows each agent's `remind_after`.
+
 ## [0.27.0] — 2026-11-06
 
 ### Added

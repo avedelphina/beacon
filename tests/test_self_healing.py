@@ -207,9 +207,10 @@ health:
 
 def test_health_rules_merge_field_by_field_later_wins():
     rules = policy.parse(RULES)
-    assert policy.health_for(rules, _agent("srv")) == {"heal": True, "quiet_after": 1800, "mailbox_ttl": 72 * 3600}
+    assert policy.health_for(rules, _agent("srv")) == {"heal": True, "quiet_after": 1800, "mailbox_ttl": 72 * 3600,
+                                                       "remind_after": 86400}
     laptop = policy.health_for(rules, _agent("lap", ["mobile"]))
-    assert laptop == {"heal": True, "quiet_after": 3 * 86400, "mailbox_ttl": 7 * 86400}
+    assert laptop == {"heal": True, "quiet_after": 3 * 86400, "mailbox_ttl": 7 * 86400, "remind_after": 86400}
     assert policy.health_for(rules, _agent("kid", ["family-a", "mobile"]))["heal"] is False
     assert policy.health_for(None, _agent("x")) == policy.HEALTH_DEFAULTS  # no policy: nothing switched on
     never = policy.parse('health:\n  - {for: ["*"], quiet_after: never}\n')

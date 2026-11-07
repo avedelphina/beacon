@@ -29,8 +29,10 @@ same selectors (Tailscale's node attributes, in effect):
 `heal` lets the agent's host sync restart a gateway that stopped answering;
 `quiet_after` is how long an agent may go without syncing before Beacon tells
 people (`never` for none); `mailbox_ttl` is how long the mailbox holds a message
-for it. Later entries win, field by field. Without a matching entry: no
-healing, 30 minutes, 72 hours.
+for it; `remind_after` is how long a board card may wait on the agent before
+Beacon reminds it (`never` for none; backend/board.py). Later entries win,
+field by field. Without a matching entry: no healing, 30 minutes, 72 hours,
+24 hours.
 """
 
 import fnmatch
@@ -91,13 +93,14 @@ class HealthRule(BaseModel):
     heal: bool | None = None
     quiet_after: str | int | None = None
     mailbox_ttl: str | int | None = None
+    remind_after: str | int | None = None
 
     @field_validator("for_")
     @classmethod
     def _selectors(cls, v: list[str]) -> list[str]:
         return [check_selector(s) for s in v]
 
-    @field_validator("quiet_after")
+    @field_validator("quiet_after", "remind_after")
     @classmethod
     def _quiet(cls, v):
         if v is not None and v != "never":
@@ -113,7 +116,7 @@ class HealthRule(BaseModel):
 
 
 # What an agent gets when no health entry says otherwise.
-HEALTH_DEFAULTS = {"heal": False, "quiet_after": 30 * 60, "mailbox_ttl": 72 * 3600}
+HEALTH_DEFAULTS = {"heal": False, "quiet_after": 30 * 60, "mailbox_ttl": 72 * 3600, "remind_after": 24 * 3600}
 
 
 class Policy(BaseModel):
@@ -173,7 +176,7 @@ def allows(policy: Policy | None, caller: Agent, target: Agent) -> bool:
 def health_for(policy: Policy | None, agent: Agent) -> dict:
     """The agent's effective health settings: defaults, then every matching
     entry in order, each overriding only the fields it sets. `quiet_after`
-    is None for `never`."""
+    and `remind_after` are None for `never`."""
     result = dict(HEALTH_DEFAULTS)
     for rule in policy.health if policy else []:
         if not _any(rule.for_, agent):
@@ -184,6 +187,8 @@ def health_for(policy: Policy | None, agent: Agent) -> dict:
             result["quiet_after"] = None if rule.quiet_after == "never" else parse_duration(rule.quiet_after)
         if rule.mailbox_ttl is not None:
             result["mailbox_ttl"] = parse_duration(rule.mailbox_ttl)
+        if rule.remind_after is not None:
+            result["remind_after"] = None if rule.remind_after == "never" else parse_duration(rule.remind_after)
     return result
 
 

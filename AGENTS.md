@@ -66,7 +66,8 @@ backend/
   skills/         skills Beacon hands every agent via the mesh config; the host
                   sync installs them (mesh.skills, hermes_mesh_sync.install_skills)
   board.py        fleet board: cards + history in the opstore; assignment
-                  notices go through the mailbox
+                  notices and reminders about cards nobody moves (on each
+                  pull) go through the mailbox
   board_mcp.py    /board/mcp: board-only MCP tools for agents (own token) and
                   MCP clients (bearer); a fresh server per app lifespan
   mesh.py         A2A mesh: same-network peers, derived tokens, /mesh pull config,
