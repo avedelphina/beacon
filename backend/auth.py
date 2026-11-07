@@ -231,6 +231,13 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+# What installs the page as an app, served without a session: a browser fetches
+# the manifest without cookies, and checks the service worker for updates on
+# its own, where a redirect to the login page would fail the update. They are
+# static files with nothing in them about the fleet.
+PWA_FILES = frozenset({"/manifest.json", "/sw.js", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"})
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """Gates every request except /auth/*, /mesh/*, /a2a/*, /board/* and /enroll/* behind a logged-in session.
     A member's session reaches only the few routes in backend/members.py.
@@ -245,6 +252,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # session must not unlock them. /enroll/* is a single-use code that
         # a person minted (backend/onboarding.py): the host fetching it has no session.
         if request.url.path.startswith(("/auth/", "/mesh/", "/a2a/", "/board/", "/enroll/")):
+            return await call_next(request)
+        if request.url.path in PWA_FILES:
             return await call_next(request)
         if is_mcp_authorization(request.headers.get("authorization")):
             # Keep the service credential distinct from a browser-session

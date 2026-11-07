@@ -234,7 +234,7 @@ def fleet3(fleet, monkeypatch):
         store.upsert_agent(agent)
     policy.save(RULES, "test")
     sent = []
-    monkeypatch.setattr(notify, "_email", lambda to, subject, body: sent.append((sorted(to), subject)))
+    monkeypatch.setattr(notify, "_tell", lambda to, subject, body: sent.append((sorted(to), subject)))
     from backend import auth
     monkeypatch.setattr(auth, "ALLOWED_EMAILS", frozenset({"op@example.com"}))
     return sent

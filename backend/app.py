@@ -9,11 +9,11 @@ from pathlib import Path
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, availability, board, bus, cron_store, fleet, mailbox, members, mesh, notify, onboarding, opstore, policy, scheduler, store, templates, workflow
+from . import auth, availability, board, bus, cron_store, fleet, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, CronJob, Host
@@ -81,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.28.0"
+VERSION = "0.29.0"
 
 
 async def _record_actor(request: Request) -> None:
@@ -1160,6 +1160,63 @@ def put_cron_job(id_: str, job: CronJob) -> CronJob:
 @app.delete("/api/cron-jobs/{id_}")
 def delete_cron_job(id_: str) -> dict:
     cron_store.delete_cron_job(id_)
+    return {"ok": True}
+
+
+# --- Web Push (backend/push.py) ------------------------------------------------
+
+
+class PushKeys(BaseModel):
+    p256dh: str = Field(max_length=200)
+    auth: str = Field(max_length=200)
+
+
+class PushSubscription(BaseModel):
+    endpoint: str = Field(max_length=2048)
+    keys: PushKeys
+
+
+class PushEndpoint(BaseModel):
+    endpoint: str = Field(max_length=2048)
+
+
+def _push_person(request: Request) -> str:
+    """Notifications belong to a person's browser: a logged-in session, not the
+    MCP token and not open mode (there is nobody for notify to tell)."""
+    user = request.session.get("user") if "session" in request.scope else None
+    if getattr(request.state, "auth_via_mcp", False) or not (user or {}).get("email"):
+        raise HTTPException(409, "notifications need a person logged in to Beacon")
+    return user["email"]
+
+
+@app.get("/api/push")
+def push_key() -> dict:
+    """The key a browser subscribes with; null when this Beacon cannot push."""
+    return {"key": push.public_key()}
+
+
+@app.post("/api/push")
+def push_subscribe(body: PushSubscription, request: Request) -> dict:
+    """Turn notifications on for this browser. The page sends its subscription
+    every time it opens, so a lost or changed one heals itself; only a new one
+    gets a test notice, which shows at once whether the whole path works."""
+    email = _push_person(request)
+    if not push.public_key():
+        raise HTTPException(409, f"this Beacon cannot send notifications: {mesh.SECRET_ENV} is not set")
+    if not push.allowed_endpoint(body.endpoint):
+        raise HTTPException(400, "not a known browser push service")
+    try:
+        push.encrypt(b"", body.keys.p256dh, body.keys.auth)  # keys that cannot encrypt are refused now, not on every notice
+    except ValueError:
+        raise HTTPException(400, "the subscription's keys are not valid")
+    new = push.save(email, body.endpoint, body.keys.p256dh, body.keys.auth)
+    subscription = {"endpoint": body.endpoint, "p256dh": body.keys.p256dh, "auth": body.keys.auth}
+    return {"new": new, "sent": push.deliver(subscription, "Notifications from Beacon are on") if new else None}
+
+
+@app.delete("/api/push")
+def push_unsubscribe(body: PushEndpoint, request: Request) -> dict:
+    push.remove(body.endpoint, _push_person(request))
     return {"ok": True}
 
 

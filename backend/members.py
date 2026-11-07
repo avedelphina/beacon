@@ -21,6 +21,7 @@ What a member may do, and why those:
   comments, state changes. An agent's owner hears from it, and it from them;
 - answer approvals and decisions that concern their agents: what the agent asks
   of "a human" is asked of its owner.
+- turn on notifications in their own browser (backend/push.py).
 Nothing else: no hosts, templates, policy, cron, config, deploy, enrollment,
 or any other person's agent.
 """
@@ -47,6 +48,11 @@ _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject i
     ("GET", r"/api/workflows", None),
     ("GET", r"/api/workflows/(?P<id>\d+)", "workflow"),
     ("POST", r"/api/workflows/(?P<id>\d+)/respond", "workflow"),
+    # Notifications on their own browser; push.send reaches only what notify
+    # sends a member anyway (their agents, their approvals).
+    ("GET", r"/api/push", None),
+    ("POST", r"/api/push", None),
+    ("DELETE", r"/api/push", None),
 )]
 
 

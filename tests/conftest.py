@@ -45,13 +45,14 @@ def _board_notices_run_inline(monkeypatch):
     test's result depend only on what the test did."""
     import types
 
-    from backend import board, notify
+    from backend import board, notify, push
 
     inline = types.SimpleNamespace(
         Thread=lambda target, args=(), daemon=False: types.SimpleNamespace(start=lambda: target(*args)),
         Lock=__import__("threading").Lock)
     monkeypatch.setattr(board, "threading", inline)
     monkeypatch.setattr(notify, "threading", inline)
+    monkeypatch.setattr(push, "threading", inline)
 
 
 @pytest.fixture
