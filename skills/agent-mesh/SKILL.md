@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (peers named <peer>-mailbox), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.6.0
+version: 1.7.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -117,8 +117,11 @@ Tools: `board_list`, `board_card`, `card_create`, `card_update`, `card_comment`.
 - work will take more than a few messages, or more than one session;
 - you want others to see progress without reading each conversation.
 
-Write the card so a stranger could do it: what to do, what "done" means, the
-limits (what not to touch), and where to report. Put the project name in
+Write the card so a stranger could do it: what to do, the limits (what not to
+touch), and where to report. Put the first step in `next_action` and what must
+be true to close it in `done_when`. Put links to a PR or an issue elsewhere in
+`links` (`[{url, label}]`). A link is only a pointer: it does not prove that the
+work is done, and it does not approve anything. Put the project name in
 `project`. Set `assignee` to an agent id from `a2a_list`. Assigning sends that
 agent a notice with the card in it. If you get "does not accept work from",
 that agent's operator has restricted who may give it work. Do not look for a
@@ -131,7 +134,8 @@ way around it. Tell your operator.
    and move it back or ask the creator. Do not guess.
 2. `card_update` to `doing`, with a short `note`.
 3. Report progress with `card_comment` at real milestones. When you work over
-   A2A, pass the thread's `context_id` so others can follow the thread.
+   A2A, pass the thread's `context_id` so others can follow the thread. When
+   the next step changes, set `next_action` with `card_update`.
 4. If you are stuck, set `blocked` and write what you need and from whom.
 5. When finished, move it to `review` if someone should check it, otherwise to
    `done`. The `note` states the result: what you did, where the output is, and

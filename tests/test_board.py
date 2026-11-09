@@ -68,6 +68,65 @@ def test_board_validates_input(client, fleet_agents):
     assert client.get("/api/board/cards/999").status_code == 404
 
 
+def test_card_says_what_moves_it_and_where_it_points(client, fleet_agents):
+    plain = client.post("/api/board/cards", json={"title": "x"}).json()
+    assert (plain["next_action"], plain["done_when"], plain["links"]) == (None, None, [])
+
+    card = client.post("/api/board/cards", json={
+        "title": "Ship the fix", "next_action": " open the PR ", "done_when": "merged and tagged",
+        "links": [{"url": "https://git.example/org/repo/pulls/12", "label": "PR #12"}]}).json()
+    assert card["next_action"] == "open the PR" and card["done_when"] == "merged and tagged"
+    url = f"/api/board/cards/{card['id']}"
+
+    changed = client.patch(url, json={"next_action": "wait for CI", "links": [], "note": "PR open"}).json()
+    assert changed["next_action"] == "wait for CI" and changed["links"] == []
+    assert [(e["kind"], e["body"]) for e in changed["events"][1:]] == [
+        ("edit", "next action: wait for CI: PR open"), ("edit", "links changed: PR open")]
+
+    cleared = client.patch(url, json={"done_when": ""}).json()
+    assert cleared["done_when"] is None and cleared["events"][-1]["body"] == "done when: -"
+    same = client.patch(url, json={"next_action": "wait for CI", "links": []}).json()
+    assert len(same["events"]) == len(cleared["events"])  # nothing changed, nothing recorded
+
+
+@pytest.mark.parametrize("links", [
+    [{"url": "javascript:alert(1)"}], [{"url": "data:text/html,x"}], [{"url": "https://"}],
+    [{"url": "https://ok.example", "label": 5}], ["https://ok.example"],
+    [{"url": f"https://ok.example/{i}"} for i in range(board.MAX_LINKS + 1)],
+])
+def test_links_must_be_web_urls(client, fleet_agents, links):
+    card = client.post("/api/board/cards", json={"title": "x"}).json()
+    # 422: the request model already refuses a non-object; 400: board._links refuses the rest.
+    assert client.post("/api/board/cards", json={"title": "y", "links": links}).status_code in (400, 422)
+    assert client.patch(f"/api/board/cards/{card['id']}", json={"links": links}).status_code in (400, 422)
+    with pytest.raises(ValueError):
+        board.update_card("alpha", card["id"], links=links)  # what MCP calls, without the request model
+    assert board.get_card(card["id"])["links"] == []
+
+
+def test_notice_and_reminder_carry_the_next_action(client, fleet_agents):
+    card = board.create_card("beacon", "Check backups", assignee="bravo",
+                             next_action="run the restore test", done_when="a restore worked")
+    notice, = _notices()
+    assert "Next action: run the restore test" in notice["body"] and "Done when: a restore worked" in notice["body"]
+    text = board._reminder_text([board.get_card(card["id"])], card["updated_at"] + 90000)
+    assert "Next action on the card: run the restore test" in text
+
+
+def test_cards_from_before_the_plan_fields_get_them(fleet, monkeypatch, tmp_path):
+    import sqlite3
+    monkeypatch.setattr(opstore, "STATE_DIR", tmp_path / "old")
+    (tmp_path / "old").mkdir()
+    with sqlite3.connect(tmp_path / "old" / "beacon.db") as db:
+        db.execute("CREATE TABLE cards (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,"
+                   " body TEXT NOT NULL DEFAULT '', project TEXT, assignee TEXT, state TEXT NOT NULL,"
+                   " created_by TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL)")
+        db.execute("INSERT INTO cards (title, state, created_by, created_at, updated_at)"
+                   " VALUES ('old', 'todo', 'beacon', 1, 1)")
+    card = board.get_card(1)
+    assert (card["next_action"], card["done_when"], card["links"]) == (None, None, [])
+
+
 def test_assigning_an_agent_sends_it_a_notice(client, fleet_agents):
     card = client.post("/api/board/cards", json={"title": "Check backups", "body": "All hosts.",
                                                  "assignee": "bravo"}).json()
@@ -137,6 +196,11 @@ def test_agent_writes_to_the_board_as_itself(fleet_agents):
         ]
     notice, = _notices()
     assert notice["sender"] == "alpha" and notice["recipient"] == "bravo"
+
+    with TestClient(app) as c:
+        updated = _tool(c, "card_update", {"card_id": card["id"], "next_action": "draft the plan",
+                                           "links": [{"url": "https://git.example/issues/3", "label": "issue"}]}, token)
+    assert updated["next_action"] == "draft the plan" and updated["links"][0]["label"] == "issue"
 
 
 def test_board_mcp_refuses_strangers_and_other_tokens(fleet_agents, monkeypatch):

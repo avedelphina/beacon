@@ -81,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.29.0"
+VERSION = "0.30.0"
 
 
 async def _record_actor(request: Request) -> None:
@@ -441,6 +441,9 @@ class CardCreate(BaseModel):
     body: str = ""
     project: str | None = None
     assignee: str | None = None
+    next_action: str | None = None
+    done_when: str | None = None
+    links: list[dict] | None = None  # [{url, label}]; board._links checks each
 
 
 class CardUpdate(BaseModel):
@@ -449,6 +452,9 @@ class CardUpdate(BaseModel):
     title: str | None = None
     body: str | None = None
     project: str | None = None
+    next_action: str | None = None
+    done_when: str | None = None
+    links: list[dict] | None = None  # replaces the card's list
     note: str | None = None
     context_id: str | None = None
 
@@ -600,7 +606,8 @@ def board_card(card_id: int) -> dict:
 @app.post("/api/board/cards")
 def board_create(body: CardCreate, request: Request) -> dict:
     _member_may_assign(request, body.assignee)
-    return board.create_card(_board_author(request), body.title, body.body, body.project, body.assignee)
+    return board.create_card(_board_author(request), body.title, body.body, body.project, body.assignee,
+                             next_action=body.next_action, done_when=body.done_when, links=body.links)
 
 
 @app.patch("/api/board/cards/{card_id}")

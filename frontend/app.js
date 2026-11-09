@@ -935,12 +935,19 @@ async function renderBoard() {
     el.innerHTML = `<p class="empty">Could not load the board: ${esc(err.message)}</p>`;
     return;
   }
+  // Requests that wait for an answer, or for the requester after "changes requested".
+  // The workflow list is already cut to what this viewer may see.
+  const waiting = {};
+  (await api.listWorkflows().catch(() => []))
+    .filter((w) => w.state === "pending" || w.state === "changes_requested")
+    .forEach((w) => { waiting[w.card_id] = (waiting[w.card_id] || 0) + 1; });
   el.innerHTML = BOARD_STATES.map((state) => {
     const items = cards.filter((c) => c.state === state);
     return `<div class="board-col"><h2>${state} <span class="hint">${items.length}</span></h2>${
       items.map((c) => `<button type="button" class="board-card" data-card="${esc(c.id)}">
         <span>#${esc(c.id)} ${esc(c.title)}</span>
-        <span class="board-card-meta">${esc(c.assignee ?? "unassigned")}${c.project ? ` · ${esc(c.project)}` : ""}</span>
+        <span class="board-card-meta">${esc(c.assignee ?? "unassigned")}${c.project ? ` · ${esc(c.project)}` : ""}${
+          waiting[c.id] ? ` <span class="chip chip-warn">${waiting[c.id]} open request${waiting[c.id] > 1 ? "s" : ""}</span>` : ""}</span>
       </button>`).join("")}</div>`;
   }).join("");
   el.querySelectorAll("[data-card]").forEach((b) => b.addEventListener("click", () => openCard(b.dataset.card)));
@@ -960,20 +967,59 @@ async function openCard(id) {
     alert(err.message);
     return;
   }
-  const when = (t) => new Date(t * 1000).toLocaleString();
+  const requests = await json(`/api/workflows?card_id=${encodeURIComponent(id)}`).catch(() => []);
+  const when = (t) => new Date(t * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  const unset = '<span class="hint">not set</span>';
+  // Links are pointers the card's editors typed, not something Beacon checked.
+  const links = c.links.map((l) => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${
+    esc(l.label || l.url)}</a></li>`).join("");
+  const reqs = requests.map((w) => `<li><span class="chip">${esc(w.state)}</span> ${esc(w.kind)}: ${esc(w.title)}
+    <span class="hint">· responder ${esc(w.eligible_responder)}${
+      w.state === "pending" ? ` · expires ${esc(when(w.expires_at))}` : ""}${
+      w.response != null ? ` · answer: ${esc(typeof w.response === "string" ? w.response : JSON.stringify(w.response))}` : ""}</span></li>`).join("");
   document.getElementById("card-detail").innerHTML = `
     <h2>#${esc(c.id)} ${esc(c.title)}</h2>
-    <p class="hint">${esc(c.project ?? "no project")} · created by ${esc(c.created_by)} · ${when(c.created_at)}</p>
+    <p class="hint">${esc(c.state)} · ${esc(c.assignee ?? "unassigned")} · ${esc(c.project ?? "no project")} · created by ${esc(c.created_by)} · ${when(c.created_at)}</p>
+    <dl class="card-plan">
+      <dt>Next action</dt><dd>${c.next_action ? esc(c.next_action) : unset}</dd>
+      <dt>Done when</dt><dd>${c.done_when ? esc(c.done_when) : unset}</dd>
+      ${reqs ? `<dt>Requests</dt><dd><ul class="card-list">${reqs}</ul><span class="hint">Answer in the Workflows tab.</span></dd>` : ""}
+      ${links ? `<dt>Links</dt><dd><ul class="card-list">${links}</ul></dd>` : ""}
+    </dl>
     ${c.body ? `<p class="card-body">${esc(c.body)}</p>` : ""}
-    <ol class="card-history">${c.events.map((e) => `<li>
-      <span class="hint">${when(e.created_at)} · ${esc(e.author)} · ${esc(e.kind)}</span><br>${esc(e.body)}${
-        e.context_id ? ` <code>${esc(e.context_id)}</code>` : ""}</li>`).join("")}</ol>`;
+    <h3 class="card-section">History <span class="hint">${c.events.length}</span></h3>
+    <ol class="card-history">${c.events.map((e) => cardEvent(e, when)).join("")}</ol>`;
   const form = document.getElementById("card-update-form");
   form.dataset.card = c.id;
   form.state.value = c.state;
   form.assignee.value = c.assignee ?? "";
+  form.next_action.value = c.next_action ?? "";
+  form.done_when.value = c.done_when ?? "";
+  form.links.value = c.links.map((l) => `${l.url} ${l.label}`.trim()).join("\n");
   form.note.value = "";
   openModal("card-modal");
+  // Where the history scrolls on its own (wide screens), start at the newest entry.
+  const history = document.querySelector("#card-detail .card-history");
+  history.scrollTop = history.scrollHeight;
+}
+
+// Comments are what people and agents wrote, so they read as text; moves, edits,
+// notices and reminders are Beacon's record of them and stay one quiet line.
+function cardEvent(e, when) {
+  const comment = e.kind === "comment";
+  return `<li class="${comment ? "card-comment" : "card-event"}">
+    <div class="card-event-head"><strong>${esc(e.author)}</strong>${comment ? "" : `<span>${esc(e.kind.replace("_", " "))}</span>`}<time>${
+      when(e.created_at)}</time>${e.notice ? `<span class="chip">${esc(e.notice.state)}</span>` : ""}${
+      e.context_id ? `<code title="A2A context">${esc(e.context_id)}</code>` : ""}</div>
+    <div class="card-text">${esc(e.body)}</div></li>`;
+}
+
+// One link per line: the URL, then the rest of the line as its label.
+function parseLinks(text) {
+  return text.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+    const [url, ...label] = line.split(/\s+/);
+    return { url, label: label.join(" ") };
+  });
 }
 
 document.getElementById("card-update-form").addEventListener("submit", async (e) => {
@@ -981,7 +1027,8 @@ document.getElementById("card-update-form").addEventListener("submit", async (e)
   const f = e.target;
   try {
     await json(`/api/board/cards/${encodeURIComponent(f.dataset.card)}`, "PATCH",
-      { state: f.state.value, assignee: f.assignee.value.trim(), note: f.note.value.trim() || null });
+      { state: f.state.value, assignee: f.assignee.value.trim(), next_action: f.next_action.value,
+        done_when: f.done_when.value, links: parseLinks(f.links.value), note: f.note.value.trim() || null });
     closeModal("card-modal");
     renderBoard();
   } catch (err) {
@@ -1001,6 +1048,7 @@ document.getElementById("card-create-form").addEventListener("submit", async (e)
     await json("/api/board/cards", "POST", {
       title: f.title.value, body: f.body.value,
       project: f.project.value.trim() || null, assignee: f.assignee.value.trim() || null,
+      next_action: f.next_action.value || null, done_when: f.done_when.value || null,
     });
     closeModal("card-create-modal");
     renderBoard();

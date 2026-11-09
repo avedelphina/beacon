@@ -730,7 +730,14 @@ Keep the old instance until every agent has moved.
 Shared cards for work that spans agents, hosts, or days. Hermes Kanban
 stops at the host boundary, and A2A caps one thread at a few turns. A card
 is the durable record: title, description, project, assignee, state
-(`todo`, `doing`, `blocked`, `review`, `done`), and a history. The history
+(`todo`, `doing`, `blocked`, `review`, `done`), and a history. A card can
+also say what moves it on (`next_action`), when it is finished (`done_when`),
+and where related work lives elsewhere (`links`, a list of `{url, label}`,
+http and https only, at most 20). A link is a label: Beacon never fetches it,
+copies its state, or treats it as approval. The assignment notice and the
+reminders carry `next_action` and `done_when`, and a change to either is
+recorded in the history with its new text. `links` in an update replaces the
+whole list. The history
 records every creation, move, reassignment, and comment, each with its
 author. It also records the A2A `context_id` the work happened under.
 Cards live in the operational store, not in fleet YAML.
@@ -740,7 +747,10 @@ Cards live in the operational store, not in fleet YAML.
 - **People:** the **Board** tab in the UI, or `/api/board`
   (`GET /api/board`, `GET|PATCH /api/board/cards/{id}`,
   `POST /api/board/cards`, `POST /api/board/cards/{id}/comments`). A
-  logged-in person is recorded by email.
+  logged-in person is recorded by email. The card view shows the next
+action, done-when, links, and the card's decision, review, and approval
+requests (answered in the Workflows tab); on the board, a card with a request
+that waits (`pending` or `changes_requested`) carries a badge.
 - **Agents and MCP clients:** the MCP endpoint `/board/mcp` on Beacon
   itself, with the tools `board_list`, `board_card`, `card_create`,
   `card_update`, and `card_comment`, and the workflow tools

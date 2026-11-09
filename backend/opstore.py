@@ -47,7 +47,10 @@ CREATE TABLE IF NOT EXISTS cards (
     updated_at  REAL NOT NULL,
     reminded_at  REAL,                       -- last reminder to whoever has to move it (board.remind)
     reminders    INTEGER NOT NULL DEFAULT 0, -- reminders since updated_at; counts only when reminded_at >= updated_at
-    escalated_at REAL                        -- people were told by email; again only after the card changes
+    escalated_at REAL,                       -- people were told by email; again only after the card changes
+    next_action TEXT,                        -- the one step that moves the card on
+    done_when   TEXT,                        -- what has to be true to close it
+    links       TEXT NOT NULL DEFAULT '[]'   -- JSON [{url, label}]: pointers out (PRs, issues), never state
 );
 CREATE TABLE IF NOT EXISTS card_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -209,7 +212,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE agent_seen ADD COLUMN {column} {decl}")
     card_columns = {row[1] for row in conn.execute("PRAGMA table_info(cards)")}
     for column, decl in (("reminded_at", "REAL"), ("reminders", "INTEGER NOT NULL DEFAULT 0"),
-                         ("escalated_at", "REAL")):
+                         ("escalated_at", "REAL"), ("next_action", "TEXT"), ("done_when", "TEXT"),
+                         ("links", "TEXT NOT NULL DEFAULT '[]'")):
         if column not in card_columns:
             conn.execute(f"ALTER TABLE cards ADD COLUMN {column} {decl}")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(card_events)")}
