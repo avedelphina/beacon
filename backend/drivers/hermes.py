@@ -80,12 +80,14 @@ def _validate_agent(agent: Agent) -> None:
 def _wrap_for_user(agent: Agent, host: Host, command: str) -> str:
     """Run `command` as agent.desired.os_user when it differs from the SSH
     login user (the "new user" deploy mode installs Hermes under its own
-    account). `-i` gives a login shell so $HOME/PATH resolve for that user.
+    account). `-i` gives a login shell so $HOME/PATH resolve for that user. `-n`: if sudo
+    would ask for a password, fail at once instead of hanging on a prompt no one
+    can answer over a piped session.
     """
     _validate_agent(agent)
     user = target_user(agent)
     if user and user != host.ssh.user:
-        return f"sudo -u {shlex.quote(user)} -i bash -c {shlex.quote(command)}"
+        return f"sudo -n -u {shlex.quote(user)} -i bash -c {shlex.quote(command)}"
     return command
 
 
@@ -226,7 +228,7 @@ else
 fi
 sudo -n loginctl enable-linger {user} || echo "[beacon] warning: could not enable linger for {agent.desired['os_user']}"
 
-sudo -u {user} -i bash -s <<'BEACON_INNER'
+sudo -n -u {user} -i bash -s <<'BEACON_INNER'
 {inner}
 BEACON_INNER
 """
@@ -277,7 +279,7 @@ def decommission(agent: Agent, host: Host, purge: bool = False, remove_user: boo
         user = shlex.quote(agent.desired["os_user"])
         script = f"""\
 set -e
-sudo -u {user} -i bash -s <<'BEACON_INNER'
+sudo -n -u {user} -i bash -s <<'BEACON_INNER'
 {inner}
 BEACON_INNER
 

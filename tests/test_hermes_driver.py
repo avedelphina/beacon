@@ -535,7 +535,7 @@ def test_deploy_new_user_mode_wraps_in_sudo(fake_ssh):
     list(hermes.deploy(agent, make_host()))
     script = fake_ssh.last_command
     assert "useradd -m -s /bin/bash hermes-svc" in script
-    assert "sudo -u hermes-svc -i bash -s" in script
+    assert "sudo -n -u hermes-svc -i bash -s" in script
 
 
 def test_deploy_invalid_mode_raises_before_any_ssh(fake_ssh):
@@ -639,3 +639,10 @@ def test_update_agent_script_fails_closed(fake_ssh, tmp_path):
 
     assert result.returncode == 25
     assert "[beacon] done" not in result.stdout
+
+
+def test_every_sudo_to_another_user_is_non_interactive():
+    """A sudo that wants a password must fail at once: over a piped session
+    nobody can answer the prompt, and the call would hang until its timeout."""
+    wrapped = hermes._wrap_for_user(make_agent(desired={"os_user": "hermes-svc"}), make_host(), "true")
+    assert wrapped.startswith("sudo -n -u hermes-svc ")
