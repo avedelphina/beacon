@@ -81,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.30.3"
+VERSION = "0.30.4"
 
 
 async def _record_actor(request: Request) -> None:
@@ -237,12 +237,24 @@ def _split_exit_marker(lines: Iterator[str]) -> tuple[Iterator[str], Callable[[]
     return filtered(), lambda: code
 
 
+def _outcome_line(code: str | None) -> str:
+    """How an operation ended, in words, for the end of the streamed output. The
+    HTTP status is 200 whatever the remote command did (the response starts
+    before it ends), so without this the operator had to read the log to tell."""
+    if code == "0":
+        return "[beacon] ✓ succeeded (exit 0)"
+    if code is None or code == "none":
+        return "[beacon] ✗ did not finish: no exit status (connection lost, or it ran past its time limit)"
+    return f"[beacon] ✗ failed (exit {code})"
+
+
 def _stream(lines: Iterator[str]) -> StreamingResponse:
-    filtered, _ = _split_exit_marker(_started(lines))
+    filtered, exit_code = _split_exit_marker(_started(lines))
 
     def body_stream():
         try:
             yield from (line + "\n" for line in filtered)
+            yield _outcome_line(exit_code()) + "\n"
         finally:
             close = getattr(filtered, "close", None)
             if close is not None:
@@ -276,6 +288,7 @@ def _workflow_stream(lines: Iterator[str], request_id: int, actor: str) -> Strea
             for line in filtered:
                 yield line + "\n"
             code = exit_code()
+            yield _outcome_line(code) + "\n"
             if code == "0":
                 workflow.mark_executed(request_id, actor)
             else:

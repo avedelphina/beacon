@@ -146,6 +146,19 @@ def test_deploy_with_confirm_runs(client, host_and_agent, fake_ssh):
     assert len(fake_ssh.calls) == 1
 
 
+def test_streamed_operation_ends_with_a_plain_outcome_and_hides_the_exit_marker(client, host_and_agent, fake_ssh):
+    """The response is 200 whatever the remote command did, so the last line says how it ended."""
+    for lines, expected in (
+        (["[beacon] done", "__BEACON_EXIT__0"], "✓ succeeded (exit 0)"),
+        (["[beacon] boom", "__BEACON_EXIT__3"], "✗ failed (exit 3)"),
+        (["[beacon] hung", "__BEACON_EXIT__none"], "✗ did not finish"),
+    ):
+        fake_ssh.stream_lines = lines
+        text = client.post("/api/agents/a1/deploy?confirm=true").text
+        assert "__BEACON_EXIT__" not in text
+        assert text.rstrip("\n").splitlines()[-1].startswith("[beacon] " + expected)
+
+
 def test_decommission_without_confirm_does_not_touch_ssh(client, host_and_agent, fake_ssh):
     r = client.post("/api/agents/a1/decommission", json={})
     assert r.status_code == 200

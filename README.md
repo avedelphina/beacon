@@ -116,6 +116,14 @@ that file's own `Host` block own auth and host-key verification instead of
 `BEACON_KNOWN_HOSTS`; Beacon uses strict checking and never trusts a new key
 automatically.
 
+**Static keys under Docker.** The `beacon` container sees none of your
+`~/.ssh`. `docker-compose.yml` mounts `./ssh` read-only at `/etc/beacon`, so put
+the private key (mode 0600) and the reviewed `known_hosts` there and use the
+container's paths: `key: /etc/beacon/fleet_ed25519`, and
+`BEACON_KNOWN_HOSTS=/etc/beacon/known_hosts` (the compose default). A host with
+a `~/.ssh/...` key path fails every call from the container with "Identity file
+... not accessible".
+
 A host can have no `ssh` block at all:
 
 ```yaml

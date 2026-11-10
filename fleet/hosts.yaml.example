@@ -1,5 +1,7 @@
 hosts:
-  # Direct SSH with a static key.
+  # Direct SSH with a static key. Under docker compose the container sees only
+  # ./ssh (mounted at /etc/beacon), so there the key is e.g.
+  # /etc/beacon/fleet_ed25519 and known_hosts is /etc/beacon/known_hosts.
   - id: edge-01
     address: 10.20.4.11
     ssh:
