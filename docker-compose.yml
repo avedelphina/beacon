@@ -22,6 +22,7 @@ services:
       - --storage=file:///tbot-storage
       - --proxy-server=${TELEPORT_PROXY_SERVER:-teleport.example.com:443}
       - --join-method=token
+    user: ${BEACON_RUN_AS:-}
     mem_limit: ${TBOT_MEM_LIMIT:-256m}
     restart: unless-stopped
 
@@ -72,6 +73,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    # Empty (the default) runs as root, as before. BEACON_RUN_AS=10001:10001 runs
+    # unprivileged once ./state and ./tbot/data|storage are owned by that user.
+    user: ${BEACON_RUN_AS:-}
     mem_limit: ${BEACON_MEM_LIMIT:-1g}
     restart: unless-stopped
 
