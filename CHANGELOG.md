@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.30.4] — 2026-11-10
+
+### Fixed
+
+- **A streamed operation says how it ended.** Deploy, update and config push
+  end their output with `✓ succeeded (exit 0)`, `✗ failed (exit N)` or
+  `✗ did not finish` (no exit status: the connection dropped or the time limit
+  passed). The response is 200 either way, since it starts before the command
+  ends, so before you had to read the log to tell. (#30)
+
+### Documentation
+
+- **Static SSH keys under Docker.** The container sees only `./ssh`, mounted at
+  `/etc/beacon`; the README and `hosts.yaml.example` now say to put the key and
+  `known_hosts` there and use those paths. (#23)
+
 ## [0.30.3] — 2026-11-10
 
 ### Changed
