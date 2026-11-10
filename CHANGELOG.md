@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+## [0.30.3] — 2026-11-10
+
+### Changed
+
+- **Action needed for Teleport users:** the tbot proxy is no longer hardcoded.
+  Set `TELEPORT_PROXY_SERVER` (for example `teleport.example.com:443`) in
+  `.env` for the compose stack, and in the environment for `tbot/run.sh`. The
+  compose default is a placeholder, so a stack that uses Teleport hosts does
+  not connect until you set it. (#26)
+- **`tbot/run.sh` takes the join token from the environment or a file**, not
+  as an argument: `TBOT_TOKEN=<token> ./tbot/run.sh` or
+  `TBOT_TOKEN_FILE=/path ./tbot/run.sh`. On a command line `ps` shows the
+  token to every user on the host. Giving it as an argument now fails with a
+  message. (#26)
+- Containers: `beacon` and `mcp` have healthchecks, and `mcp` waits for
+  `beacon` to be healthy. All three have memory caps (`BEACON_MEM_LIMIT` 1g,
+  `MCP_MEM_LIMIT` 256m, `TBOT_MEM_LIMIT` 256m; raise them in `.env` if a
+  service is killed). `mcp` runs as an unprivileged user. (#25)
+- CI actions are pinned by commit SHA, with the tag in a comment. (#25)
+
+### Fixed
+
+- **Login works behind a TLS-terminating reverse proxy.** `BEACON_TRUSTED_PROXIES`
+  names the proxy whose `X-Forwarded-*` headers uvicorn believes (default
+  `127.0.0.1`), so the OIDC redirect URI is built as `https://`. See
+  [Authentication](README.md#authentication). (#24)
+
+### Known gaps
+
+- `beacon` and `tbot` still run as root. `beacon` writes to the `./state` bind
+  mount and reads tbot's private key material, so an unprivileged user needs
+  matching ownership of those host directories; that is its own change. (#25)
+
 ## [0.30.2] — 2026-11-10
 
 ### Fixed

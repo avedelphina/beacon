@@ -49,7 +49,7 @@ cp fleet/hosts.yaml.example fleet/hosts.yaml   # first run only
 # only needed once, ever — establishes tbot's stored identity in
 # ./tbot/storage. Get a token from `tctl bots add beacon --roles=agent`.
 # Skip this if a host in hosts.yaml only uses ssh.key, not config_file.
-./tbot/run.sh <join-token>
+TELEPORT_PROXY_SERVER=teleport.example.com:443 TBOT_TOKEN=<join-token> ./tbot/run.sh
 # Ctrl-C once it logs "Fetched new bot identity" — the compose stack takes it from here.
 
 docker compose up -d --build
@@ -1077,9 +1077,14 @@ unless `tbot/storage/` is wiped.
   dev. Writes to the same `tbot/data`/`tbot/storage` layout.
 
 ```bash
-./tbot/run.sh <join-token>   # first run
-./tbot/run.sh                # every run after
+export TELEPORT_PROXY_SERVER=teleport.example.com:443
+TBOT_TOKEN=<join-token> ./tbot/run.sh   # first run (or TBOT_TOKEN_FILE=/path/to/token)
+./tbot/run.sh                           # every run after
 ```
+
+The token goes in the environment or a file, never on the command line, where
+`ps` would show it to every user on the host. The Docker stack reads the
+proxy from `TELEPORT_PROXY_SERVER` in `.env`.
 
 Either way this produces `tbot/data/ssh_config` (plus keys, certs,
 `known_hosts`) and renews continuously. Point a host's `ssh.config_file` at
@@ -1157,6 +1162,14 @@ an operator.
    BEACON_SESSION_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
    BEACON_ALLOWED_EMAILS=tom@example.com
    ```
+
+**Behind a TLS-terminating reverse proxy** (nginx, Caddy, a load balancer),
+set `BEACON_TRUSTED_PROXIES` in `.env` to the proxy's address (comma-separated).
+uvicorn believes `X-Forwarded-Proto`/`X-Forwarded-For` only from those addresses
+(the default is `127.0.0.1`). Without it the app sees plain HTTP, builds an
+`http://` redirect URI, and login fails against the `https://` one registered
+with Zitadel. Do not use `*` where clients can reach the port directly: they
+could then claim any address or scheme.
 
 The client ID isn't sensitive (PKCE public clients don't hold a secret) —
 `BEACON_SESSION_SECRET` is what actually needs protecting, it signs the
