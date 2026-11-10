@@ -115,6 +115,19 @@ CREATE TABLE IF NOT EXISTS fleet_records (
     updated_at  REAL NOT NULL,
     PRIMARY KEY (kind, id)
 );
+-- What Beacon did on hosts and who asked (backend/audit.py).
+CREATE TABLE IF NOT EXISTS host_actions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    at          REAL NOT NULL,
+    actor       TEXT NOT NULL,     -- the person's email, or "beacon" for the MCP token / open mode / an agent
+    via         TEXT NOT NULL,     -- session | mcp | agent | open
+    capability  TEXT NOT NULL,     -- a key of tiers.CAPABILITY_TIERS
+    tier        TEXT NOT NULL,     -- T2 ... T5
+    target      TEXT,              -- the agent (or template) acted on
+    detail      TEXT NOT NULL,     -- what the gate said it would do
+    outcome     TEXT NOT NULL      -- requested | succeeded | failed | did not finish | interrupted
+);
+CREATE INDEX IF NOT EXISTS host_actions_by_target ON host_actions (target, id);
 CREATE TABLE IF NOT EXISTS fleet_history (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     kind        TEXT NOT NULL,

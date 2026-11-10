@@ -59,6 +59,7 @@ backend/
   notify.py       workflow and health notices: mailbox to agents, email (opt-in SMTP) and push to people
   push.py         Web Push to people's browsers/PWA (RFC 8291 + VAPID, key derived from
                   BEACON_A2A_SECRET); sends only to known push-service hosts
+  audit.py        who did what on hosts: a row per action past the confirm gate (host_actions)
   availability.py A2A availability (probe + last pull), health reports from the
                   host sync, quiet-agent detection
   mailbox.py      relay + voicemail behind POST /a2a/{agent}; delivers on the
@@ -231,7 +232,7 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 ## Known limitations (don't "fix" silently — see ROADMAP.md)
 
 - Hermes is the only implemented driver.
-- Audit trail is partial: fleet changes keep who made them (`fleet_history`); actions on hosts (deploy, push, restart) are not recorded yet.
+- Audit trail is partial: fleet changes keep who made them (`fleet_history`); actions that pass the confirm gate are recorded in `host_actions` (`backend/audit.py`, `GET /api/audit`), with an outcome only for streamed operations. The cron scheduler's runs and any alerting are not covered.
 - Mostly pull-based: Beacon has no timer. What happens on its own rides on
   agents' syncs: the mailbox delivers on a pull, each host's sync probes and
   heals its own agent (`health` in the policy), and every pull checks for

@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.31.0] — 2026-11-10
+
+### Added
+
+- **An audit log of actions on hosts.** Every action that passes the confirm
+  gate (T2 and up) is recorded in the store: when, who (a person's email, or
+  `beacon` for the MCP token or an agent), how they were authenticated
+  (`session`, `mcp`, `agent`, `open`), the capability, tier and target, what
+  the gate said it would do, and the outcome. Deploy, update, config push and
+  decommission record how they ended (`succeeded`, `failed`, `did not finish`,
+  `interrupted`); the others stay `requested`. Read it with
+  `GET /api/audit?limit=&target=&actor=`, operators and the MCP token only. The
+  cron scheduler's own runs are not recorded, and nothing alerts on the log
+  yet. (#27)
+
 ## [0.30.5] — 2026-11-10
 
 ### Fixed
