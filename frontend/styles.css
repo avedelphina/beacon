@@ -370,10 +370,28 @@ td[data-label="ID"] .chip { margin-left: 0.4rem; }
 .board-card:hover { border-color: var(--line); }
 .board-card-meta { color: var(--slate); font-size: 0.8rem; }
 .card-body { white-space: pre-wrap; margin: 0; }
+.card-plan { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 0.8rem; margin: 0.6rem 0; }
+.card-plan dt { color: var(--slate); font-size: 0.85rem; }
+.card-plan dd { margin: 0; overflow-wrap: anywhere; }
+.card-list { margin: 0; padding-left: 1.1rem; }
+.card-plan a { color: var(--line); text-underline-offset: 2px; overflow-wrap: anywhere; }
+#card-modal .modal { max-width: 640px; }
+.card-section { font-family: var(--font-display); font-size: 0.85rem; text-transform: uppercase; margin: 0.4rem 0 0; }
 .card-history {
-  margin: 0; padding-left: 1.1rem; max-height: 14rem; overflow-y: auto;
-  font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.45rem;
+  list-style: none; margin: 0; padding: 0 0.2rem 0 0; max-height: 26rem; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 0.55rem;
 }
+.card-event-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.5rem;
+  font-size: 0.75rem; color: var(--slate-2);
+}
+.card-event-head strong { color: var(--ink); font-weight: 600; }
+.card-event-head code { overflow-wrap: anywhere; }
+.card-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.card-comment { background: var(--surface-2); border-left: 3px solid var(--line); padding: 0.5rem 0.7rem; }
+.card-comment .card-text { font-size: 0.95rem; line-height: 1.5; margin-top: 0.2rem; }
+.card-event { border-left: 2px solid var(--line-soft); padding: 0 0 0 0.7rem; }
+.card-event .card-text { font-size: 0.85rem; color: var(--slate); }
 @media (max-width: 720px) { .board { grid-template-columns: 1fr; } }
 
 /* ---- policy editor ---- */
@@ -493,6 +511,10 @@ td.sel input { width: 1.05rem; height: 1.05rem; cursor: pointer; }
   .modal-actions .btn { flex: 1 1 8rem; }
   .policy-editor { min-height: 45vh; }
   .board-card, .board-col { min-width: 0; }
+  /* One scroll on a phone: the full-screen modal, not a box inside it. */
+  .card-history { max-height: none; overflow: visible; padding-right: 0; }
+  .card-plan { grid-template-columns: 1fr; gap: 0.1rem; }
+  .card-plan dd { margin-bottom: 0.4rem; }
 }
 
 .policy-health { border-collapse: collapse; font-size: 0.85rem; }

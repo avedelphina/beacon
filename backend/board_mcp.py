@@ -94,19 +94,28 @@ def build() -> MCPServer:
 
     @server.tool()
     def card_create(ctx: Context, title: str, body: str = "", project: str | None = None,
-                    assignee: str | None = None) -> dict:
-        """Create a card in state "todo". Put what needs doing and what "done" means in body.
-        assignee is an agent id (see board_list or the fleet); that agent gets a notice."""
-        return board.create_card(_author(ctx), title, body, project, assignee)
+                    assignee: str | None = None, next_action: str | None = None,
+                    done_when: str | None = None, links: list[dict] | None = None) -> dict:
+        """Create a card in state "todo". Put what needs doing in body, the first step in
+        next_action, and what must be true to close it in done_when. links is a list of
+        {url, label} pointing to PRs or issues elsewhere. assignee is an agent id (see
+        board_list or the fleet); that agent gets a notice."""
+        return board.create_card(_author(ctx), title, body, project, assignee,
+                                 next_action=next_action, done_when=done_when, links=links)
 
     @server.tool()
     def card_update(ctx: Context, card_id: int, state: str | None = None, assignee: str | None = None,
                     title: str | None = None, body: str | None = None, project: str | None = None,
-                    note: str | None = None, context_id: str | None = None) -> dict:
+                    next_action: str | None = None, done_when: str | None = None,
+                    links: list[dict] | None = None, note: str | None = None,
+                    context_id: str | None = None) -> dict:
         """Change a card: move its state (todo, doing, blocked, review, done), reassign it
-        (assignee="" unassigns), or edit it. note says why; it is kept in the history."""
+        (assignee="" unassigns), or edit it. Keep next_action current as the work moves;
+        "" clears it or done_when. links replaces the whole list of {url, label}, so send
+        the links you keep too. note says why; it is kept in the history."""
         return board.update_card(_author(ctx), card_id, state=state, assignee=assignee, title=title,
-                                 body=body, project=project, note=note, context_id=context_id)
+                                 body=body, project=project, next_action=next_action,
+                                 done_when=done_when, links=links, note=note, context_id=context_id)
 
     @server.tool()
     def card_comment(ctx: Context, card_id: int, text: str, context_id: str | None = None) -> dict:

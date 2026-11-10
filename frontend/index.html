@@ -405,9 +405,11 @@
       <label>Project <input name="project" placeholder="ops"></label>
       <label>Assignee <span class="hint">(agent id)</span> <input name="assignee" list="agent-ids"></label>
     </div>
-    <label>Description <span class="hint">(what needs doing, and what "done" means)</span>
+    <label>Description <span class="hint">(what needs doing, and the limits)</span>
       <textarea name="body" rows="5"></textarea>
     </label>
+    <label>Next action <span class="hint">(the first step)</span> <input name="next_action"></label>
+    <label>Done when <span class="hint">(what must be true to close it)</span> <input name="done_when"></label>
     <div class="modal-actions">
       <button type="button" class="btn" data-close>Cancel</button>
       <button type="submit" class="btn primary">Create</button>
@@ -425,6 +427,11 @@
       </select></label>
       <label>Assignee <input name="assignee" list="agent-ids"></label>
     </div>
+    <label>Next action <input name="next_action"></label>
+    <label>Done when <input name="done_when"></label>
+    <label>Links <span class="hint">(one per line: URL, then an optional label)</span>
+      <textarea name="links" rows="2" placeholder="https://git.example/org/repo/pulls/12 PR #12"></textarea>
+    </label>
     <label>Note <span class="hint">(why, or progress; kept in the history)</span>
       <textarea name="note" rows="3"></textarea>
     </label>

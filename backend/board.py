@@ -16,10 +16,18 @@ was told about once could sit in todo (or doing, blocked, review) for days.
 remind() runs on every pull and asks whoever has to move a card that nothing
 has changed on for the agent's `remind_after`, then tells people by email when
 reminders did not help (see remind()).
+
+A card also says what moves it on (`next_action`) and when it is finished
+(`done_when`), because the notice and the reminder are what an agent acts on,
+and "nothing changed for a day" is no help without the next step. `links`
+point out to PRs and issues elsewhere. They are labels only: Beacon never
+fetches them, copies their state, or treats one as approval for anything.
 """
 
+import json
 import threading
 import time
+from urllib.parse import urlsplit
 
 from . import mailbox, mesh, opstore, store
 
@@ -39,7 +47,7 @@ def list_cards(project: str | None = None, assignee: str | None = None, state: s
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with opstore.connect() as db:
         rows = db.execute(f"SELECT * FROM cards {where} ORDER BY updated_at DESC", params).fetchall()
-    return [dict(row) for row in rows]
+    return [_card(row) for row in rows]
 
 
 def get_card(card_id: int) -> dict:
@@ -67,21 +75,24 @@ def get_card(card_id: int) -> dict:
         if e["notice_id"] is not None:
             event["notice"] = notices.get(e["notice_id"])
         out_events.append(event)
-    return {**dict(card), "events": out_events}
+    return {**_card(card), "events": out_events}
 
 
 def create_card(author: str, title: str, body: str = "", project: str | None = None,
-                assignee: str | None = None, state: str = "todo") -> dict:
+                assignee: str | None = None, state: str = "todo", *, next_action: str | None = None,
+                done_when: str | None = None, links: list | None = None) -> dict:
     title = _required(title, "title")
     _check_state(state)
+    links = _links(links or [])
     if assignee:
         _check_may_assign(author, assignee)
     now = time.time()
     with opstore.connect() as db:
         card_id = db.execute(
-            "INSERT INTO cards (title, body, project, assignee, state, created_by, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (title, body or "", project or None, assignee or None, state, author, now, now)).lastrowid
+            "INSERT INTO cards (title, body, project, assignee, state, next_action, done_when, links,"
+            " created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (title, body or "", project or None, assignee or None, state, _text(next_action), _text(done_when),
+             json.dumps(links), author, now, now)).lastrowid
         _event(db, card_id, author, "created", title)
     if assignee:
         _notify_assignee(card_id, author, assignee)
@@ -90,9 +101,11 @@ def create_card(author: str, title: str, body: str = "", project: str | None = N
 
 def update_card(author: str, card_id: int, *, state: str | None = None, assignee: str | None = None,
                 title: str | None = None, body: str | None = None, project: str | None = None,
+                next_action: str | None = None, done_when: str | None = None, links: list | None = None,
                 note: str | None = None, context_id: str | None = None) -> dict:
     """Change what's given; each change is its own event. `assignee=""`
-    unassigns. `note` explains the change and is recorded with it."""
+    unassigns, `next_action=""`/`done_when=""` clear, `links` replaces the list.
+    `note` explains the change and is recorded with it."""
     card = get_card(card_id)
     changes = []
     if state is not None and state != card["state"]:
@@ -106,6 +119,12 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
         if value is not None and value != (card[column] or ""):
             changes.append((column, "edit", value if column != "title" else _required(value, "title"),
                             f"{column} changed"))
+    # The new text goes into the event: the history then shows how the plan changed.
+    for column, value in (("next_action", next_action), ("done_when", done_when)):
+        if value is not None and _text(value) != card[column]:
+            changes.append((column, "edit", _text(value), f"{column.replace('_', ' ')}: {_text(value) or '-'}"))
+    if links is not None and (links := _links(links)) != card["links"]:
+        changes.append(("links", "edit", json.dumps(links), "links changed"))
     if not changes and not note:
         return card
     now = time.time()
@@ -154,8 +173,10 @@ def _notify_assignee(card_id: int, author: str, assignee: str) -> None:
     update with the same assignee and no other change never re-enqueues."""
     card = get_card(card_id)
     text = (f"You were assigned card #{card_id} on the Beacon board by {author}.\n"
-            f"Title: {card['title']}\nProject: {card['project'] or '-'}\nState: {card['state']}\n\n"
-            f"{card['body'][:NOTICE_BODY]}")
+            f"Title: {card['title']}\nProject: {card['project'] or '-'}\nState: {card['state']}\n"
+            + "".join(f"{label}: {card[column][:NOTICE_BODY]}\n" for column, label in
+                      (("next_action", "Next action"), ("done_when", "Done when")) if card[column])
+            + f"\n{card['body'][:NOTICE_BODY]}")
     _send_notice(card_id, author, assignee, "assign_notice", text)
 
 
@@ -209,6 +230,37 @@ def _is_agent(name: str) -> bool:
 def _check_state(state: str) -> None:
     if state not in STATES:
         raise ValueError(f"state {state!r} must be one of {', '.join(STATES)}")
+
+
+MAX_LINKS = 20
+
+
+def _card(row) -> dict:
+    card = dict(row)
+    card["links"] = json.loads(card["links"] or "[]")
+    return card
+
+
+def _text(value: str | None) -> str | None:
+    return (value or "").strip() or None
+
+
+def _links(links: list) -> list[dict]:
+    """[{url, label}], http(s) only: the UI renders each as a link, so a
+    `javascript:` or `data:` URL here would run in a viewer's session."""
+    if not isinstance(links, list) or len(links) > MAX_LINKS:
+        raise ValueError(f"links must be a list of at most {MAX_LINKS}")
+    out = []
+    for link in links:
+        if not isinstance(link, dict) or not isinstance(link.get("url"), str) \
+                or not isinstance(link.get("label") or "", str):
+            raise ValueError("each link is {url, label}")
+        url, label = link["url"].strip(), (link.get("label") or "").strip()
+        parts = urlsplit(url)
+        if parts.scheme not in ("http", "https") or not parts.netloc or len(url) > 2000 or len(label) > 200:
+            raise ValueError(f"link {url[:80]!r} must be an http(s) URL (labels up to 200 characters)")
+        out.append({"url": url, "label": label})
+    return out
 
 
 def _required(value: str, what: str) -> str:
@@ -322,7 +374,8 @@ def _reminder_text(cards: list[dict], now: float) -> str:
                     " for knows, and say on the card who it is")
         else:
             what = "in progress, with no update"
-        lines.append(f"- #{card['id']} \"{title}\" ({card['state']}, no change for {idle}): {what}.")
+        lines.append(f"- #{card['id']} \"{title}\" ({card['state']}, no change for {idle}): {what}."
+                     + (f" Next action on the card: {card['next_action'][:200]}" if card["next_action"] else ""))
     return ("Reminder from the Beacon board: nothing has changed on these cards for a while, and they wait"
             " for you.\n\n" + "\n".join(lines) + "\n\n"
             "For each card, do the next step now, or make the card say what is true: card_update to doing,"

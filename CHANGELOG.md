@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-11-09
+
+### Added
+
+- **A card says what moves it on.** Cards have three new optional fields:
+  `next_action` (the next step), `done_when` (what must be true to close the
+  card), and `links` (`[{url, label}]`, http and https only, at most 20, for a
+  PR or an issue elsewhere). They are in `POST`/`PATCH /api/board/cards`, in
+  the `card_create` and `card_update` board tools, and in the card view. The
+  assignment notice and the reminders carry the next action, so an agent that
+  is reminded about a card also reads what to do. A change to `next_action` or
+  `done_when` is recorded in the history with its new text. A link is only a
+  pointer: Beacon does not fetch it or copy its state, and it does not approve
+  anything. Existing cards get the columns on the first start, empty.
+- **Requests on the card.** The card view lists the card's decision, review,
+  and approval requests with their state, responder, expiry, and answer. On
+  the board, a card with a request that waits (`pending` or
+  `changes_requested`) shows a badge. Requests are still answered in the
+  Workflows tab.
+- The agent skill (1.7.0) says to set `next_action` and `done_when`, and that
+  a link proves nothing.
+
+### Changed
+
+- **A card's history is easier to read, on a phone most of all.** Comments
+  show as text blocks with their author and time, keep their line breaks, and
+  wrap long URLs and context ids instead of running off the screen. Moves,
+  edits, notices, and reminders stay as short, quiet lines, and a notice
+  shows its delivery state. On a phone the history no longer scrolls in a box
+  of its own inside the card; on a wide screen the card is wider and the
+  history opens at the newest entry. Dates are shorter (`9 Nov 2026, 16:09`).
+
 ## [0.29.0] — 2026-11-07
 
 ### Added
