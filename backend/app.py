@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, availability, board, bus, cron_store, fleet, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow
+from . import audit, auth, availability, board, bus, cron_store, fleet, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, CronJob, Host
@@ -81,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.30.5"
+VERSION = "0.31.0"
 
 
 async def _record_actor(request: Request) -> None:
@@ -89,12 +89,17 @@ async def _record_actor(request: Request) -> None:
     runs in the request's own context, which the route function then inherits."""
     user = request.session.get("user") if "session" in request.scope else None
     store.ACTOR.set((user or {}).get("email") or mesh.BEACON_PEER)
+    audit.VIA.set(
+        "mcp" if getattr(request.state, "auth_via_mcp", False)
+        else "agent" if getattr(request.state, "workflow_agent", None)
+        else "session" if user else "open")
 
 
 app = FastAPI(title="Beacon", version=VERSION, lifespan=lifespan, dependencies=[Depends(_record_actor)])
 
 
-def _confirm_gate(capability: str, confirm: bool, description: str, **tier_params) -> dict | None:
+def _confirm_gate(capability: str, confirm: bool, description: str, target: str | None = None,
+                  **tier_params) -> dict | None:
     """Returns a "would run" dict if `capability` needs confirmation and
     didn't get it; None if the caller should proceed. This is the same
     plan-before-apply convention mcp/server.py has always applied to its own
@@ -103,7 +108,12 @@ def _confirm_gate(capability: str, confirm: bool, description: str, **tier_param
     executing immediately.
     """
     tier, rationale = tier_for(capability, **tier_params)
-    if not requires_confirm(tier) or confirm:
+    if not requires_confirm(tier):
+        return None
+    if confirm:
+        # Past the gate: the action may run. This is the one place every T2+
+        # action goes through, so it is where who/what/when is written down.
+        audit.record(store.ACTOR.get(), audit.VIA.get(), capability, tier.name, target, description)
         return None
     return {
         "would_run": True,
@@ -251,12 +261,19 @@ def _outcome_line(code: str | None) -> str:
 
 def _stream(lines: Iterator[str]) -> StreamingResponse:
     filtered, exit_code = _split_exit_marker(_started(lines))
+    action = audit.CURRENT.get()  # the audit row this request wrote at the gate
 
     def body_stream():
+        ended = False
         try:
             yield from (line + "\n" for line in filtered)
-            yield _outcome_line(exit_code()) + "\n"
+            code = exit_code()
+            audit.finish(action, audit.outcome_for(code))
+            ended = True
+            yield _outcome_line(code) + "\n"
         finally:
+            if not ended:
+                audit.finish(action, "interrupted")  # the client went away, or the stream broke
             close = getattr(filtered, "close", None)
             if close is not None:
                 close()
@@ -282,6 +299,8 @@ def _workflow_stream(lines: Iterator[str], request_id: int, actor: str) -> Strea
         workflow.mark_execution_outcome(request_id, actor, "execution_uncertain")
         raise
 
+    action = audit.CURRENT.get()
+
     def body_stream():
         filtered = None
         try:
@@ -289,15 +308,18 @@ def _workflow_stream(lines: Iterator[str], request_id: int, actor: str) -> Strea
             for line in filtered:
                 yield line + "\n"
             code = exit_code()
+            audit.finish(action, audit.outcome_for(code))
             yield _outcome_line(code) + "\n"
             if code == "0":
                 workflow.mark_executed(request_id, actor)
             else:
                 workflow.mark_execution_outcome(request_id, actor, "failed" if code is not None else "execution_uncertain")
         except GeneratorExit:
+            audit.finish(action, "interrupted")
             workflow.mark_execution_outcome(request_id, actor, "execution_uncertain")
             raise
         except Exception as exc:
+            audit.finish(action, "interrupted")
             workflow.mark_execution_outcome(request_id, actor, "execution_uncertain")
             yield f"[beacon] execution uncertain: {exc}\n"
         finally:
@@ -934,7 +956,7 @@ def enroll_agent(id_: str, body: EnrollRequest, request: Request) -> dict:
     _require_human_session(request, "enroll_agent")
     store.get_agent(id_)  # 404 first
     where = f" (Docker container {body.docker!r})" if body.docker else ""
-    if (gate := _confirm_gate("enroll_agent", body.confirm, f"create a one-time enrollment command for {id_!r}{where}")) is not None:
+    if (gate := _confirm_gate("enroll_agent", body.confirm, f"create a one-time enrollment command for {id_!r}{where}", target=id_)) is not None:
         return gate
     made = onboarding.create(id_, body.docker, body.docker_user, _board_author(request))  # ValueError -> 400
     logger.warning("enrollment code created for %s by %s", id_, _board_author(request))
@@ -966,6 +988,13 @@ def delete_agent(id_: str) -> dict:
     return {"ok": True}
 
 
+@app.get("/api/audit")
+def audit_log(limit: int = 100, target: str | None = None, actor: str | None = None) -> list[dict]:
+    """What Beacon did on hosts and who asked, newest first (backend/audit.py).
+    Not on a member's route list, so only operators and the MCP token read it."""
+    return audit.recent(limit, target=target, actor=actor)
+
+
 @app.get("/api/templates")
 def list_templates() -> list[dict]:
     agents = store.list_agents()
@@ -981,7 +1010,7 @@ def get_template(name: str) -> dict:
 @app.put("/api/templates/{name}")
 def put_template(name: str, body: TemplateBody) -> dict:
     templates.validate(name, body.content)  # before gating or writing anything
-    if (gate := _confirm_gate("set_template", body.confirm, f"save template {name!r}")) is not None:
+    if (gate := _confirm_gate("set_template", body.confirm, f"save template {name!r}", target=name)) is not None:
         return gate
     templates.save_template(name, body.content)
     return {"ok": True, "name": name, "content": body.content, "used_by": _used_by(name, store.list_agents())}
@@ -993,7 +1022,7 @@ def delete_template(name: str, confirm: bool = False) -> dict:
     users = _used_by(name, store.list_agents())
     if users:
         raise HTTPException(409, f"template {name!r} is still used by: {', '.join(users)}")
-    if (gate := _confirm_gate("set_template", confirm, f"delete template {name!r}")) is not None:
+    if (gate := _confirm_gate("set_template", confirm, f"delete template {name!r}", target=name)) is not None:
         return gate
     templates.delete_template(name)
     return {"ok": True}
@@ -1039,7 +1068,7 @@ def get_agent_plugins(id_: str) -> list[dict]:
 
 @app.post("/api/agents/{id_}/plugins/{plugin}/update")
 def update_agent_plugin(id_: str, plugin: str, confirm: bool = False) -> dict:
-    if (gate := _confirm_gate("update_plugin", confirm, f"update plugin {plugin!r} on {id_!r}")) is not None:
+    if (gate := _confirm_gate("update_plugin", confirm, f"update plugin {plugin!r} on {id_!r}", target=id_)) is not None:
         return gate
     agent, host, driver = for_agent(id_)
     return driver.update_plugin(agent, host, plugin)
@@ -1047,7 +1076,7 @@ def update_agent_plugin(id_: str, plugin: str, confirm: bool = False) -> dict:
 
 @app.post("/api/agents/{id_}/restart")
 def restart_agent(id_: str, request: Request, confirm: bool = False) -> dict:
-    if (gate := _confirm_gate("restart", confirm, f"restart the gateway for {id_!r}")) is not None:
+    if (gate := _confirm_gate("restart", confirm, f"restart the gateway for {id_!r}", target=id_)) is not None:
         return gate
     logger.warning("gateway restart of %s by %s", id_, _board_author(request))
     agent, host, driver = for_agent(id_)
@@ -1056,7 +1085,7 @@ def restart_agent(id_: str, request: Request, confirm: bool = False) -> dict:
 
 @app.post("/api/agents/{id_}/restart-agent")
 def restart_whole_agent(id_: str, confirm: bool = False) -> dict:
-    if (gate := _confirm_gate("restart_agent", confirm, f"hard-restart {id_!r} (container if desired.container is set, else its systemd unit)")) is not None:
+    if (gate := _confirm_gate("restart_agent", confirm, f"hard-restart {id_!r} (container if desired.container is set, else its systemd unit)", target=id_)) is not None:
         return gate
     agent, host, driver = for_agent(id_)
     return driver.restart_agent(agent, host)
@@ -1064,7 +1093,7 @@ def restart_whole_agent(id_: str, confirm: bool = False) -> dict:
 
 @app.post("/api/agents/{id_}/deploy")
 def deploy_agent(id_: str, confirm: bool = False) -> StreamingResponse:
-    if (gate := _confirm_gate("deploy", confirm, f"deploy {id_!r}")) is not None:
+    if (gate := _confirm_gate("deploy", confirm, f"deploy {id_!r}", target=id_)) is not None:
         return JSONResponse(gate)
     agent, host, driver = for_agent(id_)
     return _stream(driver.deploy(agent, host))
@@ -1073,7 +1102,7 @@ def deploy_agent(id_: str, confirm: bool = False) -> StreamingResponse:
 @app.post("/api/agents/{id_}/update")
 def update_agent(id_: str, request: Request, confirm: bool = False) -> StreamingResponse:
     _require_human_session(request, "update_agent")
-    if (gate := _confirm_gate("update_agent", confirm, f"run `hermes update` on the host for {id_!r} (affects every profile sharing that install)")) is not None:
+    if (gate := _confirm_gate("update_agent", confirm, f"run `hermes update` on the host for {id_!r} (affects every profile sharing that install)", target=id_)) is not None:
         return JSONResponse(gate)
     agent, host, driver = for_agent(id_)
     return _stream(driver.update_agent(agent, host))
@@ -1087,7 +1116,7 @@ def reconcile_agent(id_: str) -> list[dict]:
 
 @app.post("/api/agents/{id_}/reconcile")
 def apply_fix(id_: str, body: FixRequest) -> dict:
-    if (gate := _confirm_gate("apply_fix", body.confirm, f"apply fix {body.fix!r} to {id_!r}")) is not None:
+    if (gate := _confirm_gate("apply_fix", body.confirm, f"apply fix {body.fix!r} to {id_!r}", target=id_)) is not None:
         return gate
     agent, host, driver = for_agent(id_)
     return driver.apply_fix(agent, host, body.fix)
@@ -1104,7 +1133,7 @@ def get_config_diff(id_: str) -> dict:
 def push_config(id_: str, request: Request, confirm: bool = False,
                 workflow_request_id: int | None = None,
                 plan_revision: str | None = None, plan_hash: str | None = None) -> StreamingResponse:
-    if (gate := _confirm_gate("push_config", confirm, f"push desired.config to {id_!r} and restart its gateway if active")) is not None:
+    if (gate := _confirm_gate("push_config", confirm, f"push desired.config to {id_!r} and restart its gateway if active", target=id_)) is not None:
         return JSONResponse(gate)
     agent, host, driver = for_agent(id_, resolved=True)
     target, binding = _workflow_plan_for_push(id_, agent, host, driver)
@@ -1133,14 +1162,16 @@ def decommission_agent(id_: str, body: DecommissionRequest, request: Request) ->
         gate_desc += " and purge its profile data"
     if body.remove_user:
         gate_desc += " and delete its OS user account"
-    if (gate := _confirm_gate("decommission", body.confirm, gate_desc, purge=body.purge, remove_user=body.remove_user)) is not None:
+    if (gate := _confirm_gate("decommission", body.confirm, gate_desc, target=id_, purge=body.purge, remove_user=body.remove_user)) is not None:
         return JSONResponse(gate)
     agent, host, driver = for_agent(id_)
     filtered, exit_code = _split_exit_marker(_started(driver.decommission(agent, host, purge=body.purge, remove_user=body.remove_user)))
+    action = audit.CURRENT.get()
 
     def body_stream():
         for line in filtered:
             yield line + "\n"
+        audit.finish(action, audit.outcome_for(exit_code()))
 
         # The decommission script never uses `set -e` and swallows its own
         # step failures with `|| echo`, so its exit code is 0 whenever ssh

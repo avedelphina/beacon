@@ -1318,6 +1318,23 @@ they are pre-authorized fleet records, persisted ahead of time and reviewed
 like any other fleet record. They are limited to a fixed set of v1 actions
 (`restart`, `status`, `push_config`) to keep the blast radius bounded.
 
+## Audit log
+
+Every action that passes the confirm gate (`confirm=true`, tier T2 and up) writes
+a row to the `host_actions` table of the operational store: when, who (the
+person's email, or `beacon` for the MCP token, an agent's token, or open mode),
+how they were authenticated (`session`, `mcp`, `agent`, `open`), the capability
+and tier, the target agent or template, what the gate said it would do, and the
+outcome. The row is written when the action is allowed to run, as `requested`;
+the streamed operations (deploy, update, config push, decommission) then record
+`succeeded`, `failed`, `did not finish` or `interrupted`. For the others,
+`requested` is all Beacon knows.
+
+`GET /api/audit?limit=100&target=<agent>&actor=<email>` returns it newest first.
+It is not on a member's route list, so only operators and the MCP token can read
+it. Rows are never changed except for their outcome. The cron scheduler
+(`python -m backend.scheduler`) calls the drivers itself and is not recorded.
+
 ## Limitations
 
 - **One driver.** Hermes is the only agent type implemented. The driver
@@ -1328,8 +1345,13 @@ like any other fleet record. They are limited to a fixed set of v1 actions
   review bound to the exact plan revision/hash; T4/T5 workflow responses still
   require a human browser session. This is not a complete audit ledger for all
   Beacon operations.
-- **No audit trail.** Every logged-in user has full deploy/config/
-  decommission power, and no record persists of who did what.
+- **A partial audit trail.** Fleet changes keep who made them (`fleet_history`),
+  and every action that passes the confirm gate (T2 and up: deploy, push,
+  restart, decommission, templates, ...) is recorded with who, how they were
+  authenticated, when, what, and, for the streamed operations, how it ended
+  (see [Audit log](#audit-log)). Not recorded: the cron scheduler's own runs,
+  reads, and what an agent does on its own. There is no alerting on it. Every
+  logged-in operator still has full deploy/config/decommission power.
 - **Mostly pull-based.** Status and Reconcile run when requested. The only
   things that happen on their own ride on agents' syncs: self-healing on each
   host, and the quiet-agent check on every pull. If no agent syncs at all,
