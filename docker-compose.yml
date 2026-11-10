@@ -20,8 +20,9 @@ services:
       - identity
       - --destination=file:///tbot-data
       - --storage=file:///tbot-storage
-      - --proxy-server=teleport.cqre.net:443
+      - --proxy-server=${TELEPORT_PROXY_SERVER:-teleport.example.com:443}
       - --join-method=token
+    mem_limit: ${TBOT_MEM_LIMIT:-256m}
     restart: unless-stopped
 
   beacon:
@@ -57,8 +58,21 @@ services:
       - BEACON_SESSION_HTTPS_ONLY=${BEACON_SESSION_HTTPS_ONLY:-true}
       - BEACON_KNOWN_HOSTS=${BEACON_KNOWN_HOSTS:-/etc/beacon/known_hosts}
       - BEACON_MCP_TOKEN=${BEACON_MCP_TOKEN:-}
+      # uvicorn believes X-Forwarded-Proto/For only from these addresses. Behind a
+      # TLS-terminating proxy, name the proxy's address here or the OIDC redirect
+      # URI is built as http:// and login fails. Never "*" on a port that clients
+      # can reach directly: they could then claim any address or scheme.
+      - FORWARDED_ALLOW_IPS=${BEACON_TRUSTED_PROXIES:-127.0.0.1}
     depends_on:
       - tbot
+    # /manifest.json is served without a session, so this works with OIDC on.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8642/manifest.json', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    mem_limit: ${BEACON_MEM_LIMIT:-1g}
     restart: unless-stopped
 
   mcp:
@@ -70,5 +84,14 @@ services:
       # Same loopback-by-default reasoning as the beacon service above.
       - "${BEACON_BIND_HOST:-127.0.0.1}:8643:8643"
     depends_on:
-      - beacon
+      beacon:
+        condition: service_healthy
+    # /mcp wants MCP headers, so only check that the port accepts connections.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8643), timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: ${MCP_MEM_LIMIT:-256m}
     restart: unless-stopped
