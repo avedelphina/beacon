@@ -346,6 +346,10 @@ td[data-label="ID"] .chip { margin-left: 0.4rem; }
 .workflow-list { display: flex; flex-direction: column; gap: 0.7rem; }
 .workflow-item { border: 1px solid var(--line-soft); background: var(--surface); padding: 0.85rem 1rem; }
 .workflow-item p { color: var(--slate); margin: 0.55rem 0; }
+.workflow-summary { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; max-width: 80ch; margin: 0.7rem 0; color: var(--ink); }
+.workflow-note { border-left: 3px solid var(--line-soft); padding-left: 0.7rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.workflow-plan summary { cursor: pointer; color: var(--slate); font-size: 0.85rem; }
+.workflow-plan pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; margin: 0.5rem 0 0; font-size: 0.8rem; }
 .workflow-item-head { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
 .workflow-meta { display: flex; flex-wrap: wrap; gap: 0.45rem 1rem; color: var(--slate-2); font-family: var(--font-mono); font-size: 0.75rem; }
 .workflow-binding { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.65rem; overflow-wrap: anywhere; }

@@ -81,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.30.0"
+VERSION = "0.30.1"
 
 
 async def _record_actor(request: Request) -> None:
@@ -485,6 +485,16 @@ class WorkflowResponseRequest(BaseModel):
     plan_hash: str
 
 
+class WorkflowReviseRequest(BaseModel):
+    plan_revision: str
+    plan_hash: str
+    title: str | None = None
+    summary: str | None = None
+    options: list[str] | None = None
+    target: dict | None = None
+    expires_at: float | None = None
+
+
 def _workflow_human(request: Request) -> bool:
     """Only an authenticated browser session counts as a human approver."""
     return (
@@ -651,6 +661,12 @@ def workflow_get(request_id: int, request: Request) -> dict:
 @app.post("/api/workflows/{request_id}/respond")
 def workflow_respond(request_id: int, body: WorkflowResponseRequest, request: Request) -> dict:
     return _respond_workflow(request_id, body, request)
+
+
+@app.post("/api/workflows/{request_id}/revise")
+def workflow_revise(request_id: int, body: WorkflowReviseRequest, request: Request) -> dict:
+    """The requester's answer to "changes requested": a changed plan, pending again."""
+    return workflow.revise(request_id, actor=_workflow_actor(request), **body.model_dump())
 
 
 @app.get("/api/mailbox")

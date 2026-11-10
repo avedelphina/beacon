@@ -524,3 +524,43 @@ def test_an_agent_looks_up_owners_only_of_agents_it_may_reach(client, monkeypatc
     with pytest.raises(PermissionError):
         board_mcp.owner_lookup("alpha", "no-such-agent")
     assert board_mcp.owner_lookup(mesh.BEACON_PEER, "other-bot")["owner"] == "private@example.com"
+
+
+def _t3_request(**kw):
+    binding = _binding()
+    request = workflow.create(
+        card_id=_card()["id"], kind="review", requester="agent-a", eligible_responder="reviewer@example.com",
+        capability="push_config", tier=3, title="Review config", summary="v1", options=[],
+        target={"agent_id": "a1"}, **binding, **kw)
+    return request, binding
+
+
+def test_requester_revises_after_changes_requested_and_responder_approves():
+    request, old = _t3_request()
+    workflow.respond(request["id"], actor="reviewer@example.com", human=True, action="changes_requested",
+                     response={"note": "max_turns too high"}, **old)
+    new = workflow.plan_binding({"capability": "push_config", "target": {"agent_id": "a1"}, "v": 2})
+
+    revised = workflow.revise(request["id"], actor="agent-a", summary="v2, max_turns lowered", **new)
+    assert revised["state"] == "pending" and revised["summary"] == "v2, max_turns lowered"
+    assert revised["response"] is None and revised["plan_hash"] == new["plan_hash"]
+    assert [e["kind"] for e in revised["events"]] == ["created", "responded", "revised"]
+
+    # The old binding is refused (and marks the request stale); the new one is approved.
+    approved = workflow.respond(request["id"], actor="reviewer@example.com", human=True, action="approved",
+                                response={}, **new)
+    assert approved["state"] == "approved"
+
+
+def test_only_the_requester_revises_and_only_from_changes_requested():
+    request, binding = _t3_request()
+    new = workflow.plan_binding({"v": 2})
+    with pytest.raises(workflow.WorkflowError, match="not changes_requested"):
+        workflow.revise(request["id"], actor="agent-a", **new)
+    workflow.respond(request["id"], actor="reviewer@example.com", human=True, action="changes_requested",
+                     response={"note": "no"}, **binding)
+    with pytest.raises(workflow.UnauthorizedWorkflowAccess):
+        workflow.revise(request["id"], actor="reviewer@example.com", **new)
+    with pytest.raises(workflow.WorkflowError, match="unchanged"):
+        workflow.revise(request["id"], actor="agent-a", **binding)
+    assert workflow.get(request["id"])["state"] == "changes_requested"

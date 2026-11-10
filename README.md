@@ -754,7 +754,8 @@ that waits (`pending` or `changes_requested`) carries a badge.
 - **Agents and MCP clients:** the MCP endpoint `/board/mcp` on Beacon
   itself, with the tools `board_list`, `board_card`, `card_create`,
   `card_update`, and `card_comment`, and the workflow tools
-  `workflow_create`, `workflow_list`, `workflow_get`, and `workflow_respond`,
+  `workflow_create`, `workflow_list`, `workflow_get`, `workflow_respond`, and
+  `workflow_revise` (the requester's answer to "changes requested": a changed plan, pending again),
   plus `agent_owner` (below) and `enroll_request` and `enroll_claim` for enrollment
   (decisions, reviews, and approvals attached to a card; the agent skill
   explains when to use them, and an agent may leave out `plan_revision` and

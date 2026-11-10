@@ -216,6 +216,20 @@ async def respond_workflow(request_id: int, action: str, plan_revision: str,
 
 
 @mcp.tool()
+async def revise_workflow(request_id: int, plan_revision: str, plan_hash: str,
+                          title: str | None = None, summary: str | None = None,
+                          options: list[str] | None = None, target: dict | None = None,
+                          expires_at: float | None = None) -> object:
+    """After a responder asked for changes, send the changed plan: the request
+    goes back to pending under the new plan binding. Only the requester (here,
+    Beacon's MCP service identity) may revise; give only what changed.
+    """
+    body = {"plan_revision": plan_revision, "plan_hash": plan_hash, "title": title, "summary": summary,
+            "options": options, "target": target, "expires_at": expires_at}
+    return await _post(f"/api/workflows/{request_id}/revise", json=body)
+
+
+@mcp.tool()
 async def create_workflow(card_id: int, kind: str, eligible_responder: str,
                           capability: str, tier: int, title: str, summary: str,
                           plan_revision: str, plan_hash: str, options: list[str] | None = None,

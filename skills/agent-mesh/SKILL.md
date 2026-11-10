@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
-description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (peers named <peer>-mailbox), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.7.0
+description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (peers named <peer>-mailbox), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
+version: 1.8.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -165,7 +165,7 @@ When you need a person or another agent to decide something, check your work, or
 approve a change, ask through a workflow request instead of in a message. It is
 attached to a board card, it has an owner and an expiry, and it cannot be
 answered by someone else. You have the workflow tools (`workflow_create`,
-`workflow_list`, `workflow_get`, `workflow_respond`) with the board tools, and
+`workflow_list`, `workflow_get`, `workflow_respond`, `workflow_revise`) with the board tools, and
 only then.
 
 **Ask:** make or find the card first, then `workflow_create` with:
@@ -206,8 +206,8 @@ the request's expiry, 24 hours by default.
 
 **Follow up:** `workflow_get(request_id)` shows the state and the answer.
 `workflow_list(card_id=N)` shows the requests on a card. States: `pending`,
-`approved`, `rejected`, `changes_requested` (read the answer, change the plan,
-and ask again), `expired`, `withdrawn`. An `approved` answer is for that exact
+`approved`, `rejected`, `changes_requested` (read the answer, then send the changed plan
+with `workflow_revise`: the request goes back to `pending` for the same responder), `expired`, `withdrawn`. An `approved` answer is for that exact
 text only. If you want something different, make a new request.
 
 **When you are the one asked:** you get a notice when it is made. `workflow_list(state="pending")`

@@ -1077,12 +1077,20 @@ function renderWorkflowItems(items) {
     ].join("") : "";
     const options = w.kind === "decision" && w.state === "pending"
       ? `<label class="workflow-option">Option <select data-workflow-option="${esc(w.id)}">${w.options.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select></label>` : "";
+    // The plan is what the approver signs off on, so it reads as text with its line
+    // breaks (it was one run-on line), open while the request waits for an answer.
+    const note = w.state === "changes_requested" && w.response?.note
+      ? `<p class="workflow-note"><strong>Changes requested:</strong> ${esc(w.response.note)}</p>` : "";
+    const waitingForRequester = w.state === "changes_requested"
+      ? '<p class="hint">Waiting for the requester to send a changed plan.</p>' : "";
     return `<article class="workflow-item">
       <div class="workflow-item-head"><strong>${esc(w.title)}</strong><span class="chip">${esc(w.state)}</span></div>
-      <p>${esc(w.summary)}</p>
-      <div class="workflow-meta"><span>${esc(w.kind)} / T${esc(w.tier)}</span><span>card #${esc(w.card_id)}</span><span>responder: ${esc(w.eligible_responder)}</span><span>expires: ${esc(workflowWhen(w.expires_at))}</span></div>
-      <div class="workflow-binding"><code>${esc(w.plan_revision)}</code><code>${esc(w.plan_hash)}</code></div>
-      <details class="workflow-plan"><summary>Bound execution plan</summary><pre>${esc(JSON.stringify(w.target, null, 2))}</pre></details>
+      <div class="workflow-meta"><span>${esc(w.kind)} / T${esc(w.tier)}</span><span>card #${esc(w.card_id)}</span><span>from: ${esc(w.requester)}</span><span>responder: ${esc(w.eligible_responder)}</span><span>expires: ${esc(workflowWhen(w.expires_at))}</span></div>
+      <div class="workflow-summary">${esc(w.summary)}</div>
+      ${note}${waitingForRequester}
+      <details class="workflow-plan"${w.state === "pending" ? " open" : ""}><summary>Bound execution plan</summary>
+        <pre>${esc(JSON.stringify(w.target, null, 2))}</pre>
+        <div class="workflow-binding"><code>${esc(w.plan_revision)}</code><code>${esc(w.plan_hash)}</code></div></details>
       ${options}<div class="workflow-actions">${buttons}</div>
     </article>`;
   }).join("");
