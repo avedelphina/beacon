@@ -64,6 +64,29 @@ Copy `.env.example` to `.env` and fill it in to require login — see
 [Authentication](#authentication). No `.env`, no login: Beacon runs open,
 same as local dev.
 
+### Running unprivileged
+
+The `beacon` and `tbot` containers start as root unless you say otherwise. To
+run them as an unprivileged user, own the directories they write first, then
+set `BEACON_RUN_AS` in `.env`:
+
+```bash
+sudo chown -R 10001:10001 state tbot/data tbot/storage   # what beacon writes, and what tbot writes and beacon reads
+echo 'BEACON_RUN_AS=10001:10001' >> .env
+docker compose up -d --build
+```
+
+- It is off by default because switching it on needs that `chown`: an existing
+  stack whose `./state` is owned by root would stop starting ("unable to open
+  database file"). `mcp` already runs unprivileged.
+- A static SSH key in `./ssh` (see above) must be readable by that user: `chown
+  10001 ssh/fleet_ed25519` (mode 0600), or the host's `ssh` fails to read it.
+- `tbot/run.sh` on the bare host writes the same `tbot/data` and `tbot/storage`
+  as your own user, so use either the container or the script for them, not
+  both with these owners.
+- uid 10001 is the account the images create; another uid has no passwd entry
+  and `ssh` refuses to run as it.
+
 ## Data model
 
 ### Fleet storage

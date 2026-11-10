@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.31.1] — 2026-11-10
+
+### Added
+
+- **`beacon` and `tbot` can run unprivileged.** Set `BEACON_RUN_AS=10001:10001`
+  in `.env` after owning `./state`, `./tbot/data` and `./tbot/storage` by that
+  user (README, "Running unprivileged"). The images now have that account. It
+  is off by default, so nothing changes on upgrade: the default would break
+  stacks whose directories are owned by root. (#25)
+
 ## [0.31.0] — 2026-11-10
 
 ### Added
