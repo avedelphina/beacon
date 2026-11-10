@@ -149,6 +149,26 @@ def build() -> MCPServer:
         )
 
     @server.tool()
+    def workflow_revise(ctx: Context, request_id: int, title: str | None = None, summary: str | None = None,
+                        options: list[str] | None = None, target: dict | None = None,
+                        expires_at: float | None = None, plan_revision: str | None = None,
+                        plan_hash: str | None = None) -> dict:
+        """After a responder asked for changes (state "changes_requested"), send the changed plan: the
+        request goes back to pending for the same responder. Only the requester may; give only what
+        changed. Leave out plan_revision and plan_hash and Beacon binds the new text itself."""
+        if (plan_revision is None) != (plan_hash is None):
+            raise workflow.WorkflowError("give both plan_revision and plan_hash, or neither")
+        if plan_revision is None:
+            old = workflow.get(request_id, actor=_author(ctx))
+            plan_revision, plan_hash = workflow.plan_binding(
+                {"capability": old["capability"], "tier": old["tier"], "title": title or old["title"],
+                 "summary": summary or old["summary"], "options": old["options"] if options is None else options,
+                 "target": old["target"] if target is None else target}).values()
+        return workflow.revise(
+            request_id, actor=_author(ctx), title=title, summary=summary, options=options, target=target,
+            expires_at=expires_at, plan_revision=plan_revision, plan_hash=plan_hash)
+
+    @server.tool()
     def workflow_create(ctx: Context, card_id: int, kind: str, eligible_responder: str,
                         capability: str, tier: int, title: str, summary: str,
                         options: list[str] | None = None, target: dict | None = None,

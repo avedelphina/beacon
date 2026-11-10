@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [0.30.1] — 2026-11-10
+
+### Fixed
+
+- **A request with "changes requested" can be answered with a changed plan.**
+  Before, `changes_requested` ended the request: only `pending` accepts a
+  response, so the requester had to open a second request. The requester now
+  sends the changed plan with `POST /api/workflows/{id}/revise`, the
+  `workflow_revise` board tool, or the `revise_workflow` MCP tool. The request
+  goes back to `pending` under the new plan revision and hash, with a new
+  expiry, and the responder gets a notice. Only the requester may revise, only
+  from `changes_requested`, and the plan binding must change; an approved
+  request is never rewritten. The history keeps the earlier answer and a
+  `revised` event. The agent skill is 1.8.0. (#81)
+- **Plans in the Workflows tab are readable.** The summary keeps its line
+  breaks (it ran together as one line), the requester shows, the plan is open
+  while the request waits, and the plan hashes sit inside it. A request with
+  "changes requested" shows the responder's note. (#82)
+
 ## [0.30.0] — 2026-11-09
 
 ### Added

@@ -38,16 +38,19 @@ _sent: dict[str, collections.deque] = collections.defaultdict(collections.deque)
 _lock = threading.Lock()
 
 
-def workflow_created(request: dict) -> None:
-    """A request was made: tell an agent responder, and email the people who may answer."""
+def workflow_created(request: dict, revised: bool = False) -> None:
+    """A request was made (or changed after "changes requested"): tell an agent
+    responder, and email the people who may answer."""
     try:
+        lead = "changed the plan and asks again for" if revised else "asks you for"
         _agent_notice(request["eligible_responder"], request, (
-            f"{request['requester']} asks you for {_what(request)}: workflow request #{request['id']} on card "
+            f"{request['requester']} {lead} {_what(request)}: workflow request #{request['id']} on card "
             f"#{request['card_id']}.\nTitle: {request['title']}\nTier: T{request['tier']}\n\n"
             f"{request['summary'][:SUMMARY_CHARS]}\n\nRead it with workflow_get({request['id']}) and answer "
             f"with workflow_respond. It expires {_when(request['expires_at'])}."), skip=request["requester"])
-        _tell(_people_to_ask(request), f"Beacon: {request['requester']} needs your answer",
-               _created_body(request))
+        _tell(_people_to_ask(request),
+              f"Beacon: {request['requester']} {'changed a plan and ' if revised else ''}needs your answer",
+              _created_body(request))
     except Exception:
         logger.exception("workflow notice for request %s failed", request.get("id"))
 

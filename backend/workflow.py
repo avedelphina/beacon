@@ -345,6 +345,64 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
     return answered
 
 
+def revise(request_id: int, *, actor: str, plan_revision: str, plan_hash: str,
+           title: str | None = None, summary: str | None = None, options: list[str] | None = None,
+           target: dict[str, Any] | None = None, expires_at: float | None = None) -> dict:
+    """The requester answers "changes requested" with a changed plan: the request
+    goes back to pending under the new binding, so the responder can approve what
+    they asked for. Before, changes_requested was a dead end (respond() only takes
+    pending), and the requester had to open a second request on the card. Only the
+    requester may revise, and only from changes_requested: an approved or answered
+    request is never rewritten, so an approval still covers exactly one plan."""
+    actor = _validate_actor(actor)
+    if not isinstance(plan_revision, str) or not plan_revision.strip():
+        raise WorkflowError("plan_revision must not be empty")
+    if not isinstance(plan_hash, str) or not plan_hash.strip():
+        raise WorkflowError("plan_hash must not be empty")
+    with opstore.connect() as db:
+        row = db.execute("SELECT * FROM workflow_requests WHERE id = ?", (request_id,)).fetchone()
+        if row is None:
+            raise WorkflowNotFound(f"workflow request {request_id} not found")
+        request = _decode(row)
+        if actor.casefold() != request["requester"].casefold():
+            raise UnauthorizedWorkflowAccess(f"{actor} did not make workflow request {request_id}")
+        if request["state"] != "changes_requested":
+            raise WorkflowError(f"workflow request {request_id} is {request['state']}, not changes_requested")
+        if (plan_revision, plan_hash) == (request["plan_revision"], request["plan_hash"]):
+            raise WorkflowError("the plan binding is unchanged: revise the plan, then bind the new one")
+        title = request["title"] if title is None else title.strip()
+        summary = request["summary"] if summary is None else summary.strip()
+        options = request["options"] if options is None else options
+        target = request["target"] if target is None else target
+        if not title or not summary:
+            raise WorkflowError("title and summary must not be empty")
+        if (not isinstance(options, list) or any(not isinstance(o, str) or not o.strip() for o in options)
+                or len(set(options)) != len(options)):
+            raise WorkflowError("options must be a list of unique, non-empty strings")
+        if request["kind"] == "decision" and not options:
+            raise WorkflowError("decision requests require at least one option")
+        if not isinstance(target, dict):
+            raise WorkflowError("target must be an object")
+        now = time.time()
+        expires_at = now + 24 * 60 * 60 if expires_at is None else expires_at
+        if not isinstance(expires_at, (int, float)) or expires_at <= now:
+            raise WorkflowError("expires_at must be in the future")
+        db.execute(
+            "UPDATE workflow_requests SET state = 'pending', title = ?, summary = ?, options_json = ?, "
+            "target_json = ?, plan_revision = ?, plan_hash = ?, expires_at = ?, response_json = NULL, "
+            "responded_at = NULL, updated_at = ? WHERE id = ? AND state = 'changes_requested'",
+            (title, summary, json_text(options), json_text(target), plan_revision.strip(), plan_hash.strip(),
+             expires_at, now, request_id),
+        )
+        # The earlier answer stays in the history: the responder's note is what the change answers.
+        _event(db, request_id, actor, "revised", "changes_requested", "pending", {
+            "plan_revision": plan_revision, "plan_hash": plan_hash, "previous_plan_hash": request["plan_hash"],
+        })
+    revised = get(request_id)
+    notify.workflow_created(revised, revised=True)
+    return revised
+
+
 def authorize(*, request_id: int | None, capability: str, tier: int, actor: str,
                human: bool, target: dict[str, Any], plan_revision: str,
                plan_hash: str) -> dict | None:
