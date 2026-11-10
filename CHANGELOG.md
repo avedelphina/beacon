@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.30.5] — 2026-11-10
+
+### Fixed
+
+- **A host that agents use cannot be deleted.** `DELETE /api/hosts/{id}` answers
+  `409` and names the agents, instead of leaving them with "host not found" on
+  their next status, deploy or logs call. Delete or move the agents first. (#18)
+- **Deleting an agent says what it does not do.** The confirmation now says it
+  removes only Beacon's record, that a deployed gateway keeps running with
+  nothing tracking it, and points to Decommission. The delete buttons show an
+  error instead of failing silently. (#18)
+
 ## [0.30.4] — 2026-11-10
 
 ### Fixed

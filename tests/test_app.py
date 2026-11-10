@@ -305,3 +305,10 @@ def test_the_page_and_the_api_are_revalidated_not_reused_blindly(client):
     for path in ("/", "/app.js", "/styles.css", "/api/version"):
         assert client.get(path).headers["cache-control"] == "no-cache", path
     assert client.get("/app.js").headers["etag"]  # so revalidating is a cheap 304
+
+
+def test_deleting_a_host_that_agents_use_answers_409_naming_them(client, host_and_agent):
+    refused = client.delete("/api/hosts/edge-01")
+    assert refused.status_code == 409 and "a1" in refused.json()["detail"]
+    assert client.delete("/api/agents/a1").status_code == 200
+    assert client.delete("/api/hosts/edge-01").status_code == 200

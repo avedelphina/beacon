@@ -81,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.30.4"
+VERSION = "0.30.5"
 
 
 async def _record_actor(request: Request) -> None:
@@ -189,6 +189,7 @@ app.add_exception_handler(workflow.UnauthorizedWorkflowAccess, _error_handler(40
 app.add_exception_handler(workflow.HumanApprovalRequired, _error_handler(403))
 app.add_exception_handler(workflow.StalePlan, _error_handler(409))
 app.add_exception_handler(NoSSH, _error_handler(409))
+app.add_exception_handler(store.HostInUse, _error_handler(409))
 
 
 def _started(lines: Iterator[str]) -> Iterator[str]:

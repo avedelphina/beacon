@@ -39,6 +39,17 @@ def test_delete_host(fleet):
     assert store.list_hosts() == []
 
 
+def test_delete_host_is_refused_while_a_live_agent_uses_it(fleet):
+    store.upsert_host(make_host(id="edge-01"))
+    store.upsert_agent(make_agent(id="a1", host="edge-01"))
+    with pytest.raises(store.HostInUse, match="a1"):
+        store.delete_host("edge-01")
+    assert [h.id for h in store.list_hosts()] == ["edge-01"]
+    store.delete_agent("a1")
+    store.delete_host("edge-01")  # free once nothing points at it
+    assert store.list_hosts() == []
+
+
 def test_delete_missing_host_raises(fleet):
     with pytest.raises(store.NotFound):
         store.delete_host("nope")
