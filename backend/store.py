@@ -40,6 +40,11 @@ class NotFound(Exception):
     pass
 
 
+class HostInUse(Exception):
+    """A host that live agents still point at. Deleting it would leave their
+    status, deploy and logs calls failing with "host not found"."""
+
+
 class InvalidId(Exception):
     pass
 
@@ -148,6 +153,9 @@ def upsert_host(host: Host) -> Host:
 
 
 def delete_host(id_: str) -> None:
+    using = sorted(a.id for a in list_agents() if a.host == id_)
+    if using:
+        raise HostInUse(f"host {id_} is still used by: {', '.join(using)}. Decommission or move those agents first.")
     delete_record("host", id_)
 
 

@@ -191,8 +191,12 @@ async function editHost(id) {
 }
 
 async function deleteHost(id) {
-  if (!confirm(`Delete host ${id}? Agents referencing it will fail to deploy.`)) return;
-  await api.del("hosts", id);
+  if (!confirm(`Delete host ${id}?`)) return;
+  try {
+    await api.del("hosts", id);  // refused while live agents still use it
+  } catch (err) {
+    alert(err.message);
+  }
   renderHosts();
 }
 
@@ -831,8 +835,12 @@ async function editAgent(id) {
 }
 
 async function deleteAgent(id) {
-  if (!confirm(`Delete agent ${id}?`)) return;
-  await api.del("agents", id);
+  if (!confirm(`Delete Beacon's record of agent ${id}?\n\nThis does not touch the host: if the agent was deployed, its gateway keeps running with nothing tracking it. To stop and uninstall it, cancel and use Decommission instead.`)) return;
+  try {
+    await api.del("agents", id);
+  } catch (err) {
+    alert(err.message);
+  }
   renderAgents();
 }
 
