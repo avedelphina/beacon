@@ -1,0 +1,14 @@
+{
+  "name": "Beacon",
+  "short_name": "Beacon",
+  "description": "Console for a fleet of agents",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0F1420",
+  "theme_color": "#0F1420",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

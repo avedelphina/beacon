@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-11-07
+
+### Added
+
+- **Beacon as an app, with notifications.** The page installs as a PWA (a web
+  app manifest, icons, and a service worker) on iPhone and iPad from the Home
+  Screen, on a Mac from Safari's Add to Dock, and from Chrome or Edge. A
+  **Notify me** button in the header turns on Web Push for that browser, and
+  Beacon sends a test notification at once. From then on, every notice that
+  goes to people by email (workflow requests, self-healing restarts and
+  give-ups, quiet and returning agents, stuck board cards) also goes as a push
+  to the same people, with or without a mail server, at most 10 per hour to
+  one person. A push holds only the subject line, never an agent's own text.
+  It is encrypted to the browser (RFC 8291) and signed with a VAPID key that
+  Beacon derives from `BEACON_A2A_SECRET`, so there is nothing new to
+  configure. Beacon sends only to the browsers' push services (Apple, Google,
+  Mozilla, Microsoft), whatever endpoint it is given. A subscription that the
+  push service reports as gone is removed. New routes: `GET`/`POST`/`DELETE
+  /api/push` (members too, for their own browser).
+
+### Changed
+
+- The manifest, the service worker and the icons load without a session, so
+  that a browser can install the page and update the worker after the session
+  ends.
+
 ## [0.28.0] — 2026-11-07
 
 ### Added

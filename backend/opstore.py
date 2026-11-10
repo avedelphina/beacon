@@ -161,6 +161,16 @@ CREATE TABLE IF NOT EXISTS enrollments (
     pulls_at_fetch  INTEGER
 );
 CREATE INDEX IF NOT EXISTS enrollments_by_agent ON enrollments (agent, created_at);
+
+-- Browsers that asked for Web Push, one row per browser (backend/push.py).
+-- Without Beacon's VAPID key these values cannot send anything to the browser.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint    TEXT PRIMARY KEY,
+    email       TEXT NOT NULL,      -- whose browser it is, casefolded
+    p256dh      TEXT NOT NULL,
+    auth        TEXT NOT NULL,
+    created_at  REAL NOT NULL
+);
 """
 
 

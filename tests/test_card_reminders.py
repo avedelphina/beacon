@@ -28,7 +28,7 @@ def crew(fleet, monkeypatch):
     monkeypatch.setattr(board.mailbox, "deliver_pending", lambda agent: None)
     monkeypatch.setattr(auth, "ALLOWED_EMAILS", frozenset({"op@example.com"}))
     emails = []
-    monkeypatch.setattr(notify, "_email", lambda to, subject, body: emails.append((sorted(to), subject, body)))
+    monkeypatch.setattr(notify, "_tell", lambda to, subject, body: emails.append((sorted(to), subject, body)))
     return emails
 
 
