@@ -1,4 +1,7 @@
 import threading
+import time
+
+import pytest
 
 from backend import ssh
 from backend.ssh import _base_cmd
@@ -103,3 +106,59 @@ def test_stream_script_reaps_process_when_generator_is_closed(monkeypatch):
 
     assert proc.killed
     assert proc.waited
+
+
+# --- the real subprocess lifecycle ------------------------------------------
+# The tests above use fakes. These run the real stream_script/run against a
+# local `sh -s` standing in for ssh: _base_cmd is the only thing replaced, so
+# the Popen, the reader thread, the deadline and the exit code are the real ones.
+
+@pytest.fixture
+def local_shell(monkeypatch):
+    monkeypatch.setattr(ssh, "_base_cmd", lambda host: ["sh", "-c", "exec sh -s"])
+
+
+def test_stream_script_yields_output_then_the_exit_code(local_shell):
+    lines = list(ssh.stream_script(make_host(), "echo one\necho two >&2\nexit 3\n", timeout=10))
+    assert lines == ["one", "two", "__BEACON_EXIT__3"]  # stderr is folded in
+
+
+def test_stream_script_reports_success_as_exit_zero(local_shell):
+    assert list(ssh.stream_script(make_host(), "echo ok\n", timeout=10))[-1] == "__BEACON_EXIT__0"
+
+
+def test_stream_script_kills_a_silent_command_at_the_deadline(local_shell):
+    started = time.monotonic()
+    lines = list(ssh.stream_script(make_host(), "echo start\nsleep 30\n", timeout=0.5))
+    assert time.monotonic() - started < 10  # not 30
+    assert lines[0] == "start"
+    assert any("timeout" in line for line in lines)
+    assert lines[-1] == "__BEACON_EXIT__none"
+
+
+def test_stream_script_deadline_holds_against_a_chatty_command(local_shell):
+    """A command that keeps printing must not be able to outrun the deadline."""
+    started = time.monotonic()
+    lines = list(ssh.stream_script(make_host(), "while :; do echo x; sleep 0.01; done\n", timeout=0.5))
+    assert time.monotonic() - started < 10
+    assert lines[-1] == "__BEACON_EXIT__none"
+
+
+def test_stream_script_says_so_when_there_is_no_ssh_binary(monkeypatch):
+    monkeypatch.setattr(ssh, "_base_cmd", lambda host: ["beacon-no-such-binary"])
+    assert list(ssh.stream_script(make_host(), "true", timeout=5)) == [
+        "[beacon] ssh binary not found on this machine", "__BEACON_EXIT__none"]
+
+
+def test_run_distinguishes_a_missing_binary_a_timeout_and_a_remote_failure(monkeypatch):
+    monkeypatch.setattr(ssh, "_base_cmd", lambda host: ["beacon-no-such-binary"])
+    missing = ssh.run(make_host(), "true")
+    assert not missing.ok and missing.returncode is None and "not found" in missing.transport_error
+
+    monkeypatch.setattr(ssh, "_base_cmd", lambda host: ["sh", "-c", 'eval "$0"'])
+    assert ssh.run(make_host(), "sleep 5", timeout=0.3).transport_error == "ssh timed out"
+
+    failed = ssh.run(make_host(), "echo no >&2; exit 4")
+    assert not failed.ok and failed.returncode == 4 and failed.transport_error is None  # the remote command's failure
+
+    assert ssh.run(make_host(), "exit 255").transport_error == "ssh connection failed"  # ssh's own
