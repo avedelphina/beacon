@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [0.30.2] — 2026-11-10
+
+### Fixed
+
+- **`sudo` to another user never waits for a password.** `sudo -u <user> -i`
+  in the Hermes driver (running a command as an agent's OS user, deploy under a
+  new user, removing the user) now has `-n`, like the other `sudo` calls. A
+  host whose sudo needs a password now fails at once instead of hanging until
+  the timeout. (#14)
+- **Decommission output stays open.** The window no longer closes when the
+  stream ends, so the operator reads whether the teardown worked. (#29)
+- **Irreversible decommission choices need typing.** Deleting an agent's
+  profile data, or its OS account, asks for the agent id or user name; Enter on
+  an empty box keeps the data. Before, OK meant delete. (#31)
+- **An expired session goes to the login page.** Any `401` from the API
+  sends the browser to `/auth/login`, instead of failing quietly call by
+  call. (#32)
+
 ## [0.30.1] — 2026-11-10
 
 ### Fixed

@@ -29,6 +29,11 @@ async function request(path, method = "GET", body) {
     init.body = JSON.stringify(body);
   }
   const r = await fetch(path, init);
+  if (r.status === 401) {
+    // The session ran out: go and sign in again instead of failing call by call.
+    location.href = "/auth/login";
+    throw new Error("Your session expired. Signing in again…");
+  }
   if (!r.ok) {
     // An unhandled server exception is a plain-text 500, not JSON.
     const detail = await r.json().then((b) => b.detail, () => null);
@@ -101,6 +106,12 @@ function renderRows(name, items, rowHtml, handlers) {
   const heads = [...document.querySelectorAll(`#${name}-view thead th`)].map((th) => th.textContent.trim());
   body.querySelectorAll("tr").forEach((tr) => tr.querySelectorAll("td").forEach((td, i) => { td.dataset.label = heads[i] ?? ""; }));
   bindActions(body, handlers);
+}
+
+// For a choice that cannot be undone: Enter on an empty box must not mean yes,
+// so the operator types the name of what they are about to delete.
+function typedConfirm(message, expected) {
+  return (prompt(message, "") ?? "").trim() === expected;
 }
 
 // POST to a text/plain streaming endpoint, appending output to `out` live.
@@ -560,22 +571,22 @@ document.getElementById("inspect-decommission").addEventListener("click", async 
   const agent = await api.get("agents", id);
   let purge = false;
   if (agent.profile && agent.profile !== "default") {
-    purge = confirm(
+    purge = typedConfirm(
       `Also delete ${id}'s profile data (memory, sessions, skills)? This cannot be undone.\n\n` +
-      `OK = delete the data too. Cancel = keep the data, just remove the service.`
-    );
+      `Type the agent id to delete the data too. Anything else keeps the data and only removes the service.`, id);
   }
   let removeUser = false;
   if (agent.desired && agent.desired.os_user) {
-    removeUser = confirm(
+    removeUser = typedConfirm(
       `This agent runs under OS user "${agent.desired.os_user}". Also delete that user account entirely (userdel -r)?\n\n` +
-      `OK = delete the account. Cancel = leave the account, just remove the service.`
-    );
+      `Type the user name to delete the account. Anything else leaves the account and only removes the service.`,
+      agent.desired.os_user);
   }
 
   await streamInto(document.getElementById("inspect-decommission-output"), e.target,
     `/api/agents/${id}/decommission`, { purge, remove_user: removeUser, confirm: true });
-  closeModal("inspect-modal");
+  // The modal stays open: its output says whether the teardown worked, and the
+  // operator has to be able to read it. They close it themselves.
   renderAgents();
 });
 
