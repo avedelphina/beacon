@@ -121,4 +121,5 @@ def test_a_pending_restart_says_nothing_about_an_agent_that_answers(fleet_with_p
     with TestClient(app) as c:
         headers = {"Authorization": f"Bearer {mesh.token('alpha', mesh.BEACON_PEER)}", "X-Beacon-Restart": "pending"}
         assert c.get("/mesh/alpha", headers=headers).status_code == 200
-    assert availability.check_all(store.list_agents())["alpha"] == {"last_pull_seconds_ago": 0, "state": "online", "detail": "", "health": None}
+    assert availability.check_all(store.list_agents())["alpha"] == {"last_pull_seconds_ago": 0, "state": "online", "detail": "", "health": None,
+                                                                           "sync": "unknown"}

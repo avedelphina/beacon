@@ -351,7 +351,9 @@ async function refreshStatuses(agents) {
   for (const a of agents) {
     const cell = document.getElementById(`status-${a.id}`);
     const s = all[a.id];
-    if (cell) cell.innerHTML = s ? statusPill(s.state, s.detail) : statusPill("unknown", "availability could not be loaded");
+    if (cell) cell.innerHTML = s ? statusPill(s.state, s.detail) + (s.sync === "outdated"
+      ? ' <span class="chip chip-warn" title="This host runs an older sync script than Beacon serves. Turn on update_sync in the policy, or install it again.">sync outdated</span>' : "")
+      : statusPill("unknown", "availability could not be loaded");
   }
 }
 
@@ -971,12 +973,23 @@ async function renderBoard() {
       </button>`).join("")}</div>`;
   }).join("");
   el.querySelectorAll("[data-card]").forEach((b) => b.addEventListener("click", () => openCard(b.dataset.card)));
-  // A member hands cards only to their own agents; the registry is the operator's.
-  (isMember ? json("/api/agents").then((agents) => agents.map((a) => ({ ...a, callable: !!a.reach })))
-            : json("/api/agents/registry")).then((agents) => {
-    document.getElementById("agent-ids").innerHTML = agents.filter((a) => a.callable)
-      .map((a) => `<option value="${esc(a.id)}">`).join("");
+  // Who the viewer may give a card to: a member, their own agents and the ones
+  // the policy opens to members; an operator, every agent in the mesh.
+  json("/api/board/assignees").then((ids) => {
+    assigneeIds = ids;
+    document.querySelectorAll("select[data-assignees]").forEach((select) => setAssignee(select, select.value));
   }, () => {});
+}
+
+let assigneeIds = [];
+
+// A dropdown of the agents to choose from. A card's current assignee that is not
+// among them (a person, or an agent this viewer may not assign to) stays
+// selectable, so saving the card never silently unassigns it.
+function setAssignee(select, current) {
+  const ids = current && !assigneeIds.includes(current) ? [...assigneeIds, current] : assigneeIds;
+  select.innerHTML = `<option value="">unassigned</option>${ids.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join("")}`;
+  select.value = current || "";
 }
 
 async function openCard(id) {
@@ -1012,7 +1025,7 @@ async function openCard(id) {
   const form = document.getElementById("card-update-form");
   form.dataset.card = c.id;
   form.state.value = c.state;
-  form.assignee.value = c.assignee ?? "";
+  setAssignee(form.assignee, c.assignee);
   form.next_action.value = c.next_action ?? "";
   form.done_when.value = c.done_when ?? "";
   form.links.value = c.links.map((l) => `${l.url} ${l.label}`.trim()).join("\n");
@@ -1210,8 +1223,8 @@ function policyHealthHtml(health) {
   const ids = Object.keys(health).sort();
   if (!ids.length) return "";
   const span = (s) => s == null ? "never" : s % 86400 === 0 ? `${s / 86400} d` : s % 3600 === 0 ? `${s / 3600} h` : `${Math.round(s / 60)} min`;
-  return `<table class="policy-health"><thead><tr><th>agent</th><th>self-healing</th><th>tell people after</th><th>mailbox holds</th><th>card reminder after</th></tr></thead><tbody>${
-    ids.map((id) => `<tr><td>${esc(id)}</td><td>${health[id].heal ? "on" : "off"}</td><td>${esc(span(health[id].quiet_after))}</td><td>${esc(span(health[id].mailbox_ttl))}</td><td>${esc(span(health[id].remind_after))}</td></tr>`).join("")
+  return `<table class="policy-health"><thead><tr><th>agent</th><th>self-healing</th><th>tell people after</th><th>mailbox holds</th><th>card reminder after</th><th>sync self-update</th></tr></thead><tbody>${
+    ids.map((id) => `<tr><td>${esc(id)}</td><td>${health[id].heal ? "on" : "off"}</td><td>${esc(span(health[id].quiet_after))}</td><td>${esc(span(health[id].mailbox_ttl))}</td><td>${esc(span(health[id].remind_after))}</td><td>${health[id].update_sync ? "on" : "off"}</td></tr>`).join("")
   }</tbody></table>`;
 }
 

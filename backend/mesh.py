@@ -173,6 +173,7 @@ def config(agent_id: str) -> dict:
     listen = urlsplit(f"//{agent.reach.bind}") if agent.reach.bind else endpoint
     loopback = listen.hostname in ("127.0.0.1", "localhost", "::1")
     beacon_url = public_url()
+    health = policy.health_for(policy.load(), agent)
     outbound = []
     # Only peers that will accept this agent: no peer-list entries that can
     # only ever be refused.
@@ -211,8 +212,30 @@ def config(agent_id: str) -> dict:
         "board": {"url": f"{beacon_url}/board/mcp"} if beacon_url and board_allowed(agent) else None,
         "skills": skills(),
         # How the host sync looks after this agent (fleet policy `health`).
-        "health": policy.health_for(policy.load(), agent),
+        "health": health,
+        "sync": sync_offer(agent, health, beacon_url),
     }
+
+
+def sync_script(agent: Agent) -> bytes | None:
+    """The host sync's source for this agent's type, byte for byte, or None."""
+    path = getattr(get_driver(agent.type), "MESH_SYNC", None)
+    return path.read_bytes() if path else None
+
+
+def sync_hash(agent: Agent) -> str | None:
+    script = sync_script(agent)
+    return hashlib.sha256(script).hexdigest() if script is not None else None
+
+
+def sync_offer(agent: Agent, health: dict, beacon_url: str | None) -> dict | None:
+    """Where the host sync may fetch its own newer copy, only when the policy
+    says `update_sync` for this agent. Whoever can save the policy (a person in
+    a browser session) decides whether Beacon may replace code that runs on a
+    host, so this is off by default. The sync takes the script only from the
+    address it already pulls its config from."""
+    digest = sync_hash(agent) if health.get("update_sync") and beacon_url else None
+    return {"sha256": digest, "url": f"{beacon_url}/mesh/{agent.id}/sync.py"} if digest else None
 
 
 def install_script(agent_id: str, docker: str | None = None, docker_user: str = "hermes") -> str:

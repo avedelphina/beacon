@@ -30,9 +30,14 @@ same selectors (Tailscale's node attributes, in effect):
 `quiet_after` is how long an agent may go without syncing before Beacon tells
 people (`never` for none); `mailbox_ttl` is how long the mailbox holds a message
 for it; `remind_after` is how long a board card may wait on the agent before
-Beacon reminds it (`never` for none; backend/board.py). Later entries win,
-field by field. Without a matching entry: no healing, 30 minutes, 72 hours,
-24 hours.
+Beacon reminds it (`never` for none; backend/board.py); `update_sync` lets the
+host sync replace itself with the copy Beacon serves (mesh.sync_offer). Later
+entries win, field by field. Without a matching entry: no healing, 30 minutes,
+72 hours, 24 hours, no self-update.
+
+`members_may_assign: ["tag:coordinator"]` names agents that any member may hand
+board cards to, besides their own agents. Saving the policy is human-only, so
+a member cannot widen it.
 """
 
 import fnmatch
@@ -94,6 +99,7 @@ class HealthRule(BaseModel):
     quiet_after: str | int | None = None
     mailbox_ttl: str | int | None = None
     remind_after: str | int | None = None
+    update_sync: bool | None = None
 
     @field_validator("for_")
     @classmethod
@@ -116,7 +122,8 @@ class HealthRule(BaseModel):
 
 
 # What an agent gets when no health entry says otherwise.
-HEALTH_DEFAULTS = {"heal": False, "quiet_after": 30 * 60, "mailbox_ttl": 72 * 3600, "remind_after": 24 * 3600}
+HEALTH_DEFAULTS = {"heal": False, "quiet_after": 30 * 60, "mailbox_ttl": 72 * 3600, "remind_after": 24 * 3600,
+                   "update_sync": False}
 
 
 class Policy(BaseModel):
@@ -126,6 +133,14 @@ class Policy(BaseModel):
     rules: list[Rule] = Field(default_factory=list)
     deny: list[Rule] = Field(default_factory=list)
     health: list[HealthRule] = Field(default_factory=list)
+    # Agents that any member (an agent's owner) may hand board cards to, not
+    # only their own: a coordinator that organises work for everyone.
+    members_may_assign: list[str] = Field(default_factory=list)
+
+    @field_validator("members_may_assign")
+    @classmethod
+    def _assignable(cls, v: list[str]) -> list[str]:
+        return [check_selector(s) for s in v]
 
     @field_validator("tags")
     @classmethod
@@ -189,7 +204,16 @@ def health_for(policy: Policy | None, agent: Agent) -> dict:
             result["mailbox_ttl"] = parse_duration(rule.mailbox_ttl)
         if rule.remind_after is not None:
             result["remind_after"] = None if rule.remind_after == "never" else parse_duration(rule.remind_after)
+        if rule.update_sync is not None:
+            result["update_sync"] = rule.update_sync
     return result
+
+
+def assignable_to_members(policy: Policy | None, fleet: list[Agent]) -> list[str]:
+    """Ids of the agents (with a reach block: they can be given work) that any
+    member may assign cards to, besides their own."""
+    return sorted(a.id for a in fleet if a.reach is not None and policy is not None
+                  and _any(policy.members_may_assign, a))
 
 
 def health_table(policy: Policy | None, fleet: list[Agent]) -> dict[str, dict]:
@@ -209,9 +233,14 @@ def problems(policy: Policy | None, fleet: list[Agent]) -> list[str]:
     used = {t for a in fleet for t in a.tags}
     if declared:
         found += [f"agent {a.id!r} has undeclared tag {t!r}" for a in fleet for t in a.tags if t not in declared]
-    for kind, rules in (("rule", policy.rules), ("deny", policy.deny), ("health", policy.health)):
+    class _Selectors:  # members_may_assign is a plain list: give it the shape of a rule
+        def __init__(self, selectors):
+            self.for_ = selectors
+
+    for kind, rules in (("rule", policy.rules), ("deny", policy.deny), ("health", policy.health),
+                        ("members_may_assign", [_Selectors(policy.members_may_assign)])):
         for i, rule in enumerate(rules, 1):
-            for selector in (rule.for_ if kind == "health" else [*rule.from_, *rule.to]):
+            for selector in (rule.for_ if kind in ("health", "members_may_assign") else [*rule.from_, *rule.to]):
                 if selector == "*":
                     continue
                 if selector.startswith("tag:"):
@@ -276,7 +305,7 @@ def preview(text: str, fleet: list[Agent]) -> dict:
     current = load()
     old = matrix(current, fleet)
     result: dict = {"errors": [], "problems": [], "matrix": None, "added": [], "removed": [], "restarts": [],
-                    "health": None}
+                    "health": None, "members_may_assign": []}
     try:
         new_policy = parse(text)
     except ValueError as exc:
@@ -285,6 +314,7 @@ def preview(text: str, fleet: list[Agent]) -> dict:
     new = matrix(new_policy, fleet)
     result["matrix"] = new
     result["health"] = health_table(new_policy, fleet)
+    result["members_may_assign"] = assignable_to_members(new_policy, fleet)
     result["problems"] = problems(new_policy, fleet)
     pairs = lambda grid: {(c, t) for c, ts in grid.items() for t in ts}  # noqa: E731
     result["added"] = sorted(pairs(new) - pairs(old))

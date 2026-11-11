@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-11-11
+
+### Added
+
+- **The host sync can update itself.** With `update_sync: true` in the policy's
+  `health` list (off by default; saving the policy is human-only), the pull
+  carries the checksum of Beacon's copy of the sync script and an address on
+  Beacon to fetch it from (`GET /mesh/{agent}/sync.py`, the pull token as
+  credential, refused unless the policy allows it). The sync checks the
+  download against the announced checksum, runs it once with `--check`, keeps
+  the old script as `sync.py.prev`, and swaps it in for the next run. A failure
+  changes nothing and is not retried for an hour. The sync reports its own
+  checksum with each pull; the Agents tab shows **sync outdated** and
+  `GET /api/availability` gives `sync` (`current`, `outdated`, `unknown`).
+  Hosts that run a sync older than this need one manual install first.
+- **Members may give cards to the agents the policy opens to them.** The new
+  `members_may_assign` list in the policy (agent ids or `tag:` selectors) names
+  agents, such as a coordinator, that any member may assign to, besides their own.
+- The assignee fields on the Board are dropdowns of the agents the viewer may
+  choose (`GET /api/board/assignees`).
+
+### Fixed
+
+- A member who edited a card that an operator had given to someone else's
+  agent was refused, because the form sends the assignee back unchanged. An
+  unchanged assignee is now accepted.
+
 ## [0.33.0] — 2026-11-11
 
 ### Added

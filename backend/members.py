@@ -41,6 +41,7 @@ _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject i
     ("POST", r"/api/agents/(?P<id>[^/]+)/restart", "agent"),
     ("GET", r"/api/agents/(?P<id>[^/]+)/logs", "logs"),
     ("GET", r"/api/board", None),
+    ("GET", r"/api/board/assignees", None),
     ("POST", r"/api/board/cards", None),
     ("GET", r"/api/board/cards/(?P<id>\d+)", "card"),
     ("PATCH", r"/api/board/cards/(?P<id>\d+)", "card"),
@@ -66,6 +67,14 @@ def owns_any(email: str) -> bool:
 
 def owned_ids(email: str) -> set[str]:
     return {a.id for a in store.list_agents() if owns(email, a)}
+
+
+def assignable_ids(email: str) -> set[str]:
+    """Where a member may hand a card: their own agents, and the ones the
+    policy opens to every member (`members_may_assign`)."""
+    from . import policy
+    fleet = store.list_agents()
+    return {a.id for a in fleet if owns(email, a)} | set(policy.assignable_to_members(policy.load(), fleet))
 
 
 def _owned_agent(email: str, agent_id: str):

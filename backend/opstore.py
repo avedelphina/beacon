@@ -150,7 +150,8 @@ CREATE TABLE IF NOT EXISTS agent_seen (
     restart_pending INTEGER,       -- 1 while the host sync still owes the agent a gateway restart; NULL = not reported
     health      TEXT,              -- the host sync's last probe: ok | failing | healing | gave-up | network
     health_detail TEXT,
-    quiet_notified INTEGER NOT NULL DEFAULT 0  -- 1 once people were told it went quiet; cleared on its next pull
+    quiet_notified INTEGER NOT NULL DEFAULT 0,  -- 1 once people were told it went quiet; cleared on its next pull
+    sync_hash TEXT  -- sha256 of the sync script the host runs, as it reports it
 );
 
 -- Every change of an agent's health as its host sync reports it, kept as the
@@ -220,7 +221,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "restart_pending" not in seen:
         conn.execute("ALTER TABLE agent_seen ADD COLUMN restart_pending INTEGER")
     for column, decl in (("health", "TEXT"), ("health_detail", "TEXT"),
-                         ("quiet_notified", "INTEGER NOT NULL DEFAULT 0")):
+                         ("quiet_notified", "INTEGER NOT NULL DEFAULT 0"), ("sync_hash", "TEXT")):
         if column not in seen:
             conn.execute(f"ALTER TABLE agent_seen ADD COLUMN {column} {decl}")
     card_columns = {row[1] for row in conn.execute("PRAGMA table_info(cards)")}

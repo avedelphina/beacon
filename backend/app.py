@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
@@ -81,7 +81,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.33.0"
+VERSION = "0.34.0"
 
 
 async def _record_actor(request: Request) -> None:
@@ -628,11 +628,22 @@ def _board_author(request: Request) -> str:
     return (user or {}).get("email") or mesh.BEACON_PEER
 
 
-def _member_may_assign(request: Request, assignee: str | None) -> None:
-    """A member hands work only to their own agents, so a card never reaches an
-    agent that is someone else's. Unassigning is theirs to do."""
-    if (member := _member(request)) and assignee and assignee not in members.owned_ids(member):
-        raise HTTPException(403, "a member can assign cards only to their own agents")
+def _member_may_assign(request: Request, assignee: str | None, current: str | None = None) -> None:
+    """A member hands work only to their own agents and to the ones the policy
+    opens to every member, so a card never reaches an agent that is someone
+    else's. Unassigning is theirs to do, and so is keeping the assignee a card
+    already has (an operator may have given it to someone else's agent)."""
+    if (member := _member(request)) and assignee and assignee != current \
+            and assignee not in members.assignable_ids(member):
+        raise HTTPException(403, "a member can assign cards only to their own agents "
+                                 "and to the agents the policy opens to members")
+
+
+@app.get("/api/board/assignees")
+def board_assignees(request: Request) -> list[str]:
+    """The agents the viewer may give a card to: for the assignee dropdowns."""
+    allowed = members.assignable_ids(member) if (member := _member(request)) else None
+    return sorted(a.id for a in store.list_agents() if a.reach and (allowed is None or a.id in allowed))
 
 
 @app.get("/api/board")
@@ -658,7 +669,7 @@ def board_create(body: CardCreate, request: Request) -> dict:
 
 @app.patch("/api/board/cards/{card_id}")
 def board_update(card_id: int, body: CardUpdate, request: Request) -> dict:
-    _member_may_assign(request, body.assignee)
+    _member_may_assign(request, body.assignee, board.get_card(card_id)["assignee"])
     return board.update_card(_board_author(request), card_id, **body.model_dump())
 
 
@@ -824,7 +835,8 @@ def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None
                 x_beacon_open_chat: str | None = Header(None, max_length=2048),
                 x_beacon_restart: str | None = Header(None, max_length=16),
                 x_beacon_health: str | None = Header(None, max_length=16),
-                x_beacon_health_detail: str | None = Header(None, max_length=512)) -> dict:
+                x_beacon_health_detail: str | None = Header(None, max_length=512),
+                x_beacon_sync_hash: str | None = Header(None, max_length=64)) -> dict:
     """An agent's own A2A mesh config, pulled by its host's sync job. Outside
     /api/ on purpose: the only credential is that agent's derived pull token —
     not a session, not the MCP bearer — because the body holds tokens no one
@@ -836,6 +848,8 @@ def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None
         raise HTTPException(401, "not authorized for this agent's mesh config")
     if availability.record_pull(id_):
         background.add_task(notify.agent_back, id_)
+    if x_beacon_sync_hash:
+        availability.record_sync_hash(id_, x_beacon_sync_hash)
     if x_beacon_health is not None:
         # The sync's own probe of its agent, and what self-healing did about it.
         previous = availability.record_health(id_, x_beacon_health, x_beacon_health_detail or "")
@@ -863,6 +877,21 @@ def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None
         # by calling the agent, after this response.
         background.add_task(mailbox.deliver_pending, id_)
     return config
+
+
+@app.get("/mesh/{id_}/sync.py")
+def mesh_sync_script(id_: str, authorization: str | None = Header(None)) -> Response:
+    """The host sync's own source, for a sync that may update itself
+    (`update_sync` in the policy). Same credential as the config pull, and
+    refused unless the policy allows it for this agent, so a host never
+    fetches code it was not allowed to."""
+    if not mesh.may_pull(id_, authorization):
+        raise HTTPException(401, "not authorized for this agent's mesh config")
+    agent = store.get_agent(id_)
+    script = mesh.sync_script(agent) if policy.health_for(policy.load(), agent)["update_sync"] else None
+    if script is None:
+        raise HTTPException(404, "no sync update is offered for this agent")
+    return Response(script, media_type="text/x-python")
 
 
 def _tell_about_quiet_agents() -> None:

@@ -26,6 +26,14 @@ Inbound ones — who may call in — are read once when the gateway starts, so
 only those trigger a graceful `hermes gateway restart`, which waits for
 running turns. Stdlib only: it runs on whatever python3 the host has.
 
+Self-update. When Beacon's policy says `update_sync` for this agent, the pull
+carries a checksum and an address for a newer copy of this script. The sync
+fetches it from the same Beacon it pulls from (the pull token goes nowhere
+else), checks it against the announced checksum, makes sure the new copy at
+least starts (`--check`, under this same python), keeps the old one as
+sync.py.prev, and swaps it in for the next run. Any failure leaves the running
+script alone and is not retried for an hour.
+
 Usage: python3 sync.py <state-dir>   (holds sync.json, token, logs)
 """
 
@@ -56,6 +64,8 @@ INBOUND_KEYS = ("A2A_PORT", "A2A_HOST", "A2A_AGENT_NAME", "A2A_PEER_TOKENS", "A2
 BOARD_TOKEN_KEY = "BEACON_BOARD_TOKEN"
 BOARD_SERVER = "beacon-board"
 MAX_LOG_BYTES = 1_000_000
+MAX_SYNC_BYTES = 1_000_000
+UPDATE_RETRY_SECONDS = 3600
 # Announces that this sync delivers held messages itself (pull delivery).
 SYNC_VERSION = "2"
 # How long to wait for the agent's answer before leaving it to the agent's
@@ -517,6 +527,51 @@ def health_headers(state: Path) -> dict:
     return {"X-Beacon-Health": health["state"], "X-Beacon-Health-Detail": detail or "-"}
 
 
+def own_hash() -> str:
+    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def self_update(cfg: dict, state: Path, pull_token: str, offer: dict | None) -> None:
+    """Replace this script with the copy Beacon offers, if it differs. Takes no
+    part in the run in progress: the next cron run uses the new file."""
+    if not offer or not offer.get("sha256") or offer["sha256"] == own_hash():
+        return
+    wanted, url = offer["sha256"], str(offer.get("url") or "")
+    if not url.startswith(cfg["beacon"].rstrip("/") + "/"):
+        log(f"sync update ignored: {url!r} is not on Beacon's own address")
+        return
+    failed = state / "update.failed"
+    if failed.exists():
+        tried, _, when = failed.read_text().partition(" ")
+        if tried == wanted and time.time() - float(when or 0) < UPDATE_RETRY_SECONDS:
+            return
+    me = Path(__file__).resolve()
+    new = me.with_name(me.name + ".new")
+    try:
+        request = urllib.request.Request(url, headers={"Authorization": f"Bearer {pull_token}"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = response.read(MAX_SYNC_BYTES + 1)
+        if len(data) > MAX_SYNC_BYTES:
+            raise ValueError("the new script is too large")
+        if hashlib.sha256(data).hexdigest() != wanted:
+            raise ValueError("what Beacon served is not what it announced")
+        new.write_bytes(data)
+        os.chmod(new, me.stat().st_mode & 0o7777)
+        check = subprocess.run([sys.executable, str(new), "--check"], capture_output=True, text=True, timeout=30)
+        if check.returncode != 0:
+            raise ValueError("the new script does not start: " + (check.stderr.strip().splitlines() or ["?"])[-1])
+        (me.with_name(me.name + ".prev")).write_bytes(me.read_bytes())
+        os.replace(new, me)
+        if failed.exists():
+            failed.unlink()
+        log(f"sync script updated to {wanted[:12]}; the next run uses it (the old one is {me.name}.prev)")
+    except Exception as exc:
+        log(f"sync update to {wanted[:12]} failed, keeping this script: {exc}")
+        failed.write_text(f"{wanted} {time.time()}")
+        if new.exists():
+            new.unlink()
+
+
 def sync(state: Path) -> int:
     cfg = json.loads((state / "sync.json").read_text())
     log_file = state / "sync.log"
@@ -535,6 +590,7 @@ def sync(state: Path) -> int:
                                                   "X-Beacon-Open-Chat": ",".join(open_chats(cfg)) or "none",
                                                   # Whether an earlier run's gateway restart is still owed.
                                                   "X-Beacon-Restart": "pending" if (state / "restart.pending").exists() else "none",
+                                                  "X-Beacon-Sync-Hash": own_hash(),
                                                   **health_headers(state)})
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
@@ -601,6 +657,7 @@ def sync(state: Path) -> int:
 
         if not restarting:
             check_health(cfg, state, mesh)
+        self_update(cfg, state, pull_token, mesh.get("sync"))
     return 0
 
 
@@ -625,5 +682,8 @@ def adopt(state: Path) -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--check"]:  # a new copy proves it starts, before it replaces this one
+        print("ok")
+        sys.exit(0)
     state_dir = Path(sys.argv[1])
     sys.exit(adopt(state_dir) if "--adopt" in sys.argv[2:] else sync(state_dir))
