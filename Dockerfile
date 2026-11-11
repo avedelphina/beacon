@@ -9,10 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssh-client 
     && rm -rf /var/lib/apt/lists/* \
     && curl -fsSL https://goteleport.com/static/install.sh | bash -s 18.3.1
 
-# An account for running unprivileged (compose: BEACON_RUN_AS=10001:10001, see
-# the README). The image still starts as root unless told otherwise: switching the
-# default would break existing ./state and ./tbot/* bind mounts owned by root.
-# ssh needs a passwd entry for its uid, which is why the account exists here.
+# The account compose runs beacon as (BEACON_RUN_AS, default 10001:10001; see the
+# README). The image itself still starts as root, so `docker run` without a user
+# behaves as before; compose sets the user. ssh needs a passwd entry for its uid,
+# which is why the account exists here.
 RUN useradd --system --uid 10001 --create-home beacon
 
 WORKDIR /app

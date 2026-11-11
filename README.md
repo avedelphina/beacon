@@ -66,26 +66,25 @@ same as local dev.
 
 ### Running unprivileged
 
-The `beacon` and `tbot` containers start as root unless you say otherwise. To
-run them as an unprivileged user, own the directories they write first, then
-set `BEACON_RUN_AS` in `.env`:
+`beacon` and `tbot` run as uid 10001 (`mcp` too). A one-shot `init` container
+runs first, as root, and owns the directories they write (`./state`,
+`./tbot/data`, `./tbot/storage`) for that user, so an upgrade needs no manual
+step.
 
-```bash
-sudo chown -R 10001:10001 state tbot/data tbot/storage   # what beacon writes, and what tbot writes and beacon reads
-echo 'BEACON_RUN_AS=10001:10001' >> .env
-docker compose up -d --build
-```
-
-- It is off by default because switching it on needs that `chown`: an existing
-  stack whose `./state` is owned by root would stop starting ("unable to open
-  database file"). `mcp` already runs unprivileged.
-- A static SSH key in `./ssh` (see above) must be readable by that user: `chown
-  10001 ssh/fleet_ed25519` (mode 0600), or the host's `ssh` fails to read it.
-- `tbot/run.sh` on the bare host writes the same `tbot/data` and `tbot/storage`
-  as your own user, so use either the container or the script for them, not
-  both with these owners.
-- uid 10001 is the account the images create; another uid has no passwd entry
-  and `ssh` refuses to run as it.
+- **Static SSH key** in `./ssh` (see above): Beacon must be able to read it.
+  `init` does not touch `./ssh`. Run `sudo chown 10001 ssh/fleet_ed25519` (keep
+  mode 0600), or the host's `ssh` fails to read the key.
+- **Back to root:** set `BEACON_RUN_AS=0:0` in `.env`. `init` then hands the
+  directories back to root.
+- **`tbot/run.sh`** on the bare host writes `tbot/data` and `tbot/storage` as
+  your own user. Use either the container or the script for those directories,
+  not both.
+- **Files you edit by hand** in `./state` or `./tbot` need `sudo` after `init`
+  runs, because uid 10001 owns them. `./fleet` is not touched; a
+  `python -m backend.fleet export` run in the container needs `./fleet` to be
+  writable by that user.
+- **Another uid** has no passwd entry in the image, and `ssh` refuses to run as
+  it. Keep 10001 unless you rebuild the image.
 
 ## Data model
 
