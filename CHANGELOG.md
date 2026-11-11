@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.32.1] — 2026-11-11
+
+### Added
+- Board: a Refresh button reloads the cards without reloading the page.
+
+### Changed
+- The top bar (brand and tabs) now stays at the top of the page while you scroll.
+
 ## [0.32.0] — 2026-11-11
 
 ### Changed
