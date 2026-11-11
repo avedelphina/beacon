@@ -54,6 +54,22 @@ def record_pull(agent_id: str) -> bool:
                             (agent_id,)).rowcount == 1
 
 
+def record_sync_hash(agent_id: str, sync_hash: str) -> None:
+    """Which copy of the sync script the host runs (it reports its own checksum)."""
+    with opstore.connect() as conn:
+        conn.execute("UPDATE agent_seen SET sync_hash = ? WHERE agent = ?", (sync_hash[:64], agent_id))
+
+
+def sync_status(agent: Agent, reported: str | None) -> str:
+    """`current` or `outdated` against the copy Beacon serves; `unknown` for a
+    sync too old to report, or an agent type with no script."""
+    from . import mesh
+    served = mesh.sync_hash(agent)
+    if not reported or served is None:
+        return "unknown"
+    return "current" if reported == served else "outdated"
+
+
 def record_health(agent_id: str, state: str, detail: str) -> str | None:
     """Keep what the host sync found; log a change. Returns the previous state
     when it changed, "" for the first report, None when nothing changed."""
@@ -189,6 +205,9 @@ def check_all(agents: list[Agent]) -> dict[str, dict]:
     reachable = [a for a in agents if a.reach is not None]
     with ThreadPoolExecutor(max_workers=min(MAX_PROBES, len(reachable) or 1)) as pool:
         results = dict(zip((a.id for a in reachable), pool.map(probe, reachable)))
+    with opstore.connect() as conn:
+        hashes = {r["agent"]: r["sync_hash"] for r in conn.execute("SELECT agent, sync_hash FROM agent_seen")}
     return {a.id: classify(a, *results.get(a.id, (None, "")), pulls.get(a.id), now, a.id in restarting,
                            policy.health_for(rules, a)["quiet_after"], reports.get(a.id, (None, None)))
+            | {"sync": sync_status(a, hashes.get(a.id)) if a.reach else "unknown"}
             for a in agents}

@@ -25,8 +25,12 @@ deny: []
 
 # How agents are looked after. Same selectors; later entries win, field by
 # field. Without a matching entry: no healing, 30m, 72h, and board reminders
-# after 24h (remind_after).
+# after 24h (remind_after), and no self-update of the host sync (update_sync).
 health:
-  - {for: ["*"], heal: true, quiet_after: 30m}
+  - {for: ["*"], heal: true, quiet_after: 30m, update_sync: true}
   # Laptops sleep: say nothing for three days, and hold their mail for a week.
   - {for: ["tag:mobile"], quiet_after: 3d, mailbox_ttl: 7d}
+
+# Agents that any member (an agent's owner) may give board cards to, besides
+# their own: a coordinator that organises work for everyone.
+members_may_assign: ["tag:coordinator"]

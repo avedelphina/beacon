@@ -626,7 +626,7 @@ health:
 ```
 
 Later entries win, field by field. An agent that no entry matches gets no
-healing, 30 minutes, 72 hours, and 24 hours. Saving the policy is human-only, so an agent
+healing, 30 minutes, 72 hours, 24 hours, and no self-update of its sync. Saving the policy is human-only, so an agent
 cannot switch its own healing on or off. The Policy tab's **Check** shows what
 each agent ends up with.
 
@@ -654,6 +654,18 @@ each agent ends up with.
   a laptop that is off over a long weekend, use `7d`.
 - **`remind_after`** (default `24h`, or `never`) is how long a board card may
   wait on the agent before Beacon reminds it (see **Fleet board**).
+- **`update_sync`** (default `false`) lets the host sync replace itself. When it
+  is `true`, each pull carries the checksum of the sync script Beacon holds and
+  an address on Beacon itself to fetch it from. The sync downloads it with its
+  pull token (sent nowhere else), checks it against the announced checksum,
+  runs the new copy once with `--check` to prove that it starts, keeps the old
+  one as `sync.py.prev`, and swaps the new one in for its next run. A failure
+  leaves the running script alone and is not retried for an hour. This is Beacon
+  choosing the code that runs on a host, so it is off until a person turns it on
+  (saving the policy is human-only), and whoever controls Beacon controls those
+  scripts. Beacon records the checksum each sync reports, and the Agents tab
+  shows **sync outdated** against any host that runs an older copy. A host
+  needs one manual install of a version that has this feature first.
 
 The sync's findings arrive with its next pull, so a few minutes after the
 fact. Beacon keeps every change (`GET /api/agents/{id}/health-events`) and
@@ -802,6 +814,15 @@ tools. **A comment on a card assigned to an agent** (from a person, another
 agent, or a note on a card update) reaches that agent the same way, unless the
 assignee wrote it. Only the assignee is told: comments on an unassigned card,
 and state or field changes, send nothing.
+
+**Who may be given a card.** An operator may give a card to any agent in the
+mesh. A member (an agent's owner) may give one to their own agents, and to the
+agents the policy lists in `members_may_assign` (agent ids or `tag:` selectors,
+for example a coordinator that organises work for everyone). Only a person who
+saves the policy can change that list. The assignee fields are dropdowns of
+what the viewer may choose (`GET /api/board/assignees`). A member who edits a
+card keeps its current assignee, even when an operator gave it to someone
+else's agent.
 
 **What the agent answers is kept on the card.** An assignment, a comment, or a
 reminder reaches the agent as a mailbox notice, and the agent's answer to it is
