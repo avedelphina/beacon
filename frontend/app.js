@@ -966,7 +966,8 @@ async function renderBoard() {
       items.map((c) => `<button type="button" class="board-card" data-card="${esc(c.id)}">
         <span>#${esc(c.id)} ${esc(c.title)}</span>
         <span class="board-card-meta">${esc(c.assignee ?? "unassigned")}${c.project ? ` · ${esc(c.project)}` : ""}${
-          waiting[c.id] ? ` <span class="chip chip-warn">${waiting[c.id]} open request${waiting[c.id] > 1 ? "s" : ""}</span>` : ""}</span>
+          waiting[c.id] ? ` <span class="chip chip-warn">${waiting[c.id]} open request${waiting[c.id] > 1 ? "s" : ""}</span>` : ""}${
+          c.state !== "done" ? deliveryChip(c.delivery) : ""}</span>
       </button>`).join("")}</div>`;
   }).join("");
   el.querySelectorAll("[data-card]").forEach((b) => b.addEventListener("click", () => openCard(b.dataset.card)));
@@ -1022,13 +1023,31 @@ async function openCard(id) {
   history.scrollTop = history.scrollHeight;
 }
 
-// Comments are what people and agents wrote, so they read as text; moves, edits,
-// notices and reminders are Beacon's record of them and stay one quiet line.
+// Where the card's latest notice is: still waiting for the agent's sync, being
+// worked on, answered, or lost. While testing, this is what tells "has not
+// synced yet" from "is on it" from "something is wrong".
+const NOTICE_WORDS = {
+  queued: (to) => `waiting for ${to}'s sync`, delivering: (to) => `delivering to ${to}`,
+  working: (to) => `${to} is on it`, delivered: (to) => `${to} has it`,
+  failed: () => "notice failed", expired: () => "notice expired", uncertain: (to) => `${to} has it`,
+};
+
+function deliveryChip(d) {
+  if (!d) return "";
+  const words = d.answered_at ? `${d.to} answered` : (NOTICE_WORDS[d.state] || (() => d.state))(d.to);
+  const warn = d.state === "failed" || d.state === "expired";
+  return ` <span class="chip${warn ? " chip-warn" : ""}"${d.error ? ` title="${esc(d.error)}"` : ""}>${esc(words)}</span>`;
+}
+
+// Comments and answers are what people and agents wrote, so they read as text;
+// moves, edits, notices and reminders are Beacon's record and stay one quiet line.
 function cardEvent(e, when) {
-  const comment = e.kind === "comment";
+  const comment = e.kind === "comment" || e.kind === "answer";
+  const notice = e.notice && (NOTICE_WORDS[e.notice.state] || (() => e.notice.state))(e.notice.to);
   return `<li class="${comment ? "card-comment" : "card-event"}">
-    <div class="card-event-head"><strong>${esc(e.author)}</strong>${comment ? "" : `<span>${esc(e.kind.replace("_", " "))}</span>`}<time>${
-      when(e.created_at)}</time>${e.notice ? `<span class="chip">${esc(e.notice.state)}</span>` : ""}${
+    <div class="card-event-head"><strong>${esc(e.author)}</strong>${e.kind === "comment" ? "" : `<span>${esc(e.kind.replace("_", " "))}</span>`}<time>${
+      when(e.created_at)}</time>${e.notice ? `<span class="chip${["failed", "expired"].includes(e.notice.state) ? " chip-warn" : ""}"${
+        e.notice.last_error ? ` title="${esc(e.notice.last_error)}"` : ""}>${esc(notice)}</span>` : ""}${
       e.context_id ? `<code title="A2A context">${esc(e.context_id)}</code>` : ""}</div>
     <div class="card-text">${esc(e.body)}</div></li>`;
 }

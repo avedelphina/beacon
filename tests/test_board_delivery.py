@@ -132,10 +132,10 @@ def test_failed_delivery_is_distinguishable_from_assignment_success(net, monkeyp
     assert "refused" in notice["last_error"]
 
 
-def test_a_notice_without_an_answer_in_time_counts_as_delivered_and_is_not_resent(net, monkeypatch):
-    """A read timeout means the agent has the notice and is busy with it. A
-    notice needs no answer, so it is delivered; sending it again would hand
-    the agent the same assignment twice."""
+def test_a_notice_without_an_answer_in_time_is_working_and_is_not_resent(net, monkeypatch):
+    """A read timeout means the agent has the notice and is busy with it: it is
+    working, and its answer comes by push. Sending it again would hand the
+    agent the same assignment twice."""
     def timeout(agent, message, context_id=None, **kwargs):
         raise bus.Unreachable("no answer: read timeout", uncertain=True)
 
@@ -144,8 +144,19 @@ def test_a_notice_without_an_answer_in_time_counts_as_delivered_and_is_not_resen
     mailbox.deliver_pending("bravo")
 
     notice = _notice_event(board.get_card(card["id"]))["notice"]
-    assert notice["state"] == "delivered" and notice["attempts"] == 1
+    assert notice["state"] == "working" and notice["attempts"] == 1
     assert "read timeout" in notice["last_error"]
+    assert mailbox.task_view(notice["task_id"])["status"]["state"] == "TASK_STATE_WORKING"
+
+    # The turn ends; the agent pushes its answer, and the card keeps it, once.
+    done = {"statusUpdate": {"taskId": "t1", "status": {"state": "TASK_STATE_COMPLETED", "message": {
+        "role": "ROLE_AGENT", "parts": [{"text": "Shipped; card moved to review."}]}}}}
+    for _ in range(2):
+        assert mailbox.receive_push("bravo", int(notice["task_id"].removeprefix("mbx-")), done) is None
+    after = board.get_card(card["id"])
+    assert [(e["author"], e["body"]) for e in after["events"] if e["kind"] == "answer"] == [
+        ("bravo", "Shipped; card moved to review.")]
+    assert _notice_event(after)["notice"]["state"] == "delivered"
     assert mailbox.task_view(notice["task_id"])["status"]["state"] == "TASK_STATE_COMPLETED"
 
 

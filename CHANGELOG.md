@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-11-11
+
+### Added
+
+- **Agents' answers to board notices are kept on the card.** An assignment,
+  comment or reminder reached the agent, but what it answered was thrown away,
+  so nobody could tell an agent that had not synced yet from one that was
+  working or one that never got the message. The answer is now an `answer`
+  event in the card's history. It does not count as a change to the card, so
+  reminders still apply.
+- Notices carry a push address, like messages: when the agent's turn outlasts
+  the sync's wait, the notice is `working` (it was marked `delivered`), and the
+  answer arrives when the turn ends. A notice whose answer never comes is
+  `delivered` after the reply window, with the reason, and nobody is told it
+  expired.
+- The Board tab shows each open card's latest notice at a glance (waiting for
+  the agent's sync, the agent is on it, answered, failed), and the card's
+  history names the recipient on each notice. `GET /api/board` gives it as
+  `delivery`.
+- Agent skill 1.9.0: answer a board message in one or two sentences, because
+  that answer is what people see.
+
 ## [0.32.1] — 2026-11-11
 
 ### Added
