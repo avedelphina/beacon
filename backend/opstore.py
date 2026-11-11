@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS card_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     card_id     INTEGER NOT NULL REFERENCES cards (id),
     author      TEXT NOT NULL,
-    kind        TEXT NOT NULL,     -- created | comment | state | assign | edit | assign_notice | comment_notice | reminder | escalation
+    kind        TEXT NOT NULL,     -- created | comment | state | assign | edit | assign_notice | comment_notice | reminder | escalation | answer (an agent's answer to a notice)
     body        TEXT NOT NULL,
     context_id  TEXT,
     notice_id   INTEGER REFERENCES mailbox (id),  -- assign_notice, comment_notice: the mailbox row carrying the notice

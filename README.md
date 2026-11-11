@@ -803,6 +803,17 @@ agent, or a note on a card update) reaches that agent the same way, unless the
 assignee wrote it. Only the assignee is told: comments on an unassigned card,
 and state or field changes, send nothing.
 
+**What the agent answers is kept on the card.** An assignment, a comment, or a
+reminder reaches the agent as a mailbox notice, and the agent's answer to it is
+recorded in the card's history as an `answer`: its acknowledgement, in its own
+words. A notice carries a push address like a message, so when the agent's turn
+outlasts the sync's wait, the notice shows `working` and the answer still comes
+back when the turn ends. An answer is not a change to the card (reminders still
+count from the last real change). The Board tab shows, on each open card, where
+its latest notice is: waiting for the agent's sync, being delivered, the agent
+is on it, the agent has it, the agent answered, or the notice failed (the error
+is in the tooltip).
+
 **A card that nothing happens on is brought up again.** An agent acts only in a
 turn, so a card it was told about once can sit for days. When nothing has
 changed on a card for the agent's `remind_after` (the policy's `health` list,

@@ -49,6 +49,10 @@ HANDOFF_SECONDS = 90
 WORK_DEADLINE_SECONDS = mesh.REPLY_WINDOW_SECONDS + 15 * 60
 # Hermes cuts the text in a push here; a longer answer is fetched with GetTask.
 PUSH_TEXT_LIMIT = 2000
+# What an agent's answer is kept for: a message's goes back to its sender; a
+# notice's is the agent's acknowledgement, kept on the card it was about
+# (board.record_answer). Both come late by push when the turn outlasts the wait.
+ANSWERED = ("message", "notice")
 FINAL_STATES = {"TASK_STATE_COMPLETED", "TASK_STATE_INPUT_REQUIRED", "TASK_STATE_FAILED",
                 "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"}
 
@@ -159,6 +163,8 @@ def receive_push(recipient_id: str, message_id: int, payload: dict) -> str | Non
             text = bus.get_task(store.get_agent(recipient_id), str(update["taskId"]))["reply"] or text
         except (bus.Unreachable, store.NotFound):
             pass  # keep the cut text rather than nothing
+    if _notice_answered(message_id, text):
+        return None
     return _record_result(message_id, text or f"(no text; task state {status['state']})")
 
 
@@ -250,7 +256,7 @@ def deliver_pending(recipient_id: str) -> None:
         if not _allowed(row, agent):
             continue
         is_message = row["kind"] == "message"
-        url = push_url(recipient_id, row["id"]) if is_message else None
+        url = push_url(recipient_id, row["id"]) if row["kind"] in ANSWERED else None
         try:
             view = bus.call(agent, _framed(row), row["context_id"] if is_message else None,
                             token=_delivery_token(row, recipient_id), timeout=HANDOFF_SECONDS, push_url=url)
@@ -286,7 +292,7 @@ def claim_for_pull(recipient_id: str, limit: int = 10) -> list[dict]:
             is_message = row["kind"] == "message"
             items.append({"id": row["id"], "text": _framed(row), "token": _delivery_token(row, recipient_id),
                           "context_id": row["context_id"] if is_message else None,
-                          "push_url": push_url(recipient_id, row["id"]) if is_message else None})
+                          "push_url": push_url(recipient_id, row["id"]) if row["kind"] in ANSWERED else None})
     return items
 
 
@@ -334,10 +340,30 @@ def _allowed(row, agent) -> bool:
 def _delivered(row, reply: str) -> str | None:
     """Mark delivered; for a message, keep the reply for the original sender.
     Returns that sender when it is an agent (its reply now needs delivery)."""
+    if row["kind"] == "notice":
+        _notice_answered(row["id"], reply)
+        return None
     if row["kind"] != "message":
         _finish(row["id"], "delivered")
         return None
     return _record_result(row["id"], reply)
+
+
+def _notice_answered(message_id: int, text: str) -> bool:
+    """Settle a notice exactly once, whichever arrives first (the delivery's
+    own answer or the agent's push), and keep what the agent said on the card.
+    False when the row is not a notice."""
+    with opstore.connect() as db:
+        row = db.execute("SELECT * FROM mailbox WHERE id = ? AND kind = 'notice'", (message_id,)).fetchone()
+        if row is None:
+            return False
+        settled = db.execute("UPDATE mailbox SET state = 'delivered', last_error = NULL, updated_at = ?"
+                             " WHERE id = ? AND state IN ('delivering', 'working')",
+                             (time.time(), message_id)).rowcount
+    if settled and text and not text.startswith("(no text"):
+        from . import board  # lazy: board imports this module
+        board.record_answer(message_id, row["recipient"], text)
+    return True
 
 
 def _record_result(message_id: int, text: str) -> str | None:
@@ -369,10 +395,14 @@ def _record_result(message_id: int, text: str) -> str | None:
 
 
 def _handed_off(row, pushed: bool, error: str) -> None:
-    """No answer within the wait, but it arrived, so it is never sent again. A
-    message waits for the agent's push (or is uncertain without one); a notice
-    or reply needs no answer, so it counts as delivered."""
-    state = "delivered" if row["kind"] != "message" else "working" if pushed else "uncertain"
+    """No answer within the wait, but it arrived, so it is never sent again.
+    With a push on its way, a message or notice is "working" until the answer
+    comes; without one, a message is uncertain, and a notice or reply (which
+    nobody waits for) counts as delivered."""
+    if pushed and row["kind"] in ANSWERED:
+        state = "working"
+    else:
+        state = "uncertain" if row["kind"] == "message" else "delivered"
     _move(row["id"], "delivering", state, error)
 
 
@@ -427,6 +457,13 @@ def _expire() -> None:
                           (now, now - WORK_DEADLINE_SECONDS)).fetchall()
         for row in rows:
             undelivered = row["state"] == "queued"
+            if row["kind"] == "notice" and not undelivered:
+                # It arrived; only the answer never came back, and nobody waits for it.
+                db.execute("UPDATE mailbox SET state = 'delivered', last_error = ?, updated_at = ?"
+                           " WHERE id = ? AND state = ?",
+                           (f"no answer came back within {mesh.REPLY_WINDOW_SECONDS // 3600} h", now,
+                            row["id"], row["state"]))
+                continue
             why = (f"Your message to {row['recipient']} from {_when(row['created_at'])} expired undelivered"
                    if undelivered else
                    f"{row['recipient']} did not answer your message from {_when(row['created_at'])} within "

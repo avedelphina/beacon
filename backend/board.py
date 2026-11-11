@@ -33,6 +33,7 @@ from . import mailbox, mesh, opstore, store
 
 STATES = ("todo", "doing", "blocked", "review", "done")
 NOTICE_BODY = 600
+ANSWER_CHARS = 1500
 
 
 def list_cards(project: str | None = None, assignee: str | None = None, state: str | None = None,
@@ -47,7 +48,37 @@ def list_cards(project: str | None = None, assignee: str | None = None, state: s
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with opstore.connect() as db:
         rows = db.execute(f"SELECT * FROM cards {where} ORDER BY updated_at DESC", params).fetchall()
-    return [_card(row) for row in rows]
+        delivery = _deliveries(db)
+    return [_card(row) | {"delivery": delivery.get(row["id"])} for row in rows]
+
+
+def _deliveries(db) -> dict[int, dict]:
+    """Per card, its latest notice and whether the agent answered it: so the
+    board shows at a glance whether an agent still has to sync, is working on
+    it, or answered, without opening each card."""
+    out = {}
+    for row in db.execute(
+            "SELECT e.card_id, m.recipient, m.state, m.created_at, m.last_error FROM card_events e"
+            " JOIN mailbox m ON m.id = e.notice_id WHERE e.id IN"
+            " (SELECT max(id) FROM card_events WHERE notice_id IS NOT NULL GROUP BY card_id)"):
+        out[row["card_id"]] = {"to": row["recipient"], "state": row["state"], "sent_at": row["created_at"],
+                               "error": row["last_error"], "answered_at": None}
+    for row in db.execute("SELECT card_id, max(created_at) AS at FROM card_events WHERE kind = 'answer'"
+                          " GROUP BY card_id"):
+        if row["card_id"] in out and row["at"] >= out[row["card_id"]]["sent_at"]:
+            out[row["card_id"]]["answered_at"] = row["at"]
+    return out
+
+
+def record_answer(notice_id: int, agent: str, text: str) -> None:
+    """What an agent said when a board notice (assignment, comment, reminder)
+    reached it: its acknowledgement, kept on each card the notice was about, so
+    a person sees that it arrived and what the agent made of it. Not a change
+    to the card (updated_at stays): an agent that only says "will do" is still
+    reminded when nothing else happens."""
+    with opstore.connect() as db:
+        for row in db.execute("SELECT DISTINCT card_id FROM card_events WHERE notice_id = ?", (notice_id,)).fetchall():
+            _event(db, row["card_id"], agent, "answer", text.strip()[:ANSWER_CHARS])
 
 
 def get_card(card_id: int) -> dict:
@@ -66,7 +97,7 @@ def get_card(card_id: int) -> dict:
         if notice_ids:
             placeholders = ",".join("?" * len(notice_ids))
             for row in db.execute(f"SELECT * FROM mailbox WHERE id IN ({placeholders})", notice_ids):
-                notices[row["id"]] = {"task_id": f"mbx-{row['id']}", "state": row["state"],
+                notices[row["id"]] = {"task_id": f"mbx-{row['id']}", "to": row["recipient"], "state": row["state"],
                                       "attempts": row["attempts"], "last_error": row["last_error"],
                                       "updated_at": row["updated_at"]}
     out_events = []

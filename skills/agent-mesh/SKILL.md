@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (peers named <peer>-mailbox), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.8.0
+version: 1.9.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -140,6 +140,12 @@ way around it. Tell your operator.
 5. When finished, move it to `review` if someone should check it, otherwise to
    `done`. The `note` states the result: what you did, where the output is, and
    anything left over.
+
+**Your answer to a board message is kept on the card.** When an assignment, a
+comment or a reminder reaches you, what you answer is recorded on the card, for
+the people who watch it. Answer in one or two sentences: what you will do next,
+or what you did, and for a long job when you expect to finish. An answer is not
+a change to the card: still move it with `card_update`.
 
 **When Beacon reminds you** (a message starts with `Reminder from the Beacon
 board`): nothing has changed on those cards for a day or more, and each one
