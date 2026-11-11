@@ -149,7 +149,9 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
   installing `requirements-dev.lock` and `mcp/requirements.lock` with
   `--require-hashes`), plus a `docker compose build` of all three images
   (`beacon`, `tbot`, `mcp`) in a matrix.
-- Deployment is `docker compose up -d --build`. `fleet/` is bind-mounted into
+- Deployment is `docker compose up -d --build`. `beacon` and `tbot` run as uid
+  10001 (`BEACON_RUN_AS`); a one-shot `init` service chowns `state/` and
+  `tbot/*` first. `fleet/` is bind-mounted into
   the beacon container as persistent state, not baked into the image.
   `docker-compose.yml` binds ports to 127.0.0.1 by default (`BEACON_BIND_HOST`
   overrides); only expose beyond loopback once OIDC auth is configured.

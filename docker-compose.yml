@@ -10,6 +10,21 @@
 # ./tbot/storage from a prior `tbot/run.sh` — tbot renews from its own
 # stored identity after that and never needs the token again.
 services:
+  # Runs once before the others and hands the directories they write to the user
+  # they run as, so an upgrade needs no manual chown. It is the only container
+  # that runs as root. BEACON_RUN_AS=0:0 keeps everything as root, as before 0.32.
+  init:
+    build: .
+    user: "0:0"
+    entrypoint: ["sh", "-c", 'chown -R "$$RUN_AS" /state /tbot-data /tbot-storage']
+    environment:
+      - RUN_AS=${BEACON_RUN_AS:-10001:10001}
+    volumes:
+      - ./state:/state
+      - ./tbot/data:/tbot-data
+      - ./tbot/storage:/tbot-storage
+    restart: "no"
+
   tbot:
     build: ./tbot
     volumes:
@@ -22,7 +37,10 @@ services:
       - --storage=file:///tbot-storage
       - --proxy-server=${TELEPORT_PROXY_SERVER:-teleport.example.com:443}
       - --join-method=token
-    user: ${BEACON_RUN_AS:-}
+    user: ${BEACON_RUN_AS:-10001:10001}
+    depends_on:
+      init:
+        condition: service_completed_successfully
     mem_limit: ${TBOT_MEM_LIMIT:-256m}
     restart: unless-stopped
 
@@ -65,7 +83,10 @@ services:
       # can reach directly: they could then claim any address or scheme.
       - FORWARDED_ALLOW_IPS=${BEACON_TRUSTED_PROXIES:-127.0.0.1}
     depends_on:
-      - tbot
+      init:
+        condition: service_completed_successfully
+      tbot:
+        condition: service_started
     # /manifest.json is served without a session, so this works with OIDC on.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8642/manifest.json', timeout=3)"]
@@ -73,9 +94,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
-    # Empty (the default) runs as root, as before. BEACON_RUN_AS=10001:10001 runs
-    # unprivileged once ./state and ./tbot/data|storage are owned by that user.
-    user: ${BEACON_RUN_AS:-}
+    # Unprivileged by default; the init service owns ./state and ./tbot/* for this
+    # user first. Set BEACON_RUN_AS=0:0 to run as root.
+    user: ${BEACON_RUN_AS:-10001:10001}
     mem_limit: ${BEACON_MEM_LIMIT:-1g}
     restart: unless-stopped
 

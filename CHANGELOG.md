@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-11-11
+
+### Changed
+
+- **`beacon` and `tbot` now run unprivileged by default** (uid 10001, as `mcp`
+  already did). A one-shot `init` service runs first and owns `./state`,
+  `./tbot/data` and `./tbot/storage` for that user, so upgrading is
+  `docker compose up -d --build` with no manual `chown`. `BEACON_RUN_AS=0:0`
+  restores root. Closes #25.
+- **Upgrade notes.** A static SSH key in `./ssh` must be readable by uid 10001
+  (`sudo chown 10001 ssh/fleet_ed25519`); `init` leaves `./ssh` alone. Files
+  under `./state` and `./tbot` are now owned by 10001, so editing them by hand
+  needs `sudo`. See README, "Running unprivileged".
+
 ## [0.31.1] — 2026-11-10
 
 ### Added
