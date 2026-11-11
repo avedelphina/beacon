@@ -1055,6 +1055,7 @@ document.getElementById("card-update-form").addEventListener("submit", async (e)
   }
 });
 
+document.getElementById("refresh-board").addEventListener("click", renderBoard);
 document.getElementById("add-card").addEventListener("click", () => {
   document.getElementById("card-create-form").reset();
   openModal("card-create-modal");
