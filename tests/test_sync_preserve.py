@@ -159,3 +159,33 @@ def test_adopt_marks_the_current_state_as_beacons_without_changing_anything(host
     host.sync.sync(host.state)
     assert host.values()["A2A_PEER_TOKENS"] == "beacon:tk-beacon"
     assert host.calls() == ["config unset a2a_agents.bravo"]
+
+
+def test_when_beacon_is_unreachable_a_peer_with_a_direct_address_goes_direct_until_beacon_is_back(host):
+    def mesh_with_direct():
+        mesh = _mesh(peers=())
+        mesh["outbound"] = [
+            {"name": "bravo", "url": "https://beacon.test/a2a/bravo", "token": "tk-bravo-out", "capabilities": ["chat", "mailbox"]},
+            {"name": "bravo-direct", "url": "http://bravo.test:9900", "token": "tk-bravo-out", "capabilities": ["chat"]},
+        ]
+        return mesh
+
+    host.serve(mesh_with_direct())
+    host.sync.sync(host.state)
+    host.log.unlink()
+
+    (host.beacon_dir / "alpha").unlink()  # Beacon cannot be reached: the pull fails
+    host.sync.sync(host.state)
+
+    direct = host.sync.peer_list({"outbound": [{"name": "bravo", "url": "http://bravo.test:9900",
+                                                "capabilities": ["chat"]}]})["bravo"]
+    assert host.calls() == ["config set --force a2a_agents.bravo " + json.dumps(direct)]
+    host.log.unlink()
+
+    host.sync.sync(host.state)  # still down: nothing changes again
+    assert host.calls() == []
+
+    host.serve(mesh_with_direct())  # back: the mailbox route is restored
+    host.sync.sync(host.state)
+    assert host.calls() == ["config set --force a2a_agents.bravo " + json.dumps(
+        host.sync.peer_list(mesh_with_direct())["bravo"])]

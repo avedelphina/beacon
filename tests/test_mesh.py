@@ -445,3 +445,14 @@ def test_a_refused_restart_is_retried_until_it_succeeds(synced, host, tmp_path):
     restarts = _argv(host).count("gateway restart")
     sync.sync(state)
     assert _argv(host).count("gateway restart") == restarts  # settled: no more attempts
+
+
+def test_plain_peer_name_goes_through_the_mailbox_when_beacon_is_known(two_agents, monkeypatch):
+    monkeypatch.setattr(mesh, "public_url", lambda: "https://beacon.test")
+    outbound = {entry["name"]: entry for entry in mesh.config("alpha")["outbound"]}
+
+    assert outbound["bravo"]["url"] == "https://beacon.test/a2a/bravo"
+    assert "mailbox" in outbound["bravo"]["capabilities"]
+    assert outbound["bravo-mailbox"]["url"] == outbound["bravo"]["url"]
+    assert outbound["bravo-direct"]["url"] == "http://bravo.test:9900"
+    assert outbound["bravo-direct"]["token"] == mesh.token("alpha", "bravo")

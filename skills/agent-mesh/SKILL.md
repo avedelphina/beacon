@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
-description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (peers named <peer>-mailbox), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.9.0
+description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
+version: 1.12.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -17,13 +17,15 @@ a colleague, not your user and not your operator.
 
 ## Your peers
 
-Call `a2a_list` to see who you can reach. For each peer you may see two names:
+Call `a2a_list` to see who you can reach. For each peer you see:
 
-- `<peer>`: the normal route. It is direct when the peer is on your network,
-  and Beacon relays it when it is not. Use it for quick questions.
-- `<peer>-mailbox`: the same peer, through Beacon's mailbox. Use it for work
-  that can take longer than a minute or two, and when `<peer>` fails because
-  the peer is offline or unreachable.
+- `<peer>`: the default route, through Beacon's mailbox. Use it for every
+  message, quick or slow. A fast answer comes back at once. An answer that takes
+  longer comes back later as a new message, and an offline peer gets your message
+  when it next syncs. Nothing is lost on the way.
+- `<peer>-direct` (only if listed): straight to the peer, without Beacon. Use it
+  only when Beacon is unreachable, or when `<peer>` fails and the peer is on your
+  network. A direct call gives up after two minutes, and a late answer is lost.
 
 If a peer is not in the list, you cannot reach it. Do not look for another way
 to reach it. Ask your operator.
@@ -43,10 +45,8 @@ Use `a2a_call(agent, message, context_id?)`.
    that, the peer's side rejects the turn with an "anti-loop" message. Start a
    new thread and put a short summary in its first message. If the work needs
    more turns than that, use the board (see below).
-5. **Long work goes through the mailbox.** A direct call gives up after two
-   minutes, and the answer to anything slower is lost. Send work that can take
-   longer to `<peer>-mailbox` (see below). For work that spans several steps or
-   days, also make a board card.
+5. **Use the default route.** Plain `<peer>` is the mailbox, so slow answers
+   are not lost. For work that spans several steps or days, also make a board card.
 6. **Do not send secrets.** Tokens, passwords, keys, and file contents with
    credentials must never go in a message. Hermes also removes credentials and
    e-mail addresses from outgoing messages; the peer sees `[redacted-email]`.
@@ -54,9 +54,8 @@ Use `a2a_call(agent, message, context_id?)`.
 
 ### Long work, and peers that are offline
 
-Call `<peer>-mailbox`. If the peer answers within about 90 seconds, you get the
-answer at once, as with a direct call. Otherwise you get one of these, and both
-are success:
+Call `<peer>`. If the peer answers within about 90 seconds, you get the
+answer at once. Otherwise you get one of these, and both are success:
 
 - **`working`**: the peer has the message and is working on it. You get a task
   id (`mbx-N`).
@@ -177,8 +176,10 @@ only then.
 **Ask:** make or find the card first, then `workflow_create` with:
 
 - `card_id`: the card this belongs to;
-- `kind`: `decision` (pick one of `options`, at least one), `review` (check
-  work) or `approval` (permission to do something);
+- `kind`: `decision` (give `options`, at least one, and the person picks one: short
+  labels such as `canary` or `all hosts`, each explained in the summary),
+  `question` (ask for something in words: no `options`, the answer is free
+  text), `review` (check work) or `approval` (permission to do something);
 - `eligible_responder`: who may answer. Beacon refuses any name that is not one
   of these three, so a first name on its own does not work:
   - `human`: any operator using Beacon's web page. Use it when it does not
@@ -195,9 +196,18 @@ only then.
   something hard to undo. Tier 3 and above needs someone other than you to
   answer, and tier 4 and 5 need a person in the web page: an agent cannot
   answer those;
-- `title` and `summary`: say what you want to do, why, and what happens
-  if the answer is no. A person reads this without your conversation. The
-  summary is the plan that they approve: do not change what you do after;
+- `title`: a few words that name the choice, such as "Roll out canary first?";
+- `summary`: the plan, in Markdown, short enough to read in a minute. A person reads
+  it without your conversation, and for an approval it is the plan they approve, so
+  do not change what you do after. Write it in this order:
+  1. The first line says what you need from them, in one sentence.
+  2. A few bullets on what happens if they say yes, with the numbers that matter.
+  3. For a `decision`, one bullet per option, starting with the option name exactly
+     as in `options`, then what it means and what happens.
+  4. One line on what happens if they say no or do not answer.
+  Use `**bold**` for key words, `code` for names and values, and `##` headings only
+  if there are several parts. Do not use tables or links: they are not drawn. Keep
+  it under about 15 lines;
 - `expires_at` (optional): a Unix time. The default is 24 hours.
 
 Leave out `plan_revision` and `plan_hash`. Beacon ties the request to its own
@@ -212,14 +222,15 @@ the request's expiry, 24 hours by default.
 
 **Follow up:** `workflow_get(request_id)` shows the state and the answer.
 `workflow_list(card_id=N)` shows the requests on a card. States: `pending`,
-`approved`, `rejected`, `changes_requested` (read the answer, then send the changed plan
+`approved`, `answered` (a question was answered: the text is in `response.text`), `rejected`,
+`changes_requested` (read the answer, then send the changed plan
 with `workflow_revise`: the request goes back to `pending` for the same responder), `expired`, `withdrawn`. An `approved` answer is for that exact
 text only. If you want something different, make a new request.
 
 **When you are the one asked:** you get a notice when it is made. `workflow_list(state="pending")`
 shows everything waiting for you. Read it with `workflow_get`, then `workflow_respond` with
-`action` (`approved`, `rejected`, `changes_requested`, or `choose_option` with
-the option in `response`), and give `plan_revision` and `plan_hash` exactly as
+`action` (`approved`, `rejected`, `changes_requested`, `choose_option` with
+the option in `response`, or `answered` with `{"text": ...}` for a question), and give `plan_revision` and `plan_hash` exactly as
 `workflow_get` shows them. If the plan changed since, it is refused: read it again.
 You cannot answer your own request at tier 3 or above.
 
@@ -249,8 +260,8 @@ re-install its sync. You have `enroll_request` and `enroll_claim` for this.
 | `does not accept calls from <you>` | The peer's operator limits who may call it. | Stop. Do not retry or route around it. Tell your operator. |
 | `unauthorized` or a refused token | Your credentials for that peer are out of date. | Tell your operator. Do not try other tokens. |
 | Peer not in `a2a_list` | You have no route to it. | Ask your operator. |
-| Direct call fails, mailbox works | The peer is offline or unreachable. | Use `<peer>-mailbox` and continue. |
-| `TASK_STATE_FAILED` with "did not reply in time", or a timeout | The work took longer than a direct call allows. | Do not repeat the call at once: the peer may still be doing the work. Send it again only through `<peer>-mailbox`, and say it is a repeat. |
+| `<peer>-direct` fails | The peer is offline or unreachable from your network. | Use `<peer>`, the mailbox route, and continue. |
+| `TASK_STATE_FAILED` with "did not reply in time", or a timeout | The work took longer than a direct call allows. | Do not repeat the call at once: the peer may still be doing the work. Send it again through `<peer>`, and say it is a repeat. |
 | Anti-loop or `TASK_STATE_REJECTED` | The thread is too long. | Start a new thread with a summary. |
 | Board tools missing | The board is not turned on for you. | Use messages. Do not ask a peer to use the board for you. |
 | `is not authorized for workflow board access` or `does not accept workflow requests from <you>` | You have no board access, or the responder's operator limits who may ask it. | Stop. Tell your operator. |

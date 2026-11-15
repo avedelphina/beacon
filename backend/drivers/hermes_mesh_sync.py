@@ -67,7 +67,7 @@ MAX_LOG_BYTES = 1_000_000
 MAX_SYNC_BYTES = 1_000_000
 UPDATE_RETRY_SECONDS = 3600
 # Announces that this sync delivers held messages itself (pull delivery).
-SYNC_VERSION = "2"
+SYNC_VERSION = "3"
 # How long to wait for the agent's answer before leaving it to the agent's
 # push to Beacon (backend/mailbox.py), so one long task never holds the sync.
 LOCAL_REPLY_TIMEOUT = 60
@@ -134,6 +134,10 @@ def env_settings(mesh: dict, pull_token: str, managed: dict, current: dict) -> d
     return settings
 
 
+# Marks a peer whose entry was switched to its direct address because Beacon is unreachable.
+DIRECT_NOW = "direct"
+
+
 def peer_list(mesh: dict) -> dict:
     return {
         peer["name"]: {
@@ -143,6 +147,22 @@ def peer_list(mesh: dict) -> dict:
         }
         for peer in mesh["outbound"]
     }
+
+
+def fall_back_to_direct(cfg: dict, state: Path) -> None:
+    """Beacon is unreachable, so the mailbox route is down with it. A peer that
+    has a direct address (`<peer>-direct` in the last pull) goes direct until a
+    pull works again; the next successful pull sets the mailbox route back, because
+    the recorded state no longer matches its entry (backend/mesh.py)."""
+    managed = load_managed(state)
+    for name, direct in managed.get("direct", {}).items():
+        if managed["peers"].get(name) == DIRECT_NOW:
+            continue
+        entry = peer_list({"outbound": [{"name": name, **direct}]})[name]
+        run_hermes(cfg, ["config", "set", "--force", f"a2a_agents.{name}", json.dumps(entry)])
+        managed["peers"][name] = DIRECT_NOW
+        save_managed(state, managed)
+        log(f"Beacon unreachable: {name} goes direct")
 
 
 def digest(entry: dict) -> str:
@@ -597,6 +617,7 @@ def sync(state: Path) -> int:
                 mesh = json.load(response)
         except Exception as exc:
             log(f"Beacon unreachable, keeping the last applied config: {exc}")
+            fall_back_to_direct(cfg, state)
             return 0
 
         # Beacon announces where it lives; follow it, so moving Beacon needs
@@ -619,6 +640,9 @@ def sync(state: Path) -> int:
         if managed["peers"] != before:
             log(f"peer list: {', '.join(managed['peers']) or '(none)'}")
         managed["inbound"], managed["token_envs"] = list(mesh["inbound"]), new_token_envs(mesh)
+        # The direct address of each peer that has one, for the next time Beacon cannot be reached.
+        managed["direct"] = {p["name"][:-len("-direct")]: {"url": p["url"], "capabilities": p.get("capabilities", [])}
+                             for p in mesh["outbound"] if p["name"].endswith("-direct")}
         save_managed(state, managed)
 
         # Hermes connects MCP servers when the gateway starts: a change to the

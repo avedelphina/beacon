@@ -239,7 +239,7 @@ PWA_FILES = frozenset({"/manifest.json", "/sw.js", "/icon-192.png", "/icon-512.p
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Gates every request except /auth/*, /mesh/*, /a2a/*, /board/* and /enroll/* behind a logged-in session.
+    """Gates every request except /auth/*, /mesh/*, /a2a/*, /board/*, /enroll/* and /intake/* behind a logged-in session.
     A member's session reaches only the few routes in backend/members.py.
     JSON API paths get a 401; anything else (the GUI) gets redirected to
     /auth/login — a plain GET to `/` shouldn't have to know it needs auth,
@@ -251,7 +251,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # token themselves (backend/mesh.py, mailbox.py, board_mcp.py) — a
         # session must not unlock them. /enroll/* is a single-use code that
         # a person minted (backend/onboarding.py): the host fetching it has no session.
-        if request.url.path.startswith(("/auth/", "/mesh/", "/a2a/", "/board/", "/enroll/")):
+        # /intake/* is signed per request with BEACON_INTAKE_SECRET (backend/intake.py): a forge has no session.
+        if request.url.path.startswith(("/auth/", "/mesh/", "/a2a/", "/board/", "/enroll/", "/intake/")):
             return await call_next(request)
         if request.url.path in PWA_FILES:
             return await call_next(request)

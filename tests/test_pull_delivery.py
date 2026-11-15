@@ -182,7 +182,7 @@ def test_sync_delivers_held_messages_locally_and_reports(host):
 
     sync.sync(state)
 
-    assert net.version == "2"
+    assert net.version == "3"
     (auth, message), = net.agent_calls
     assert auth == "Bearer tok-bravo-alpha"  # delivered as the original sender
     assert message["parts"][0]["text"].endswith("hi") and message["contextId"] == "ctx-1"

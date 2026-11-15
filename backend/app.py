@@ -3,6 +3,7 @@ import datetime
 import hashlib
 import hmac
 import logging
+import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import audit, auth, availability, board, bus, cron_store, fleet, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow
+from . import audit, auth, availability, board, bus, cron_store, fleet, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, CronJob, Host
@@ -81,7 +82,7 @@ async def lifespan(_app):
         yield
 
 
-VERSION = "0.34.0"
+VERSION = "0.35.0"
 
 
 async def _record_actor(request: Request) -> None:
@@ -749,6 +750,45 @@ def _a2a_error(req_id, code: int, message: str, status: int) -> JSONResponse:
                         status_code=status)
 
 
+class IntakeVisibilityRequest(BaseModel):
+    members: bool
+    agents: bool
+
+
+@app.get("/api/intake/visibility")
+def intake_visibility() -> dict:
+    return intake.visibility()
+
+
+@app.put("/api/intake/visibility")
+def set_intake_visibility(body: IntakeVisibilityRequest, request: Request) -> dict:
+    """Who besides operators may see intake cards. Only a person in the web page may change it."""
+    if not _workflow_human(request):
+        raise HTTPException(403, "only a person in the web page may change who sees intake cards")
+    return intake.set_visibility(_board_author(request), members=body.members, agents=body.agents)
+
+
+@app.post("/intake/{source}")
+async def intake_event(source: str, request: Request):
+    """An outside event, signed with BEACON_INTAKE_SECRET, becomes a triage card (backend/intake.py).
+    Refused, not queued, when the signature is wrong: nothing is recorded for an unsigned event."""
+    if not intake.enabled():
+        raise HTTPException(404)
+    if int(request.headers.get("content-length") or 0) > intake.MAX_BYTES:
+        return JSONResponse({"detail": "event is too large"}, status_code=413)
+    body = await request.body()
+    try:
+        intake.verify(os.environ[intake.SECRET_ENV], body,
+                      request.headers.get("x-hub-signature-256"))
+        card = await run_in_threadpool(intake.record, source, request.headers.get("x-gitea-event")
+                                       or request.headers.get("x-github-event"), body)
+    except intake.IntakeRefused as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=401)
+    except intake.IntakeError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    return JSONResponse({"card_id": card["id"]}, status_code=202)
+
+
 @app.post("/a2a/{id_}")
 async def a2a_mailbox(id_: str, request: Request):
     """The Beacon mailbox, speaking A2A on behalf of agent `id_` (relay now,
@@ -868,7 +908,7 @@ def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None
     except Exception:  # a reminder problem must never cost an agent its config
         logger.exception("board reminders on %s's pull failed", id_)
     config = mesh.config(id_)
-    if x_beacon_sync_version == "2":
+    if x_beacon_sync_version in ("2", "3"):  # 3 adds the direct fallback; it delivers the same way
         # The sync delivers held messages to the agent on its own host and
         # reports back: Beacon never has to reach the agent (pull delivery).
         config["inbox"] = mailbox.claim_for_pull(id_)

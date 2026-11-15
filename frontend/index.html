@@ -16,10 +16,10 @@
 <header class="topbar">
   <div class="brand"><span class="dot"></span>BEACON <span class="hint" id="beacon-version"></span></div>
   <nav class="tabs">
-    <button class="tab op-only active" data-tab="hosts">Hosts</button>
+    <button class="tab active" data-tab="workflows">Workflows</button>
+    <button class="tab op-only" data-tab="hosts">Hosts</button>
     <button class="tab" data-tab="agents">Agents</button>
     <button class="tab" data-tab="board">Board</button>
-    <button class="tab" data-tab="workflows">Workflows</button>
     <button class="tab op-only" data-tab="policy">Policy</button>
     <button class="tab op-only" data-tab="templates">Templates</button>
     <button class="tab op-only" data-tab="cron-jobs">Cron jobs</button>
@@ -33,7 +33,7 @@
 
 <main class="page">
 
-  <section id="hosts-view" class="view active">
+  <section id="hosts-view" class="view">
     <div class="view-head">
       <h1>Hosts</h1>
       <button class="btn primary" id="add-host">+ Add host</button>
@@ -82,6 +82,12 @@
   </section>
 
   <section id="board-view" class="view">
+    <div class="intake-visibility op-only" id="intake-visibility" hidden>
+      <span>Intake cards (outside events) are visible to operators, and also to:</span>
+      <label><input type="checkbox" id="intake-see-members"> members</label>
+      <label><input type="checkbox" id="intake-see-agents"> agents</label>
+      <span class="hint" id="intake-visibility-by"></span>
+    </div>
     <div class="view-head">
       <h1>Board</h1>
       <span><button class="btn" id="refresh-board" type="button">Refresh</button>
@@ -91,12 +97,12 @@
     <div class="board" id="board-columns"></div>
   </section>
 
-  <section id="workflows-view" class="view">
+  <section id="workflows-view" class="view active">
     <div class="view-head">
       <h1>Workflows</h1>
       <button class="btn" id="workflows-refresh" type="button">Refresh</button>
     </div>
-    <p class="hint" style="margin:-0.6rem 0 1rem">Typed decision, review, and approval requests attached to board cards. Responses are bound to the exact plan revision and hash shown here.</p>
+    <p class="hint" style="margin:-0.6rem 0 1rem">Requests from agents and people, attached to board cards: decisions (pick an option), questions (answer in words), reviews, and approvals. Responses are bound to the exact plan revision and hash shown here.</p>
     <div class="workflow-list" id="workflow-list"></div>
     <p class="empty" id="workflows-empty" hidden>No workflow requests.</p>
   </section>

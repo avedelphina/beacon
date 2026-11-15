@@ -15,12 +15,12 @@ from typing import Any
 
 from . import mesh, notify, opstore, store
 
-REQUEST_KINDS = ("decision", "review", "approval")
+REQUEST_KINDS = ("decision", "review", "approval", "question")
 STATES = (
     "pending", "approved", "claimed", "rejected", "changes_requested", "expired", "withdrawn",
-    "stale", "executed", "verified", "failed", "execution_uncertain",
+    "stale", "executed", "verified", "failed", "execution_uncertain", "answered",
 )
-RESPONSE_ACTIONS = ("approved", "rejected", "changes_requested", "withdrawn", "choose_option")
+RESPONSE_ACTIONS = ("approved", "rejected", "changes_requested", "withdrawn", "choose_option", "answered")
 
 
 class WorkflowError(ValueError):
@@ -222,6 +222,8 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
         raise WorkflowError("options must not contain duplicates")
     if kind == "decision" and not options:
         raise WorkflowError("decision requests require at least one option")
+    if kind == "question" and options:
+        raise WorkflowError("question requests take no options: the responder writes the answer")
     target = target or {}
     if not isinstance(target, dict):
         raise WorkflowError("target must be an object")
@@ -262,7 +264,7 @@ def list_requests(*, card_id: int | None = None, state: str | None = None,
             clauses.append("state = ?")
             params.append(state)
         if not include_done:
-            clauses.append("state NOT IN ('executed', 'verified', 'failed', 'execution_uncertain', 'rejected', 'withdrawn', 'expired', 'stale')")
+            clauses.append("state NOT IN ('executed', 'verified', 'failed', 'execution_uncertain', 'rejected', 'withdrawn', 'expired', 'stale', 'answered')")
         if actor is not None:
             if human:
                 clauses.append("(requester = ? OR lower(eligible_responder) = lower(?) OR eligible_responder = 'human')")
@@ -320,6 +322,17 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
             })
             db.commit()
             raise StalePlan("plan revision/hash no longer matches this workflow request")
+        if request["kind"] == "question":
+            # A question is answered in free text, or declined. Nothing else applies to it.
+            if action not in ("answered", "rejected"):
+                raise WorkflowError("question requests are answered with action answered, or declined with rejected")
+            text = response.get("text") if isinstance(response, dict) else response
+            if action == "answered":
+                if not isinstance(text, str) or not text.strip():
+                    raise WorkflowError("an answer needs text")
+                response = {"text": text.strip()}
+        elif action == "answered":
+            raise WorkflowError("only question requests take action answered")
         if request["kind"] == "decision":
             option = response.get("option") if isinstance(response, dict) else response
             if action == "choose_option" and option not in request["options"]:
@@ -328,6 +341,8 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
                 raise WorkflowError(f"option must be one of {', '.join(request['options'])}")
         if action == "choose_option":
             state = "approved"
+        elif action == "answered":
+            state = "answered"
         elif action in ("approved", "rejected", "changes_requested", "withdrawn"):
             state = action
         else:  # defensive; action is validated above

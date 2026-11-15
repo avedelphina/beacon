@@ -143,6 +143,14 @@ CREATE TABLE IF NOT EXISTS fleet_meta (
     value       TEXT NOT NULL
 );
 
+-- Operator settings that are not fleet records: who may see intake cards, and who changed it.
+CREATE TABLE IF NOT EXISTS settings (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_by  TEXT NOT NULL,
+    updated_at  REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS agent_seen (
     agent       TEXT PRIMARY KEY,
     last_pull   REAL NOT NULL,     -- the agent's host sync last pulled /mesh/{agent}
