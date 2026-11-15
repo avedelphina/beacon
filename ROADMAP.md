@@ -293,6 +293,56 @@ Related foundation work, in Horizon 0:
 config diff, and recover its local fleet definition from an export without touching
 a production agent.
 
+## Board and workflow — blocked work and asking for help
+
+**Goal:** a card that is blocked says why, and someone is working on the reason.
+Agents try to resolve their own blockers before they ask a person, and a person
+is asked only for what only a person can decide or provide.
+
+Observed on the live board: most blocked cards were waiting on something that
+no reminder could move (a person's decision, another agent's review, a pull
+request's CI), and several were agents parking work they could still do. The
+same state covered "I don't know what to do", "I am waiting", and "I cannot do
+this", which need different handling.
+
+- **Reason on every move to `blocked`.** `unclear` (the agent does not know the
+  next step), `waiting` (the next step depends on a named thing), `cannot` (the
+  agent lacks a capability or access). The card names what it waits on: an agent,
+  a person, a workflow request, or an external link. Existing blocked cards are
+  marked by hand once.
+- **`unclear`: consult before escalating.** The agent asks at least one peer it may
+  call, and asks the peer to challenge the approach. The consultation is recorded
+  on the card. Reminders for `unclear` cards say "consult", not "recheck".
+- **`waiting` on a person goes through a workflow request.** A workflow gives the
+  wait an owner, an expiry and an answer that moves the card. A card with no
+  request has nothing tracking it, and that is the cause of the stuck cards.
+- **`waiting` on an agent or an external event is watched, not re-asked.** No
+  rechecking reminders go to the waiting agent. Beacon reminds the agent it waits
+  on, or notes the external state on the card.
+- **`cannot` names the missing capability.** An agent asks a person for authority
+  (grant access, approve a risk), never for labour (install software, edit files,
+  reset credentials). The agent does the work itself where it can.
+- **Human requests show their consultation.** A workflow to a person carries
+  `consulted`: the agents asked, what they said, and the thread. A request with no
+  consultation is flagged on the page. Straightforward questions are exempt.
+- **Choices use decisions, not approvals.** A workflow with several paths is a
+  `decision` with options. An approval has one answer, so an approval with a
+  choice behind it is approved with nothing chosen.
+- **Reminders run on the scheduler, not only on pulls.** The reminder and
+  escalation pass runs from `python -m backend.scheduler tick`, so a card does not
+  wait for its agent to pull. People are emailed about a card again each
+  `remind_after` while it stays blocked, not once.
+- **Changes-requested requests expire.** A request waiting on a revision is swept
+  like a pending one, so a card cannot wait on it forever.
+- **Mailbox is the default route between agents.** Direct calls are an explicit
+  fallback (`<peer>-direct`), and the host sync falls back to them automatically
+  when Beacon is unreachable. Delivered in 0.35.0.
+
+**Acceptance:** no blocked card lacks a reason and a named wait; a card blocked
+on a person has an open workflow request; a card with `unclear` shows a peer
+consultation before any human request; a card waiting on a changes-request
+expires; the reminder pass runs without a pull.
+
 ## Horizon 1 — Make observation first-class
 
 **Goal:** Beacon tells the operator what is wrong without requiring a human to
