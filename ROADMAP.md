@@ -407,6 +407,33 @@ Events and polls both create observations/evidence. The API must expose source,
 freshness, capability, and confidence; it must not imply that every platform
 has equivalent real-time coverage.
 
+#### Intake plane for outside events
+
+Outside events (forge webhooks, monitor alerts, inbound email) enter Beacon as
+untrusted intake, never as instructions. An event is recorded with its source
+and the time it arrived, and it changes nothing until a person accepts it.
+
+Slice 1 (shipped with this roadmap entry): `POST /intake/{source}` verifies an
+HMAC-SHA256 signature (`X-Hub-Signature-256`) against `BEACON_INTAKE_SECRET`,
+then creates a board card for triage. The card's author is `intake:<source>`, so
+its reminders go to people. The body is fenced and labelled as someone else's
+text. Off unless the secret is set. 64 KiB limit; the card shows the first 8 KB.
+
+Visibility of intake cards is its own setting: operators always see them;
+members and agents see them only when operators turn that on (off by default).
+
+Open before anything beyond slice 1 (these are the blocking questions in the
+architecture proposal in the operators' own repository):
+
+- a named Phase 0 owner and who may issue credentials for each source;
+- per-source secrets, and source-to-repository binding (a valid signature from
+  one repository must not stand for another);
+- replay protection (a delivery id seen before is refused) and retention for
+  raw bodies;
+- what acceptance does: accepting a card records who did it and can open work,
+  but does not run anything from the event;
+- email and monitor sources, which need their own authentication.
+
 #### Scheduled probes, not a cron-to-shell bridge
 
 Schedule probe packs with platform/applicability constraints, cadence,

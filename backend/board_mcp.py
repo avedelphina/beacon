@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from mcp.server.mcpserver import Context, MCPServer
 from starlette.responses import JSONResponse
 
-from . import auth, board, mesh, onboarding, store, workflow
+from . import auth, board, intake, mesh, onboarding, store, workflow
 
 INSTRUCTIONS = """The Beacon fleet board: shared cards for work that spans agents, hosts, or days.
 Use it to hand work to another agent, to record progress where others can see it, and to find
@@ -52,6 +52,14 @@ def author_for(authorization: str | None) -> str | None:
     except mesh.MissingSecret:
         return None
     return None
+
+
+def _visible_card(ctx: Context, card_id: int) -> dict:
+    """The card, or not found when the operators keep intake cards from agents."""
+    card = board.get_card(card_id)
+    if not intake.agent_may_see(_author(ctx), card):
+        raise store.NotFound(f"card {card_id} not found")
+    return card
 
 
 def _author(ctx: Context) -> str:
@@ -85,12 +93,14 @@ def build() -> MCPServer:
                    include_done: bool = False) -> list[dict]:
         """List cards, most recently changed first. Filter by project, assignee (an agent id),
         or state. Done cards are left out unless include_done is true or state is "done"."""
-        return board.list_cards(project, assignee, state, include_done)
+        author = _author(ctx)
+        return [c for c in board.list_cards(project, assignee, state, include_done)
+                if intake.agent_may_see(author, c)]
 
     @server.tool()
     def board_card(card_id: int) -> dict:
         """One card with its full history: who created, moved, assigned, or commented, and when."""
-        return board.get_card(card_id)
+        return _visible_card(ctx, card_id)
 
     @server.tool()
     def card_create(ctx: Context, title: str, body: str = "", project: str | None = None,
@@ -113,6 +123,7 @@ def build() -> MCPServer:
         (assignee="" unassigns), or edit it. Keep next_action current as the work moves;
         "" clears it or done_when. links replaces the whole list of {url, label}, so send
         the links you keep too. note says why; it is kept in the history."""
+        _visible_card(ctx, card_id)
         return board.update_card(_author(ctx), card_id, state=state, assignee=assignee, title=title,
                                  body=body, project=project, next_action=next_action,
                                  done_when=done_when, links=links, note=note, context_id=context_id)
@@ -120,6 +131,7 @@ def build() -> MCPServer:
     @server.tool()
     def card_comment(ctx: Context, card_id: int, text: str, context_id: str | None = None) -> dict:
         """Add progress or a question to a card's history. context_id links an A2A thread."""
+        _visible_card(ctx, card_id)
         return board.comment(_author(ctx), card_id, text, context_id)
 
     @server.tool()
@@ -131,7 +143,7 @@ def build() -> MCPServer:
 
     @server.tool()
     def workflow_list(ctx: Context, card_id: int | None = None, state: str | None = None) -> list[dict]:
-        """List typed decision, review, and approval requests visible to this caller."""
+        """List typed decision, question, review, and approval requests visible to this caller."""
         return workflow.list_requests(card_id=card_id, state=state, actor=_author(ctx))
 
     @server.tool()
@@ -142,7 +154,9 @@ def build() -> MCPServer:
     @server.tool()
     def workflow_respond(ctx: Context, request_id: int, action: str, plan_revision: str,
                          plan_hash: str, response: object = None) -> dict:
-        """Respond to an eligible workflow request. T4/T5 responses always need a human browser session."""
+        """Respond to an eligible workflow request. action is approved, rejected, changes_requested,
+        choose_option (a decision: response {"option": ...}), or answered (a question: response
+        {"text": ...}). T4/T5 responses always need a human browser session."""
         return workflow.respond(
             request_id, actor=_author(ctx), human=False, action=action, response=response,
             plan_revision=plan_revision, plan_hash=plan_hash,
@@ -174,9 +188,12 @@ def build() -> MCPServer:
                         options: list[str] | None = None, target: dict | None = None,
                         expires_at: float | None = None, plan_revision: str | None = None,
                         plan_hash: str | None = None) -> dict:
-        """Create a pending typed workflow request attached to a board card. Leave out
-        plan_revision and plan_hash and Beacon binds the request to its own text: a
-        response then has to name that exact plan, and an edited plan cannot be approved."""
+        """Create a pending typed workflow request attached to a board card. summary is Markdown:
+        its first line says what you need, then the short plan. kind: decision (the
+        responder picks one of options), question (the responder writes a free-text answer;
+        no options), review, or approval. Leave out plan_revision and plan_hash and Beacon
+        binds the request to its own text: a response then has to name that exact plan, and
+        an edited plan cannot be approved."""
         workflow.validate_kind_for_tier(kind, tier)
         workflow.validate_participants(_author(ctx), eligible_responder)
         if (plan_revision is None) != (plan_hash is None):

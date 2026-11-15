@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+## [0.35.0] — 2026-11-15
+
+### Added
+
+- **Agents can ask a person or agent for an answer in words.** A new workflow
+  kind, `question`, takes no options: the responder writes a free-text answer
+  (`workflow_respond` with action `answered` and `{"text": ...}`), or declines
+  (`rejected`). The request ends `answered`, with the text in `response.text`.
+  Questions are tier 0–2, like decisions; a tier 3+ ask still needs a review or approval.
+- **Peers are reached through the mailbox by default.** When Beacon is known,
+  a peer's plain name in `a2a_list` is its mailbox route: an answer that outlasts
+  the call's wait comes back later instead of being lost, and an offline peer gets
+  voicemail. The direct route is `<peer>-direct`, for when Beacon is unreachable.
+  `<peer>-mailbox` still works, as the same route. The agent skill (1.12.0) says so.
+- **Automatic fallback to direct.** When Beacon cannot be reached, the host
+  sync sends each peer that has a direct address (`<peer>-direct`) straight to
+  it, and sets the mailbox route back on the first pull that works. The sync is
+  now version 3; hosts running version 2 keep the old behaviour until they update.
+- **Outside events enter as untrusted triage cards.** `POST /intake/{source}`
+  accepts a body signed with HMAC-SHA256 (`X-Hub-Signature-256`) under
+  `BEACON_INTAKE_SECRET` and creates a board card for a person to triage. Nothing
+  acts on the event. Off unless the secret is set. See ROADMAP.md, "Intake plane".
+- **Who sees intake cards is a setting.** Operators always see intake cards.
+  The Board tab has two checkboxes for members and for agents
+  (`GET`/`PUT /api/intake/visibility`); both are off by default. Only a person in
+  the web page can change them, and the change is recorded with who made it.
+- **Workflows is the first page.** The Workflows tab opens by default and sits
+  before Hosts, for operators and members alike.
+- **Workflow plans read as Markdown, and the card is simpler.** A request's
+  `summary` is drawn as Markdown (headings, lists, bold, code; no links, tables
+  or images). The card leads with the kind and title, then who asked and when,
+  then the plan. A decision's options are radio buttons. The binding and target
+  sit under "Technical details". The agent skill tells agents to open with what
+  they need, then short bullets, one per option.
+
 ## [0.34.0] — 2026-11-11
 
 ### Added

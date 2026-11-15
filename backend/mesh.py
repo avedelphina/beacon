@@ -178,13 +178,21 @@ def config(agent_id: str) -> dict:
     # Only peers that will accept this agent: no peer-list entries that can
     # only ever be refused.
     for p in (p for p in direct if may_call(agent.id, p, fleet)):
-        outbound.append({"name": p.id, "url": p.reach.endpoint, "token": token(agent.id, p.id),
+        if not beacon_url:
+            outbound.append({"name": p.id, "url": p.reach.endpoint, "token": token(agent.id, p.id),
+                             "capabilities": p.reach.capabilities})
+            continue
+        # The plain name goes through Beacon's mailbox: an answer that outlasts the
+        # call's wait comes back later instead of being lost, and an offline peer gets
+        # voicemail. Same token: the mailbox checks it and delivers with it, so the peer
+        # still sees who wrote (backend/mailbox.py). `-mailbox` is the same route, kept
+        # for agents that were told that name; `-direct` is for when Beacon is unreachable.
+        via_beacon = {"url": f"{beacon_url}/a2a/{p.id}", "token": token(agent.id, p.id),
+                      "capabilities": [*p.reach.capabilities, "mailbox"]}
+        outbound.append({"name": p.id, **via_beacon})
+        outbound.append({"name": f"{p.id}-mailbox", **via_beacon})
+        outbound.append({"name": f"{p.id}-direct", "url": p.reach.endpoint, "token": token(agent.id, p.id),
                          "capabilities": p.reach.capabilities})
-        if beacon_url:
-            # Same token: the mailbox checks it and delivers with it, so the
-            # peer still sees who wrote (backend/mailbox.py).
-            outbound.append({"name": f"{p.id}-mailbox", "url": f"{beacon_url}/a2a/{p.id}",
-                             "token": token(agent.id, p.id), "capabilities": [*p.reach.capabilities, "mailbox"]})
     if beacon_url:
         # No direct path to these: one entry under the plain name, through
         # Beacon's relay. Agents call a peer by its id either way; Beacon carries it.

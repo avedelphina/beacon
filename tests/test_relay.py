@@ -32,7 +32,8 @@ def _peers(agent_id):
 
 def test_other_networks_are_reached_through_the_relay_by_plain_name(two_networks):
     peers = _peers("alpha")
-    assert peers["bravo"]["url"] == "http://bravo.test:9900"  # same network: direct
+    assert peers["bravo"]["url"] == f"{PUBLIC}/a2a/bravo"  # same network: still through the mailbox by default
+    assert peers["bravo-direct"]["url"] == "http://bravo.test:9900"
     assert "bravo-mailbox" in peers
     assert peers["lima"]["url"] == f"{PUBLIC}/a2a/lima"  # other network: relay, plain name
     assert "relay" in peers["lima"]["capabilities"]

@@ -73,7 +73,7 @@ def workflow_answered(request: dict, actor: str) -> None:
 
 
 def _what(request: dict) -> str:
-    return {"approval": "an approval", "review": "a review", "decision": "a decision"}.get(request["kind"], "an answer")
+    return {"approval": "an approval", "review": "a review", "decision": "a decision", "question": "a question"}.get(request["kind"], "an answer")
 
 
 def _when(timestamp: float) -> str:

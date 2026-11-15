@@ -947,7 +947,36 @@ document.getElementById("enroll-copy").addEventListener("click", async (e) => {
 // ---- board ----
 const BOARD_STATES = ["todo", "doing", "blocked", "review", "done"];
 
+// Who besides operators may see intake cards. Changed only from this page's session.
+async function renderIntakeVisibility() {
+  const box = document.getElementById("intake-visibility");
+  try {
+    const v = await json("/api/intake/visibility");
+    document.getElementById("intake-see-members").checked = v.members;
+    document.getElementById("intake-see-agents").checked = v.agents;
+    box.hidden = false;
+  } catch (err) {
+    box.hidden = true;  // no visibility setting to show: the board still works
+  }
+}
+
+async function changeIntakeVisibility() {
+  const body = {
+    members: document.getElementById("intake-see-members").checked,
+    agents: document.getElementById("intake-see-agents").checked,
+  };
+  try {
+    await json("/api/intake/visibility", "PUT", body);
+  } catch (err) {
+    alert(err.message);
+  }
+  renderIntakeVisibility();
+}
+document.getElementById("intake-see-members").addEventListener("change", changeIntakeVisibility);
+document.getElementById("intake-see-agents").addEventListener("change", changeIntakeVisibility);
+
 async function renderBoard() {
+  renderIntakeVisibility();
   const el = document.getElementById("board-columns");
   let cards;
   try {
@@ -1114,36 +1143,94 @@ function workflowWhen(t) {
   return t ? new Date(t * 1000).toLocaleString() : "-";
 }
 
-function workflowActionLabel(action) {
-  return { approved: "Approve", rejected: "Reject", changes_requested: "Request changes", choose_option: "Choose option" }[action] || action;
+const WORKFLOW_KIND_LABEL = { decision: "Decision", question: "Question", review: "Review", approval: "Approval" };
+
+// Summaries are Markdown written by agents, so they are escaped before any markup
+// is added. Only a small subset is drawn: headings, lists, bold, code and code blocks.
+// No links and no images: a link from an agent is text, not something to follow.
+function renderMarkdown(source) {
+  const out = [];
+  let para = [], list = null, code = null;
+  const inline = (t) => esc(t)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  const flush = () => { if (para.length) { out.push(`<p>${para.map(inline).join("<br>")}</p>`); para = []; } };
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  for (const raw of String(source ?? "").replace(/\r\n?/g, "\n").split("\n")) {
+    const line = raw.trimEnd();
+    if (code !== null) {
+      if (line.trim().startsWith("```")) { out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`); code = null; }
+      else code.push(raw);
+      continue;
+    }
+    if (line.trim().startsWith("```")) { flush(); closeList(); code = []; continue; }
+    if (!line.trim()) { flush(); closeList(); continue; }
+    const heading = line.match(/^#{1,6}\s+(.*)$/);
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (heading) { flush(); closeList(); out.push(`<h4>${inline(heading[1])}</h4>`); }
+    else if (bullet || numbered) {
+      flush();
+      const tag = bullet ? "ul" : "ol";
+      if (list !== tag) { closeList(); out.push(`<${tag}>`); list = tag; }
+      out.push(`<li>${inline((bullet || numbered)[1])}</li>`);
+    } else { closeList(); para.push(line.trim()); }
+  }
+  if (code !== null) out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`);
+  flush(); closeList();
+  return out.join("");
 }
 
+// One card per request, in the order a reader needs it: what is asked, the plan,
+// the answer box or choice, then the technical details the approver signs against.
 function renderWorkflowItems(items) {
   const list = document.getElementById("workflow-list");
   document.getElementById("workflows-empty").hidden = items.length > 0;
   list.innerHTML = items.map((w) => {
-    const buttons = w.state === "pending" ? [
-      `<button class="btn primary" data-workflow-action="${w.kind === "decision" ? "choose_option" : "approved"}" data-workflow-id="${esc(w.id)}">${w.kind === "decision" ? "Choose option" : "Approve"}</button>`,
-      `<button class="btn" data-workflow-action="changes_requested" data-workflow-id="${esc(w.id)}">Request changes</button>`,
-      `<button class="btn danger" data-workflow-action="rejected" data-workflow-id="${esc(w.id)}">Reject</button>`,
-    ].join("") : "";
-    const options = w.kind === "decision" && w.state === "pending"
-      ? `<label class="workflow-option">Option <select data-workflow-option="${esc(w.id)}">${w.options.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select></label>` : "";
-    // The plan is what the approver signs off on, so it reads as text with its line
-    // breaks (it was one run-on line), open while the request waits for an answer.
+    const pending = w.state === "pending";
+    const isQuestion = w.kind === "question";
+    const isDecision = w.kind === "decision";
+    const id = esc(w.id);
+    const buttons = !pending ? "" : isQuestion ? [
+      `<button class="btn primary" data-workflow-action="answered" data-workflow-id="${id}">Send answer</button>`,
+      `<button class="btn danger" data-workflow-action="rejected" data-workflow-id="${id}">Decline</button>`,
+    ].join("") : [
+      isDecision
+        ? `<button class="btn primary" data-workflow-action="choose_option" data-workflow-id="${id}">Choose this option</button>`
+        : `<button class="btn primary" data-workflow-action="approved" data-workflow-id="${id}">Approve</button>`,
+      `<button class="btn" data-workflow-action="changes_requested" data-workflow-id="${id}">Request changes</button>`,
+      `<button class="btn danger" data-workflow-action="rejected" data-workflow-id="${id}">Reject</button>`,
+    ].join("");
+    // Options are the labels the plan explains; the first one starts selected.
+    const choice = isDecision && pending ? `<fieldset class="wf-choice"><legend>Pick one</legend>${
+      w.options.map((o, i) => `<label><input type="radio" name="wf-option-${id}" data-workflow-option="${id}" value="${esc(o)}"${i === 0 ? " checked" : ""}> ${esc(o)}</label>`).join("")
+    }</fieldset>` : "";
+    const answerBox = isQuestion && pending
+      ? `<label class="wf-answer">Your answer <textarea rows="3" data-workflow-answer="${id}"></textarea></label>` : "";
+    const answered = w.state === "answered" && w.response?.text
+      ? `<div class="wf-note"><strong>Answer</strong>${renderMarkdown(w.response.text)}</div>` : "";
     const note = w.state === "changes_requested" && w.response?.note
-      ? `<p class="workflow-note"><strong>Changes requested:</strong> ${esc(w.response.note)}</p>` : "";
-    const waitingForRequester = w.state === "changes_requested"
+      ? `<div class="wf-note"><strong>Changes requested</strong>${renderMarkdown(w.response.note)}</div>` : "";
+    const waiting = w.state === "changes_requested"
       ? '<p class="hint">Waiting for the requester to send a changed plan.</p>' : "";
+    const responder = w.eligible_responder === "human" ? "any operator" : w.eligible_responder;
     return `<article class="workflow-item">
-      <div class="workflow-item-head"><strong>${esc(w.title)}</strong><span class="chip">${esc(w.state)}</span></div>
-      <div class="workflow-meta"><span>${esc(w.kind)} / T${esc(w.tier)}</span><span>card #${esc(w.card_id)}</span><span>from: ${esc(w.requester)}</span><span>responder: ${esc(w.eligible_responder)}</span><span>expires: ${esc(workflowWhen(w.expires_at))}</span></div>
-      <div class="workflow-summary">${esc(w.summary)}</div>
-      ${note}${waitingForRequester}
-      <details class="workflow-plan"${w.state === "pending" ? " open" : ""}><summary>Bound execution plan</summary>
+      <header class="wf-head">
+        <div>
+          <div class="wf-kind">${esc(WORKFLOW_KIND_LABEL[w.kind] || w.kind)} · T${esc(w.tier)}</div>
+          <h3 class="wf-title">${esc(w.title)}</h3>
+        </div>
+        <span class="chip">${esc(w.state)}</span>
+      </header>
+      <p class="wf-from">From <strong>${esc(w.requester)}</strong> to <strong>${esc(responder)}</strong> · card #${esc(w.card_id)} · expires ${esc(workflowWhen(w.expires_at))}</p>
+      <div class="wf-plan">${renderMarkdown(w.summary)}</div>
+      ${note}${answered}${waiting}
+      ${choice}${answerBox}
+      ${buttons ? `<div class="workflow-actions">${buttons}</div>` : ""}
+      <details class="wf-tech"><summary>Technical details</summary>
+        <div class="workflow-binding"><span class="hint">Plan revision and hash the answer must name</span><code>${esc(w.plan_revision)}</code><code>${esc(w.plan_hash)}</code></div>
         <pre>${esc(JSON.stringify(w.target, null, 2))}</pre>
-        <div class="workflow-binding"><code>${esc(w.plan_revision)}</code><code>${esc(w.plan_hash)}</code></div></details>
-      ${options}<div class="workflow-actions">${buttons}</div>
+      </details>
     </article>`;
   }).join("");
   list.querySelectorAll("[data-workflow-action]").forEach((button) => button.addEventListener("click", () => respondWorkflow(button)));
@@ -1166,13 +1253,17 @@ async function respondWorkflow(button) {
   const action = button.dataset.workflowAction;
   let response = {};
   if (action === "changes_requested") response = { note: prompt("What needs to change?", "") || "" };
-  if (action === "rejected" && !confirm(`Reject “${item.title}”?`)) return;
+  if (action === "rejected" && !confirm(`${item.kind === "question" ? "Decline" : "Reject"} “${item.title}”?`)) return;
+  if (action === "answered") {
+    const text = document.querySelector(`[data-workflow-answer="${CSS.escape(id)}"]`)?.value.trim();
+    if (!text) return alert("Write an answer first.");
+    response = { text };
+  }
   if (action === "approved" || action === "choose_option") {
     if (!confirm(`${action === "choose_option" ? "Choose an option for" : "Approve"} “${item.title}”?`)) return;
   }
   if (action === "choose_option" && item.kind === "decision") {
-    const option = document.querySelector(`[data-workflow-option="${CSS.escape(id)}"]`);
-    response.option = option?.value;
+    response.option = document.querySelector(`input[data-workflow-option="${CSS.escape(id)}"]:checked`)?.value;
   }
   button.disabled = true;
   try {
@@ -1362,13 +1453,13 @@ async function start() {
   }
   if (isMember) {
     document.body.classList.add("member");
-    document.querySelector('[data-tab="agents"]').click();
   } else {
     renderHosts();
     renderTemplates();
     renderCronJobs();
     populateHostSelect();
   }
+  renderWorkflows();  // the page opens on Workflows
   renderAgents();
   renderBoard();
 }

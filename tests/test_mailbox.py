@@ -227,10 +227,11 @@ def test_mailbox_card_points_back_at_the_mailbox(client, net):
 def test_mesh_config_offers_a_mailbox_entry_per_peer(net):
     cfg = mesh.config("alpha")
     names = [p["name"] for p in cfg["outbound"]]
-    assert names == ["bravo", "bravo-mailbox", "charlie", "charlie-mailbox"]
-    mailbox_entry = cfg["outbound"][1]
+    assert names == ["bravo", "bravo-mailbox", "bravo-direct", "charlie", "charlie-mailbox", "charlie-direct"]
+    mailbox_entry = cfg["outbound"][0]  # the plain name is the mailbox route
     assert mailbox_entry["url"] == f"{PUBLIC}/a2a/bravo"
     assert mailbox_entry["token"] == mesh.token("alpha", "bravo")
+    assert cfg["outbound"][2]["url"] == "http://bravo.test:9900"  # direct, for when Beacon is unreachable
     assert cfg["beacon"] == PUBLIC
 
 

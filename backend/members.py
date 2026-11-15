@@ -86,8 +86,10 @@ def _owned_agent(email: str, agent_id: str):
 
 
 def card_visible(email: str, card: dict) -> bool:
+    from . import intake  # not at import: intake imports board, which imports this package's store
     return card["created_by"].casefold() == email.casefold() or (
-        card["assignee"] is not None and card["assignee"] in owned_ids(email))
+        card["assignee"] is not None and card["assignee"] in owned_ids(email)) or (
+        intake.is_intake(card) and intake.visibility()["members"])
 
 
 def _target_agent(request: dict) -> str | None:

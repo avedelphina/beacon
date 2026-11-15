@@ -564,3 +564,47 @@ def test_only_the_requester_revises_and_only_from_changes_requested():
     with pytest.raises(workflow.WorkflowError, match="unchanged"):
         workflow.revise(request["id"], actor="agent-a", **binding)
     assert workflow.get(request["id"])["state"] == "changes_requested"
+
+
+def test_question_takes_a_text_answer_not_options():
+    binding = _binding()
+    request = workflow.create(
+        card_id=_card()["id"], kind="question", requester="beacon", eligible_responder="beacon",
+        capability="ask", tier=1, title="Which region?", summary="Tell me the region", options=[], target={}, **binding,
+    )
+    with pytest.raises(workflow.WorkflowError):
+        workflow.create(
+            card_id=_card()["id"], kind="question", requester="beacon", eligible_responder="beacon",
+            capability="ask", tier=1, title="Bad", summary="Options are not for questions", options=["a"], target={}, **binding,
+        )
+    with pytest.raises(workflow.WorkflowError):
+        workflow.respond(request["id"], actor="beacon", human=True, action="approved", response={}, **binding)
+    with pytest.raises(workflow.WorkflowError, match="needs text"):
+        workflow.respond(request["id"], actor="beacon", human=True, action="answered", response={"text": " "}, **binding)
+    answered = workflow.respond(request["id"], actor="beacon", human=True, action="answered",
+                                response={"text": "  eu-west  "}, **binding)
+    assert answered["state"] == "answered"
+    assert answered["response"] == {"text": "eu-west"}
+    assert workflow.list_requests(actor="beacon", include_done=False) == []
+
+
+def test_question_can_be_declined_and_answer_is_only_for_questions():
+    binding = _binding()
+    request = workflow.create(
+        card_id=_card()["id"], kind="question", requester="beacon", eligible_responder="beacon",
+        capability="ask", tier=1, title="Anything?", summary="Optional", options=[], target={}, **binding,
+    )
+    declined = workflow.respond(request["id"], actor="beacon", human=True, action="rejected", response={}, **binding)
+    assert declined["state"] == "rejected"
+    decision = workflow.create(
+        card_id=_card()["id"], kind="decision", requester="beacon", eligible_responder="beacon",
+        capability="ask", tier=1, title="Pick", summary="Pick one", options=["a"], target={}, **binding,
+    )
+    with pytest.raises(workflow.WorkflowError, match="only question requests"):
+        workflow.respond(decision["id"], actor="beacon", human=True, action="answered", response={"text": "x"}, **binding)
+
+
+def test_question_cannot_be_tier_three_without_review():
+    with pytest.raises(workflow.WorkflowError):
+        workflow.validate_kind_for_tier("question", 3)
+    workflow.validate_kind_for_tier("question", 2)
