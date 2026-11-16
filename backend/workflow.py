@@ -90,13 +90,61 @@ def _is_responder(actor: str, eligible_responder: str) -> bool:
     return eligible_responder != "human" and actor.casefold() == eligible_responder.casefold()
 
 
+def _delegate(actor: str) -> tuple[str, int] | None:
+    """(the operator's email, the highest tier it may answer) when `actor` is a client agent acting for an
+    operator who still is one, and is switched on. A client reads what its operator reads and answers what
+    its operator may hand it, never tier 4 or 5 (schemas.AgentClient). Looked up on every call, so turning a
+    client off, or removing the operator, takes effect at once."""
+    try:
+        agent = store.get_agent(actor)
+    except (store.NotFound, store.InvalidId):
+        return None
+    client = agent.client
+    if client is None or not client.enabled or not client.acts_for:
+        return None
+    from . import auth  # not at import: auth reads its settings when it loads
+    if auth.role_for_email(client.acts_for) != "operator":
+        return None
+    return client.acts_for, min(client.max_tier, 3)
+
+
+def _delegate_note(request: dict, actor: str, delegate: tuple[str, int]) -> dict:
+    """What this client may do with a request, and why not when it may not: shown to it, so that it can
+    tell its operator about what only they can answer."""
+    email, ceiling = delegate
+    why = None
+    if request["state"] != "pending":
+        why = f"it is {request['state']}"
+    elif request["require_human"]:
+        why = "it was sent to a person: only a person in the web page can answer it"
+    elif request["tier"] >= 4:
+        why = "tier 4 and above need your operator in the web page: tell them, do not wait for it"
+    elif request["tier"] > ceiling:
+        why = f"it is above this client's ceiling (T{ceiling})"
+    elif request["requester"].casefold() in (actor.casefold(), email):
+        why = f"it was made by {request['requester']}: an independent reviewer must answer it"
+    elif request["eligible_responder"].casefold() not in ("human", email):
+        why = f"it is not addressed to {email}"
+    return {"acting_for": email, "ceiling": ceiling, "can_answer": why is None, "why_not": why}
+
+
+def _annotate(request: dict, actor: str | None) -> dict:
+    delegate = _delegate(actor) if actor else None
+    if delegate is not None:
+        request["delegate"] = _delegate_note(request, actor, delegate)
+    return request
+
+
 def _visible(request: dict, actor: str, human: bool = False) -> bool:
     eligible_responder = request["eligible_responder"]
-    return (
+    if (
         actor == request["requester"]
         or _is_responder(actor, eligible_responder)
         or (human and (eligible_responder == "human" or bool(request["require_human"])))
-    )
+    ):
+        return True
+    delegate = _delegate(actor)  # a client reads what the operator it acts for reads
+    return delegate is not None and _visible(request, delegate[0], True)
 
 
 def _event(db, request_id: int, actor: str, kind: str, from_state: str | None,
@@ -134,7 +182,8 @@ def _card_text(request_id: int, row, kind: str, from_state: str | None, to_state
         response = payload.get("response")
         detail = (response.get("note") or response.get("option") or response.get("text")
                   if isinstance(response, dict) else response)
-        return f"{label}: {to_state}" + (f": {str(detail)[:300]}" if detail else "")
+        by = f" (by {payload['answered_by']} for {payload['on_behalf_of']})" if payload.get("answered_by") else ""
+        return f"{label}: {to_state}{by}" + (f": {str(detail)[:300]}" if detail else "")
     if kind == "revised":
         return f"{label}: plan revised, pending again"
     if kind == "escalated":
@@ -240,6 +289,8 @@ def validate_kind_for_tier(kind: str, tier: int) -> None:
 
 def _eligible(request: dict, actor: str, human: bool) -> bool:
     eligible_responder = request["eligible_responder"]
+    if (delegate := _delegate(actor)) is not None and not human:
+        return _delegate_note(request, actor, delegate)["can_answer"]
     if request["require_human"]:
         # Sent to a person: only a person in the browser answers. The named person if it names one;
         # otherwise (an agent, or any operator) any operator, since the agent it named may not.
@@ -394,15 +445,21 @@ def list_requests(*, card_id: int | None = None, state: str | None = None,
         if not include_done:
             clauses.append("state NOT IN ('executed', 'verified', 'failed', 'execution_uncertain', 'rejected', 'withdrawn', 'expired', 'stale', 'answered')")
         if actor is not None:
-            if human:
-                clauses.append("(requester = ? OR lower(eligible_responder) = lower(?) OR eligible_responder = 'human'"
-                               " OR require_human = 1)")
-            else:
-                clauses.append("(requester = ? OR (eligible_responder != 'human' AND lower(eligible_responder) = lower(?)))")
-            params.extend((actor, actor))
+            viewers = [(actor, human)]
+            if (delegate := _delegate(actor)) is not None:
+                viewers.append((delegate[0], True))  # a client also sees what its operator sees
+            alternatives = []
+            for name, as_person in viewers:
+                if as_person:
+                    alternatives.append("(requester = ? OR lower(eligible_responder) = lower(?) OR eligible_responder = 'human'"
+                                        " OR require_human = 1)")
+                else:
+                    alternatives.append("(requester = ? OR (eligible_responder != 'human' AND lower(eligible_responder) = lower(?)))")
+                params.extend((name, name))
+            clauses.append("(" + " OR ".join(alternatives) + ")")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = db.execute(f"SELECT * FROM workflow_requests {where} ORDER BY updated_at DESC, id DESC", params).fetchall()
-    return [_decode(row) for row in rows]
+    return [_annotate(_decode(row), actor) for row in rows]
 
 
 def get(request_id: int, actor: str | None = None, human: bool = False) -> dict:
@@ -420,7 +477,7 @@ def get(request_id: int, actor: str | None = None, human: bool = False) -> dict:
         item = dict(event)
         item["payload"] = json.loads(item.pop("payload_json"))
         result["events"].append(item)
-    return result
+    return _annotate(result, actor)
 
 
 def respond(request_id: int, *, actor: str, human: bool, action: str,
@@ -429,6 +486,7 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
     actor = _validate_actor(actor)
     if action not in RESPONSE_ACTIONS:
         raise WorkflowError(f"action must be one of {', '.join(RESPONSE_ACTIONS)}")
+    delegate = None if human else _delegate(actor)  # an operator's client answering for them, or None
     with opstore.connect() as db:
         _expire_due(db, time.time())
         row = db.execute("SELECT * FROM workflow_requests WHERE id = ?", (request_id,)).fetchone()
@@ -442,8 +500,14 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
         if request["require_human"] and not human:
             raise HumanApprovalRequired(f"workflow request {request_id} was sent to a person: only a person in the "
                                         f"web page may answer it ({request['escalated_reason']})")
+        if delegate is not None and request["tier"] >= 4 and _visible(request, actor, False):
+            # Not for a client to answer, and not for it to leave unmentioned: the operator is told now.
+            _tell(notify.client_needs_person, request, actor, delegate[0])
+            raise HumanApprovalRequired(f"workflow request {request_id} is tier {request['tier']}: only a person in the "
+                                        f"web page may answer it. {delegate[0]} has been told")
         if not _eligible(request, actor, human):
-            raise UnauthorizedResponder(f"{actor} is not eligible to respond to workflow request {request_id}")
+            why = f": {_delegate_note(request, actor, delegate)['why_not']}" if delegate is not None else ""
+            raise UnauthorizedResponder(f"{actor} is not eligible to respond to workflow request {request_id}{why}")
         if request["tier"] >= 4 and not human:
             raise HumanApprovalRequired("T4/T5 workflow responses require a human browser session")
         if plan_revision != request["plan_revision"] or plan_hash != request["plan_hash"]:
@@ -486,18 +550,22 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
         # took most of the request's time does not leave the requester almost none.
         expires_at = max(request["expires_at"], now + CHANGES_WINDOW_SECONDS) if state == "changes_requested" \
             else request["expires_at"]
+        answered_by, on_behalf_of = (actor, delegate[0]) if delegate is not None else (None, None)
         db.execute(
             "UPDATE workflow_requests SET state = ?, response_json = ?, responded_at = ?, updated_at = ?,"
-            " expires_at = ? WHERE id = ?",
-            (state, json_text(response), now, now, expires_at, request_id),
+            " expires_at = ?, answered_by = ?, on_behalf_of = ? WHERE id = ?",
+            (state, json_text(response), now, now, expires_at, answered_by, on_behalf_of, request_id),
         )
         _event(db, request_id, actor, "responded", "pending", state, {
             "action": action, "plan_revision": plan_revision, "plan_hash": plan_hash, "response": response,
+            **({"answered_by": answered_by, "on_behalf_of": on_behalf_of} if answered_by else {}),
         }, context_id)
         if request["kind"] == "handoff" and state == "approved":
             _hand_over(db, request, actor, context_id)
     answered = get(request_id)
     _tell(notify.workflow_answered, answered, actor)
+    if delegate is not None:
+        _tell(notify.workflow_answered_for, answered, actor, delegate[0])  # the operator hears what was answered for them
     return answered
 
 
