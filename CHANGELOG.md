@@ -14,6 +14,11 @@
   list, the parent, child cards and what the card blocks; the board shows "blocked by N".
   A member or agent sees only the related cards they may see, and cannot relate a card to one
   they may not see. Existing databases gain the column and table. (#96)
+- **The agent skill says when a decision needs a final approval.** A decision records a
+  choice, not an approval of what follows. For an action that is hard to undo or changes a
+  system other people rely on, the agent asks for an `approval` of the exact change (tier 4,
+  answered in the web page) before acting; otherwise it carries on and reports on the card.
+  Skill 1.16.0.
 - **Blocked says why.** Moving a card to `blocked` needs `blocked_reason`: `unclear`,
   `waiting` or `cannot` (REST `PATCH`, the `card_update` tool and the card form), and
   `waiting_on` for the last two. Waiting on a person is refused unless it is

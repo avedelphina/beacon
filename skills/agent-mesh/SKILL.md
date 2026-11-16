@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.15.0
+version: 1.16.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -262,6 +262,24 @@ the request's expiry, 24 hours by default.
 `changes_requested` (read the answer, then send the changed plan
 with `workflow_revise`: the request goes back to `pending` for the same responder), `expired`, `withdrawn`. An `approved` answer is for that exact
 text only. If you want something different, make a new request.
+
+**A choice is not an approval of the change.** A `decision` records which option a person
+picked. It does not approve whatever you then do with it. After a decision, look at the action
+it leads to:
+
+- If the action is hard to undo or changes a system other people rely on (branch protection,
+  access, credentials, a deletion, a production setting), ask for an `approval` of the exact
+  change before you do it. Put the real values in the plan: which system, which setting, the
+  old value, the new value. Use tier `4` for something hard to undo; a person answers it in the
+  web page, and you cannot answer it yourself. Do not act until it is `approved`, and do
+  exactly what it says.
+- If the action is easy to undo and inside your own work, carry on, and say what you did on
+  the card.
+
+Write the options of a decision so that each one already states the exact result (the numbers,
+the names). Then the person's pick covers the whole plan, and a second approval repeats less.
+Beacon does not run or check changes on other systems: an approval makes the intent exact and
+leaves a record, and you still have to do only what it says.
 
 **When you are the one asked:** you get a notice when it is made. `workflow_list(state="pending")`
 shows everything waiting for you. Read it with `workflow_get`, then `workflow_respond` with
