@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.36.1] — 2026-11-16
+
+### Fixed
+
+- The agent's board tools `board_list` and `board_card` failed with
+  "name 'ctx' is not defined", so an agent could not read a card's history
+  before writing to it. They now take the caller's context like the other tools.
+  Tests call the registered tool functions (`tests/test_board_tools.py`).
+
 ## [0.36.0] — 2026-11-16
 
 ### Added
