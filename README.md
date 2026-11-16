@@ -778,33 +778,36 @@ Keep the old instance until every agent has moved.
 
 ### Client agents: an operator's own AI client
 
-Claude Code, Codex, or any MCP client can take part in Beacon under its own identity, so what
-it does is recorded under its name and the access policy applies to it. It is an agent in the
-fleet with a `client` block instead of a `reach` block:
+Claude Code, Codex, or any MCP client can take part in Beacon under its own identity, so what it
+does is recorded under its name and the access policy applies to it. It is an agent in the fleet
+with a `client` block instead of a `reach` block. It is bound to one operator (`acts_for`), has a
+ceiling (`max_tier`, 0 to 3, never higher) and an off switch (`enabled`).
 
-```yaml
-# fleet/hosts.yaml: a place for clients, with no SSH, so nothing runs there
-- id: clients
-  address: none.invalid
-# fleet/agents/claude-<operator>.yaml
-id: claude-<operator>
-type: client
-host: clients
-client: {board: true}
-```
+**Making one.** An operator opens the **Agents** tab, **AI clients**, **Add my client**, and chooses
+the kind (`claude-<you>`, `codex-<you>`) and the highest tier it may answer. Beacon makes the agent
+(on an inventory-only host named `clients`, with no SSH, so nothing runs there) and shows its first
+token once, with the command to paste (`claude mcp add ...` for Claude Code, a URL and a header for
+other clients). You can only make your own, and only from a browser session: the MCP service token
+cannot. The same page makes more tokens (**New token**), rotates them (**Rotate** revokes the
+others), revokes one, and turns the client off. On Beacon's host,
+`python -m backend.mesh client-token <id>` mints one without the page.
 
-A client is never called, assigned a card, sent mail, or asked for an answer: it has no endpoint,
-and it is in nobody's peer list. It uses the board and workflow tools (`/board/mcp`) with its own
-token and can call agents the access policy allows. The token is the agent's own pull token. Print
-it, with the settings to paste into the client, on Beacon's host:
+**Its token.** A client's token is random and shown once. Beacon keeps only a hash of it, so a lost
+token is replaced, not recovered, and the API never returns one. Each token is revoked on its own,
+with who made it and when it was last used on the page. It is not the derived pull token a fleet agent
+holds; that one does not work for a client. A token reaches the board and the workflow tools as that
+client, and nothing else.
 
-```sh
-docker compose exec -T beacon python -m backend.mesh client-token claude-<operator>
-```
+**Who may change it.** Any operator can revoke a token or turn a client off, so whoever notices a leak
+can stop it. Turning it back on, raising `max_tier`, and making tokens are for the operator it acts for.
+Its binding is not editable through the agent record: `PUT /api/agents/{id}` refuses a change to the
+`client` block, and `/api/clients` is the one place that checks who is asking. Each change is a recorded
+action (`create_client`, `mint_client_token`, `update_client` at T4; `disable_client` at T2).
 
-The API never returns it, and rotating `BEACON_A2A_SECRET` changes it. A client with an
-operator-bound identity that answers requests for that operator is the next step (ROADMAP.md,
-"Operator-bound agents"); today a client asks and acts as itself.
+**What it is not.** It is never called (not even by Beacon), assigned a card, sent mail, listed as a
+peer, or asked for an answer, and it never answers tier 4 or 5. It can call the agents the access policy
+allows, and the policy applies to the cards it assigns. Reading and answering requests for its operator
+is the next step (ROADMAP.md, "Operator-bound agents"); today a client asks and acts as itself.
 
 ### Outside events (intake)
 

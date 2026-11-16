@@ -99,6 +99,27 @@ CAPABILITY_TIERS: dict[str, tuple[Tier, str]] = {
         "set of allowed callers changes. The MCP token must not be able to widen its own "
         "reach, so this needs a human browser session.",
     ),
+    "create_client": (
+        Tier.T4,
+        "Makes an identity that reads and answers workflow requests for an operator, and mints its token. "
+        "That is access, so the LLM-facing MCP token must not be able to create one: a person in a browser "
+        "session, and only for themselves.",
+    ),
+    "mint_client_token": (
+        Tier.T4,
+        "A new token for a client agent: whoever holds it acts as that client. Shown once. A person in a "
+        "browser session, and only the operator the client acts for.",
+    ),
+    "update_client": (
+        Tier.T4,
+        "Raises what a client may answer (`max_tier`, never above T3) or turns it back on. A person in a "
+        "browser session, and only the operator the client acts for.",
+    ),
+    "disable_client": (
+        Tier.T2,
+        "Turns a client off, or revokes one of its tokens: it only takes access away, reversible by the "
+        "operator it acts for. Any operator may, so a lost token can be stopped by whoever notices.",
+    ),
     "set_agent_access": (
         Tier.T4,
         "Tags, `reach.callers`, and `reach.board` decide who may call whom and who may use "

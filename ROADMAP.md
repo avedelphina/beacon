@@ -358,7 +358,7 @@ not the operator: Beacon says so everywhere it is recorded.
   card or sent mail, and uses the board and workflow tools with its own token. Named for the
   client and the operator (`claude-<operator>`, `codex-<operator>`). Any operator may have one.
   It replaces the placeholder endpoint a client would need today.
-- **Binding.** `acts_for` (an operator's email) and `max_tier` (0 to 3, never higher). Saved only
+- **Binding** *(delivered: the fields, `/api/clients`, and the page's AI clients panel; answering is next)*. `acts_for` (an operator's email) and `max_tier` (0 to 3, never higher). Saved only
   from a browser session, with history, like the access policy; the client cannot widen or set
   its own binding, and one switch turns it off.
 - **What it may answer.** Workflow requests at T0 to T3 addressed to its operator's email, or to

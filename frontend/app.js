@@ -1426,6 +1426,111 @@ async function respondWorkflow(button) {
 document.getElementById("workflows-refresh").addEventListener("click", renderWorkflows);
 document.querySelector('[data-tab="workflows"]').addEventListener("click", renderWorkflows);
 
+// ---- AI clients ----
+// An operator's own AI client is an agent of its own (backend/clients.py). Making a client or a token
+// is T4: it asks for confirmation, then is sent with confirm=true. The token comes back once, here.
+async function renderClients() {
+  const body = document.getElementById("clients-body");
+  let list;
+  try {
+    list = await json("/api/clients");
+  } catch (err) {
+    document.getElementById("clients-panel").hidden = true;  // not an operator, or not signed in: nothing to show
+    return;
+  }
+  document.getElementById("clients-panel").hidden = false;
+  document.getElementById("clients-empty").hidden = list.length > 0;
+  const when = (t) => (t ? new Date(t * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "never");
+  body.innerHTML = list.map((c) => {
+    const live = c.tokens.filter((t) => !t.revoked_at);
+    const tokens = live.length
+      ? live.map((t) => `<div>#${esc(t.id)} ${esc(t.label || "no label")} <span class="hint">· made ${esc(when(t.created_at))} by ${esc(t.created_by)} · last used ${esc(when(t.last_used_at))}</span>
+          <button class="link-btn danger" data-client-revoke="${esc(c.id)}" data-token="${esc(t.id)}">Revoke</button></div>`).join("")
+      : '<span class="hint">no live token</span>';
+    return `<tr>
+      <td><strong>${esc(c.id)}</strong></td>
+      <td>${esc(c.acts_for ?? "-")}</td>
+      <td>T${esc(c.max_tier)}</td>
+      <td>${c.enabled ? '<span class="chip">on</span>' : '<span class="chip chip-warn">off</span>'}</td>
+      <td>${tokens}</td>
+      <td class="row-actions">
+        <button class="link-btn" data-client-token="${esc(c.id)}">New token</button>
+        <button class="link-btn" data-client-rotate="${esc(c.id)}">Rotate</button>
+        <button class="link-btn" data-client-toggle="${esc(c.id)}" data-on="${c.enabled ? "1" : ""}">${c.enabled ? "Turn off" : "Turn on"}</button>
+      </td></tr>`;
+  }).join("");
+  body.querySelectorAll("[data-client-token]").forEach((b) => b.addEventListener("click", () => mintClientToken(b.dataset.clientToken, false)));
+  body.querySelectorAll("[data-client-rotate]").forEach((b) => b.addEventListener("click", () => mintClientToken(b.dataset.clientRotate, true)));
+  body.querySelectorAll("[data-client-revoke]").forEach((b) => b.addEventListener("click", () => revokeClientToken(b.dataset.clientRevoke, b.dataset.token)));
+  body.querySelectorAll("[data-client-toggle]").forEach((b) => b.addEventListener("click", () => toggleClient(b.dataset.clientToggle, b.dataset.on === "1")));
+}
+
+function showClientToken(title, settings) {
+  document.getElementById("client-token-title").textContent = title;
+  document.getElementById("client-token-settings").textContent = settings;
+  openModal("client-token-modal");
+}
+
+async function mintClientToken(id, rotate) {
+  if (!confirm(rotate ? `Make a new token for ${id} and revoke all its other tokens?` : `Make a new token for ${id}?`)) return;
+  try {
+    const r = await json(`/api/clients/${encodeURIComponent(id)}/tokens`, "POST", { revoke_others: rotate, confirm: true });
+    showClientToken(`New token for ${id}`, r.settings);
+    renderClients();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function revokeClientToken(id, token) {
+  if (!confirm(`Revoke token #${token} of ${id}? Whatever uses it stops working at once.`)) return;
+  try {
+    await json(`/api/clients/${encodeURIComponent(id)}/tokens/${encodeURIComponent(token)}?confirm=true`, "DELETE");
+    renderClients();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function toggleClient(id, wasOn) {
+  if (!confirm(wasOn ? `Turn ${id} off? All its tokens stop working until you turn it on.` : `Turn ${id} on again?`)) return;
+  try {
+    await json(`/api/clients/${encodeURIComponent(id)}`, "PATCH", { enabled: !wasOn, confirm: true });
+    renderClients();
+  } catch (err) {
+    alert(err.message);  // turning one on is for the operator it acts for: the server says so
+  }
+}
+
+document.getElementById("add-client").addEventListener("click", () => {
+  document.getElementById("client-form").reset();
+  document.getElementById("client-person").textContent = document.getElementById("whoami-name").textContent || "you";
+  openModal("client-modal");
+});
+
+document.getElementById("client-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    const r = await json("/api/clients", "POST", { kind: f.kind.value, max_tier: Number(f.max_tier.value), label: f.label.value.trim(), confirm: true });
+    closeModal("client-modal");
+    showClientToken(`${r.agent.id}: its first token`, r.settings);
+    renderClients();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+document.getElementById("client-token-copy").addEventListener("click", async (e) => {
+  try {
+    await navigator.clipboard.writeText(document.getElementById("client-token-settings").textContent);
+    e.target.textContent = "Copied";
+  } catch (err) {
+    e.target.textContent = "Select and copy by hand";
+  }
+});
+document.querySelector('[data-tab="agents"]').addEventListener("click", renderClients);
+
 // ---- policy ----
 let policyHash = "";
 
@@ -1608,6 +1713,7 @@ async function start() {
     populateHostSelect();
   }
   renderWorkflows();  // the page opens on Workflows
+  if (!isMember) renderClients();
   renderAgents();
   renderBoard();
 }
