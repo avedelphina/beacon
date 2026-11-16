@@ -867,20 +867,23 @@ def set_intake_visibility(body: IntakeVisibilityRequest, request: Request) -> di
 async def intake_event(source: str, request: Request):
     """An outside event, signed with BEACON_INTAKE_SECRET, becomes a triage card (backend/intake.py).
     Refused, not queued, when the signature is wrong: nothing is recorded for an unsigned event."""
-    if not intake.enabled():
-        raise HTTPException(404)
+    secret = intake.secret_for(source)
+    if secret is None:
+        raise HTTPException(404)  # no one can sign for this source: it looks like no route
     if int(request.headers.get("content-length") or 0) > intake.MAX_BYTES:
         return JSONResponse({"detail": "event is too large"}, status_code=413)
     body = await request.body()
     try:
-        intake.verify(os.environ[intake.SECRET_ENV], body,
-                      request.headers.get("x-hub-signature-256"))
-        card = await run_in_threadpool(intake.record, source, request.headers.get("x-gitea-event")
-                                       or request.headers.get("x-github-event"), body)
+        intake.verify(secret, body, request.headers.get("x-hub-signature-256"))
+        card = await run_in_threadpool(
+            intake.receive, source, request.headers.get("x-gitea-event") or request.headers.get("x-github-event"),
+            body, request.headers.get("x-gitea-delivery") or request.headers.get("x-github-delivery"))
     except intake.IntakeRefused as exc:
         return JSONResponse({"detail": str(exc)}, status_code=401)
     except intake.IntakeError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=400)
+    except intake.Duplicate as exc:  # a retry or a replay: acknowledged, and nothing more is made
+        return JSONResponse({"card_id": exc.card_id, "duplicate": True}, status_code=200)
     return JSONResponse({"card_id": card["id"]}, status_code=202)
 
 

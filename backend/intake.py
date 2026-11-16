@@ -18,11 +18,17 @@ import hmac
 import json
 import os
 import re
+import sqlite3
 import time
 
 from . import board, opstore, store
 
 SECRET_ENV = "BEACON_INTAKE_SECRET"
+# One secret per source (BEACON_INTAKE_SECRET_<SOURCE>, upper case, "-" as "_"), so a valid
+# signature for one source cannot stand for another. A source with its own secret accepts
+# only that one; the shared BEACON_INTAKE_SECRET serves the sources that have none.
+SOURCE_SECRET_PREFIX = "BEACON_INTAKE_SECRET_"
+RETENTION_SECONDS = 30 * 24 * 3600  # how long a delivery id is remembered, and a replay refused
 SOURCE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 MAX_BYTES = 64 * 1024
 SHOWN = 8000  # what of the body the card carries; the rest is cut, and the card says so
@@ -40,8 +46,27 @@ class IntakeRefused(PermissionError):
     """The signature is missing or does not match."""
 
 
+class Duplicate(Exception):
+    """This delivery was already accepted. `card_id` is the card it made, if known."""
+
+    def __init__(self, card_id: int | None):
+        super().__init__(f"delivery already received (card {card_id})")
+        self.card_id = card_id
+
+
+def secret_for(source: str) -> str | None:
+    """The secret a source signs with, or None when nobody can sign for it: an endpoint
+    with no secret must not accept events. A source name that is not valid has no secret of
+    its own; it falls back to the shared one and is refused as malformed after the signature."""
+    if SOURCE.match(source):
+        own = os.environ.get(SOURCE_SECRET_PREFIX + source.upper().replace("-", "_"))
+        if own:
+            return own
+    return os.environ.get(SECRET_ENV) or None
+
+
 def enabled() -> bool:
-    """Off unless a secret is set: an endpoint nobody can sign for must not accept events."""
+    """Whether any shared secret is set (per-source secrets are looked up by `secret_for`)."""
     return bool(os.environ.get(SECRET_ENV))
 
 
@@ -102,3 +127,37 @@ def agent_may_see(author: str, card: dict) -> bool:
         return store.get_agent(author).reach is None  # not an agent: an operator's client
     except (store.NotFound, store.InvalidId):
         return True
+
+
+def delivery_key(delivery: str | None, body: bytes) -> str:
+    """What makes two requests the same delivery: the forge's own delivery id when it
+    sends one, else the body's hash (a replay of a captured request is byte for byte the
+    same, and its signature stays valid, so the signature alone cannot tell it from the first)."""
+    if delivery and len(delivery) <= 200 and delivery.isprintable():
+        return "id:" + delivery.strip()
+    return "sha256:" + hashlib.sha256(body).hexdigest()
+
+
+def receive(source: str, event: str | None, body: bytes, delivery: str | None = None) -> dict:
+    """Record a delivery once. A second delivery with the same key within the retention
+    period raises Duplicate, so a replayed or retried request makes no second card."""
+    key, now = delivery_key(delivery, body), time.time()
+    with opstore.connect() as db:
+        db.execute("DELETE FROM intake_deliveries WHERE received_at < ?", (now - RETENTION_SECONDS,))
+        try:
+            db.execute("INSERT INTO intake_deliveries (source, delivery_id, received_at) VALUES (?, ?, ?)",
+                       (source, key, now))
+        except sqlite3.IntegrityError:
+            row = db.execute("SELECT card_id FROM intake_deliveries WHERE source = ? AND delivery_id = ?",
+                             (source, key)).fetchone()
+            raise Duplicate(row["card_id"] if row else None) from None
+    try:
+        card = record(source, event, body)
+    except Exception:
+        with opstore.connect() as db:  # nothing was recorded: a corrected retry must not be called a replay
+            db.execute("DELETE FROM intake_deliveries WHERE source = ? AND delivery_id = ?", (source, key))
+        raise
+    with opstore.connect() as db:
+        db.execute("UPDATE intake_deliveries SET card_id = ? WHERE source = ? AND delivery_id = ?",
+                   (card["id"], source, key))
+    return card

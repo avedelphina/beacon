@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Intake: one secret per source, and no replays.** `BEACON_INTAKE_SECRET_<SOURCE>` (upper
+  case, `-` as `_`) is the secret one source signs with; a source that has one accepts only
+  that, so a valid signature for one source cannot stand for another. The shared
+  `BEACON_INTAKE_SECRET` still serves sources with none. A delivery is remembered for 30 days
+  by the forge's delivery id (`X-Gitea-Delivery`, `X-GitHub-Delivery`) or else the body's hash:
+  a retry or a replayed capture answers `200` with `{"card_id": ..., "duplicate": true}` and
+  makes no second card. See the README, "Outside events (intake)".
+
+### Added
+
 - **Requests to people say whether a peer was consulted.** `workflow_create` (and the REST
   body) take `consulted`, the peers asked first with what each said and the thread, and
   `consult_skipped`, why none was. An agent asking `human` or an email with neither is

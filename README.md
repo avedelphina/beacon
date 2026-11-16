@@ -767,6 +767,26 @@ old instance's `BEACON_PUBLIC_URL` to the new URL. Every agent's sync
 switches over on its next pull, and nobody has to touch the agents' hosts.
 Keep the old instance until every agent has moved.
 
+### Outside events (intake)
+
+A forge, a monitor, or anything that can sign a POST sends an event to
+`POST /intake/{source}` (`source` is lowercase letters, digits and dashes). The request
+carries `X-Hub-Signature-256: sha256=<hmac>`, the HMAC-SHA256 of the body under the source's
+secret, as Gitea and GitHub send it. Beacon checks it, then records the event as a board card
+for a person to triage. The card is fenced and labelled as someone else's text. Nothing acts
+on the event, and no agent sees it unless the operators allow that (the Board tab's intake
+visibility setting). A body larger than 64 KiB is refused.
+
+- **Secrets, one per source.** Set `BEACON_INTAKE_SECRET_<SOURCE>` (upper case, `-` as `_`)
+  for each source, so a valid signature for one source cannot stand for another. A source with
+  its own secret accepts only that one. `BEACON_INTAKE_SECRET` is a shared secret for sources
+  that have none. With neither set for a source, `/intake/{source}` is a 404.
+- **Replays.** A delivery is remembered for 30 days, by the forge's delivery id
+  (`X-Gitea-Delivery`, `X-GitHub-Delivery`) or else the body's hash. A second one with the same
+  key, a retry or a replayed capture with its still-valid signature, answers `200` with
+  `{"card_id": ..., "duplicate": true}` and makes no second card. A new event answers `202`.
+  After 30 days a captured request could be replayed once more: the signature carries no time.
+
 ### Fleet board
 
 Shared cards for work that spans agents, hosts, or days. Hermes Kanban

@@ -121,6 +121,15 @@ CREATE INDEX IF NOT EXISTS workflow_events_by_request ON workflow_events (reques
 -- Pointers from a card to work elsewhere (a PR, an issue, a ticket). Free-text provider and
 -- kind: a new provider needs no schema change. last_seen_* is what whoever added it last saw,
 -- typed by hand; Beacon never fetches or verifies it (backend/board.py, "references").
+-- Deliveries accepted from outside (backend/intake.py): a second one with the same id is a replay.
+CREATE TABLE IF NOT EXISTS intake_deliveries (
+    source       TEXT NOT NULL,
+    delivery_id  TEXT NOT NULL,
+    received_at  REAL NOT NULL,
+    card_id      INTEGER REFERENCES cards (id),
+    PRIMARY KEY (source, delivery_id)
+);
+
 CREATE TABLE IF NOT EXISTS card_references (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     card_id          INTEGER NOT NULL REFERENCES cards (id),
