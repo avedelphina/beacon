@@ -121,14 +121,21 @@ def open_chats() -> dict[str, list[str]]:
         return {r["agent"]: json.loads(r["open_json"]) for r in conn.execute("SELECT * FROM chat_exposure")}
 
 
+def has_board(agent: Agent) -> bool:
+    """The agent is opted in to the board: reach.board, or a client's own board access."""
+    return bool((agent.reach and agent.reach.board) or (agent.client and agent.client.board))
+
+
 def board_allowed(agent: Agent, exposure: dict[str, list[str]] | None = None) -> bool:
     """reach.board, unless the agent's host reported a chat open to anyone:
     Hermes offers its MCP servers on every chat platform, so a stranger could
     write to the board through it. An older sync reports nothing, and then
     the operator's reach.board stands. The report comes from the agent's own
     host, so it catches a chat opened later by mistake, not a hostile host."""
-    if not (agent.reach and agent.reach.board):
+    if not has_board(agent):
         return False
+    if agent.client is not None:
+        return True  # an operator's own client has no chat platforms to be left open
     return not (open_chats() if exposure is None else exposure).get(agent.id)
 
 
@@ -138,7 +145,11 @@ def may_call(caller: str, target: Agent, fleet: list[Agent] | None = None) -> bo
     only), and the target's own `reach.callers`, if set, must include the
     caller too. Applied to direct calls (the target's inbound tokens), the
     mailbox, and board assignments, so no path routes around it. Pass `fleet`
-    when asking in a loop, to avoid reading the records again each time."""
+    when asking in a loop, to avoid reading the records again each time.
+
+    Nobody calls a client, Beacon included: it listens for nothing and takes no work."""
+    if target.client is not None:
+        return False
     if caller == BEACON_PEER:
         return True
     callers = target.reach.callers if target.reach else None
@@ -285,6 +296,29 @@ def print_policy() -> int:
     return 1 if found else 0
 
 
+def client_token_text(agent_id: str) -> str:
+    """The token a client agent presents to the board MCP endpoint, with the settings to paste into
+    the client. Printed on the operator's own terminal and never returned by the API, so the token
+    does not travel through the web page: pipe it to where the client keeps its settings, do not
+    keep the output. It is the agent's own pull token: it reaches the board and the workflow tools
+    as that agent, and nothing else."""
+    agent = store.get_agent(agent_id)
+    if agent.client is None or not agent.client.board:
+        raise ValueError(f"{agent_id!r} is not a client agent with board access (set `client: {{board: true}}` on it)")
+    url = (public_url() or "https://<your-beacon-url>") + "/board/mcp"
+    secret = token(agent.id, BEACON_PEER)
+    return (
+        f"Client agent: {agent.id}\n"
+        f"Board MCP endpoint: {url}\n"
+        f"Bearer token: {secret}\n\n"
+        "Claude Code:\n"
+        f"  claude mcp add --transport http beacon-board {url} --header \"Authorization: Bearer {secret}\"\n\n"
+        "Any MCP client with streamable-HTTP servers (Codex and others): add a server named beacon-board with\n"
+        f"  url {url} and the header  Authorization: Bearer {secret}\n\n"
+        "Treat the token like a password: it acts as this agent on the board. Rotating BEACON_A2A_SECRET\n"
+        "changes every token.\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m backend.mesh", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -293,9 +327,18 @@ def main(argv: list[str] | None = None) -> int:
     install.add_argument("agent_id")
     install.add_argument("--docker", metavar="CONTAINER", help="agent runs in this container; script runs on its host as root")
     install.add_argument("--docker-user", default="hermes", help="user Hermes runs as in the container (default: hermes)")
+    client = sub.add_parser("client-token", help="print the board token and MCP settings for one client agent (an operator's AI client)")
+    client.add_argument("agent_id")
     args = parser.parse_args(argv)
     if args.cmd == "policy":
         return print_policy()
+    if args.cmd == "client-token":
+        try:
+            sys.stdout.write(client_token_text(args.agent_id))
+        except (store.NotFound, ValueError, MissingSecret) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        return 0
     try:
         sys.stdout.write(install_script(args.agent_id, args.docker, args.docker_user))
     except (store.NotFound, ValueError, MissingSecret) as exc:

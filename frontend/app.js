@@ -75,9 +75,9 @@ const api = {
 const splitList = (value) => value.split(",").map((t) => t.trim()).filter(Boolean);
 
 function statusPill(state, title = "") {
-  const labels = { "not-installed": "not installed", crashlooping: "crash-looping", "sync-only": "sync only", "no-a2a": "no A2A" };
+  const labels = { "not-installed": "not installed", crashlooping: "crash-looping", "sync-only": "sync only", "no-a2a": "no A2A", client: "client" };
   const safeState = ["loading", "active", "inactive", "failed", "unreachable", "not-installed", "crashlooping", "starting", "stopping",
-    "online", "sync-only", "away", "offline", "no-a2a"].includes(state) ? state : "unknown";
+    "online", "sync-only", "away", "offline", "no-a2a", "client"].includes(state) ? state : "unknown";
   const label = labels[safeState] || safeState;
   return `<span class="status-pill ${safeState}"${title ? ` title="${esc(title)}"` : ""}><span class="dot"></span>${esc(label)}</span>`;
 }

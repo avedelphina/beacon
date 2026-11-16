@@ -277,6 +277,7 @@ td[data-label="ID"] .chip { margin-left: 0.4rem; }
 .status-pill.offline .dot { background: var(--crit); }
 .status-pill.away .dot { background: var(--slate-2); }
 .status-pill.no-a2a .dot { background: var(--slate-2); }
+.status-pill.client .dot { background: var(--slate-2); }
 .status-pill.not-installed .dot { background: var(--slate-2); }
 .status-pill.loading .dot { background: var(--line-soft); }
 .status-pill.starting .dot, .status-pill.stopping .dot { background: var(--warn); }

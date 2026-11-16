@@ -354,7 +354,7 @@ its own identity, bound to that operator, and handles the workflow requests that
 independent agent review, so the operator is asked only for what needs a person. It is an agent,
 not the operator: Beacon says so everywhere it is recorded.
 
-- **Identity.** A new kind of agent, a *client*: it has no endpoint, is never called, assigned a
+- **Identity** *(client kind delivered; the binding below is next)*. A new kind of agent, a *client*: it has no endpoint, is never called, assigned a
   card or sent mail, and uses the board and workflow tools with its own token. Named for the
   client and the operator (`claude-<operator>`, `codex-<operator>`). Any operator may have one.
   It replaces the placeholder endpoint a client would need today.

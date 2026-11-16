@@ -541,13 +541,22 @@ def _send_notice(card_id: int, author: str, assignee: str, kind: str, text: str)
 
 
 def _check_may_assign(author: str, assignee: str) -> None:
-    """Handing an agent work is a way of calling it: an agent may assign
-    only to agents that accept calls from it (mesh.may_call). People and
-    Beacon are not limited."""
-    if not _is_agent(author) or not _is_agent(assignee):
+    """Handing an agent work is a way of calling it: an agent, or an operator's client,
+    may assign only to agents that accept calls from it (mesh.may_call). People and
+    Beacon are not limited. A client is given no work at all: it is not called."""
+    if _is_client(assignee):
+        raise ValueError(f"{assignee} is an operator's client: it is not given work")
+    if not (_is_agent(author) or _is_client(author)) or not _is_agent(assignee):
         return
     if not mesh.may_call(author, store.get_agent(assignee)):
         raise ValueError(f"{assignee} does not accept work from {author}")
+
+
+def _is_client(name: str) -> bool:
+    try:
+        return store.get_agent(name).client is not None
+    except (store.NotFound, store.InvalidId):
+        return False
 
 
 def _is_agent(name: str) -> bool:

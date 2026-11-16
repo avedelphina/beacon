@@ -172,6 +172,8 @@ def _classify(agent: Agent, answered: bool | None, detail: str, pulled: float | 
               quiet_after: int | None) -> dict:
     age = None if pulled is None else max(0, int(now - pulled))
     base = {"last_pull_seconds_ago": age}
+    if agent.reach is None and agent.client is not None:
+        return {**base, "state": "client", "detail": "an operator's client: it uses the board, it is not called"}
     if agent.reach is None:
         return {**base, "state": "no-a2a", "detail": "no reach block: Beacon has no A2A endpoint for this agent"}
     if answered:
