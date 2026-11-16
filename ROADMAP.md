@@ -480,10 +480,10 @@ Open before anything beyond slice 1 (these are the blocking questions in the
 architecture proposal in the operators' own repository):
 
 - a named Phase 0 owner and who may issue credentials for each source;
-- per-source secrets, and source-to-repository binding (a valid signature from
+- per-source secrets *(delivered)*, and source-to-repository binding (a valid signature from
   one repository must not stand for another);
-- replay protection (a delivery id seen before is refused) and retention for
-  raw bodies;
+- replay protection *(delivered: a delivery seen before makes no second card, remembered for
+  30 days)* and retention for raw bodies;
 - what acceptance does: accepting a card records who did it and can open work,
   but does not run anything from the event;
 - email and monitor sources, which need their own authentication.
