@@ -350,6 +350,8 @@ td[data-label="ID"] .chip { margin-left: 0.4rem; }
 .btn.danger { color: var(--crit); }
 .intake-visibility { display: flex; flex-wrap: wrap; align-items: center; gap: 0.8rem; margin: 0 0 0.9rem; font-size: 0.85rem; color: var(--slate); }
 .intake-visibility label { display: flex; align-items: center; gap: 0.3rem; }
+.tab-badge { display: inline-block; min-width: 1.2rem; margin-left: 0.4rem; padding: 0 0.35rem; border-radius: 999px; background: var(--ink); color: var(--paper); font-size: 0.72rem; line-height: 1.2rem; text-align: center; font-family: var(--font-mono); }
+.tab-badge[hidden] { display: none; }
 .workflow-list { display: flex; flex-direction: column; gap: 0.9rem; max-width: 880px; }
 .workflow-item { border: 1px solid var(--line-soft); border-left: 4px solid var(--line); background: var(--surface); padding: 1.1rem 1.3rem; }
 .wf-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }

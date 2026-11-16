@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-11-16
+
+### Added
+
+- **Workflows badge.** The Workflows tab shows how many requests are pending
+  for the person viewing; it is hidden at zero and refreshes every 30 seconds.
+
+### Changed
+
+- **Tab order.** Workflows comes first, then Board, then the rest.
+
 ## [0.35.0] — 2026-11-15
 
 ### Added
