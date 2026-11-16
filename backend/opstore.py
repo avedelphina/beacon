@@ -50,7 +50,9 @@ CREATE TABLE IF NOT EXISTS cards (
     escalated_at REAL,                       -- people were told by email; again only after the card changes
     next_action TEXT,                        -- the one step that moves the card on
     done_when   TEXT,                        -- what has to be true to close it
-    links       TEXT NOT NULL DEFAULT '[]'   -- JSON [{url, label}]: pointers out (PRs, issues), never state
+    links       TEXT NOT NULL DEFAULT '[]',  -- JSON [{url, label}]: pointers out (PRs, issues), never state
+    blocked_reason TEXT,                     -- while blocked: unclear | waiting | cannot (board.BLOCKED_REASONS); NULL on cards blocked before it existed
+    waiting_on  TEXT                         -- waiting: what the card waits on (an agent, workflow:<id>, something outside); cannot: what is missing
 );
 CREATE TABLE IF NOT EXISTS card_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -256,7 +258,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     card_columns = {row[1] for row in conn.execute("PRAGMA table_info(cards)")}
     for column, decl in (("reminded_at", "REAL"), ("reminders", "INTEGER NOT NULL DEFAULT 0"),
                          ("escalated_at", "REAL"), ("next_action", "TEXT"), ("done_when", "TEXT"),
-                         ("links", "TEXT NOT NULL DEFAULT '[]'")):
+                         ("links", "TEXT NOT NULL DEFAULT '[]'"), ("blocked_reason", "TEXT"), ("waiting_on", "TEXT")):
         if column not in card_columns:
             conn.execute(f"ALTER TABLE cards ADD COLUMN {column} {decl}")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(card_events)")}

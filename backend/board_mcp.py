@@ -118,15 +118,24 @@ def build() -> MCPServer:
                     title: str | None = None, body: str | None = None, project: str | None = None,
                     next_action: str | None = None, done_when: str | None = None,
                     links: list[dict] | None = None, note: str | None = None,
-                    context_id: str | None = None) -> dict:
+                    context_id: str | None = None, blocked_reason: str | None = None,
+                    waiting_on: str | None = None) -> dict:
         """Change a card: move its state (todo, doing, blocked, review, done), reassign it
         (assignee="" unassigns), or edit it. Keep next_action current as the work moves;
         "" clears it or done_when. links replaces the whole list of {url, label}, so send
-        the links you keep too. note says why; it is kept in the history."""
+        the links you keep too. note says why; it is kept in the history.
+
+        Moving a card to blocked needs blocked_reason: "unclear" (you do not know how to go on:
+        consult a peer and try before asking a person), "waiting" (the next step depends on
+        something named: give waiting_on, an agent id, "workflow:<id>" for a request on this
+        card, or something outside Beacon; waiting on a person means making a workflow request
+        first) or "cannot" (you lack a capability or access: waiting_on says exactly what is
+        missing, and a person hears at once). Do not use blocked for work you could still do."""
         _visible_card(ctx, card_id)
         return board.update_card(_author(ctx), card_id, state=state, assignee=assignee, title=title,
                                  body=body, project=project, next_action=next_action,
-                                 done_when=done_when, links=links, note=note, context_id=context_id)
+                                 done_when=done_when, links=links, note=note, context_id=context_id,
+                                 blocked_reason=blocked_reason, waiting_on=waiting_on)
 
     @server.tool()
     def card_comment(ctx: Context, card_id: int, text: str, context_id: str | None = None) -> dict:

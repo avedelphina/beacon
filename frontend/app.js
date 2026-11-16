@@ -998,6 +998,7 @@ async function renderBoard() {
         <span>#${esc(c.id)} ${esc(c.title)}</span>
         <span class="board-card-meta">${esc(c.assignee ?? "unassigned")}${c.project ? ` · ${esc(c.project)}` : ""}${
           waiting[c.id] ? ` <span class="chip chip-warn">${waiting[c.id]} open request${waiting[c.id] > 1 ? "s" : ""}</span>` : ""}${
+          c.state === "blocked" ? ` <span class="chip${c.blocked_reason === "cannot" ? " chip-warn" : ""}"${c.waiting_on ? ` title="${esc(c.waiting_on)}"` : ""}>${esc(c.blocked_reason ?? "no reason")}</span>` : ""}${
           c.state !== "done" ? deliveryChip(c.delivery) : ""}</span>
       </button>`).join("")}</div>`;
   }).join("");
@@ -1062,6 +1063,8 @@ async function openCard(id) {
     <dl class="card-plan">
       <dt>Next action</dt><dd>${c.next_action ? esc(c.next_action) : unset}</dd>
       <dt>Done when</dt><dd>${c.done_when ? esc(c.done_when) : unset}</dd>
+      ${c.state === "blocked" ? `<dt>Blocked</dt><dd>${c.blocked_reason ? esc(c.blocked_reason) : '<span class="hint">no reason given (blocked before reasons existed)</span>'}${
+        c.waiting_on ? ` · ${esc(c.waiting_on)}` : ""}</dd>` : ""}
       ${reqs ? `<dt>Requests</dt><dd><ul class="card-list">${reqs}</ul><span class="hint">Answer in the Workflows tab.</span></dd>` : ""}
       ${refs ? `<dt>References</dt><dd><ul class="card-list">${refs}</ul></dd>` : ""}
       ${links ? `<dt>Links</dt><dd><ul class="card-list">${links}</ul></dd>` : ""}
@@ -1075,6 +1078,9 @@ async function openCard(id) {
   setAssignee(form.assignee, c.assignee);
   form.next_action.value = c.next_action ?? "";
   form.done_when.value = c.done_when ?? "";
+  form.blocked_reason.value = c.blocked_reason ?? "";
+  form.waiting_on.value = c.waiting_on ?? "";
+  showBlockedFields(form);
   form.links.value = c.links.map((l) => `${l.url} ${l.label}`.trim()).join("\n");
   form.note.value = "";
   openModal("card-modal");
@@ -1120,13 +1126,21 @@ function parseLinks(text) {
   });
 }
 
+function showBlockedFields(form) {
+  document.getElementById("blocked-fields").hidden = form.state.value !== "blocked";
+}
+document.getElementById("card-update-form").state.addEventListener("change", (e) => showBlockedFields(e.target.form));
+
 document.getElementById("card-update-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = e.target;
   try {
     await json(`/api/board/cards/${encodeURIComponent(f.dataset.card)}`, "PATCH",
       { state: f.state.value, assignee: f.assignee.value.trim(), next_action: f.next_action.value,
-        done_when: f.done_when.value, links: parseLinks(f.links.value), note: f.note.value.trim() || null });
+        done_when: f.done_when.value, links: parseLinks(f.links.value), note: f.note.value.trim() || null,
+        // Only a blocked card has a reason; the server refuses a move to blocked without one.
+        blocked_reason: f.state.value === "blocked" ? f.blocked_reason.value || null : null,
+        waiting_on: f.state.value === "blocked" ? f.waiting_on.value.trim() || null : null });
     closeModal("card-modal");
     renderBoard();
   } catch (err) {
