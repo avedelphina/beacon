@@ -975,6 +975,10 @@ async function changeIntakeVisibility() {
 document.getElementById("intake-see-members").addEventListener("change", changeIntakeVisibility);
 document.getElementById("intake-see-agents").addEventListener("change", changeIntakeVisibility);
 
+const ARCHIVE_AFTER_SECONDS = 48 * 3600;  // a done card stays in the Done column this long after its last change
+const NONE = "__none";                    // the filter value for "no assignee" and "no project"
+let boardCards = [], boardWaiting = {};
+
 async function renderBoard() {
   renderIntakeVisibility();
   const el = document.getElementById("board-columns");
@@ -991,19 +995,10 @@ async function renderBoard() {
   (await api.listWorkflows().catch(() => []))
     .filter((w) => w.state === "pending" || w.state === "changes_requested")
     .forEach((w) => { waiting[w.card_id] = (waiting[w.card_id] || 0) + 1; });
-  el.innerHTML = BOARD_STATES.map((state) => {
-    const items = cards.filter((c) => c.state === state);
-    return `<div class="board-col"><h2>${state} <span class="hint">${items.length}</span></h2>${
-      items.map((c) => `<button type="button" class="board-card" data-card="${esc(c.id)}">
-        <span>#${esc(c.id)} ${esc(c.title)}</span>
-        <span class="board-card-meta">${esc(c.assignee ?? "unassigned")}${c.project ? ` · ${esc(c.project)}` : ""}${
-          waiting[c.id] ? ` <span class="chip chip-warn">${waiting[c.id]} open request${waiting[c.id] > 1 ? "s" : ""}</span>` : ""}${
-          c.blocked_by_count ? ` <span class="chip chip-warn" title="unfinished dependencies">blocked by ${esc(c.blocked_by_count)}</span>` : ""}${
-          c.state === "blocked" ? ` <span class="chip${c.blocked_reason === "cannot" ? " chip-warn" : ""}"${c.waiting_on ? ` title="${esc(c.waiting_on)}"` : ""}>${esc(c.blocked_reason ?? "no reason")}</span>` : ""}${
-          c.state !== "done" ? deliveryChip(c.delivery) : ""}</span>
-      </button>`).join("")}</div>`;
-  }).join("");
-  el.querySelectorAll("[data-card]").forEach((b) => b.addEventListener("click", () => openCard(b.dataset.card)));
+  boardCards = cards;
+  boardWaiting = waiting;
+  fillBoardFilters();
+  drawBoard();
   // Who the viewer may give a card to: a member, their own agents and the ones
   // the policy opens to members; an operator, every agent in the mesh.
   json("/api/board/assignees").then((ids) => {
@@ -1011,6 +1006,88 @@ async function renderBoard() {
     document.querySelectorAll("select[data-assignees]").forEach((select) => setAssignee(select, select.value));
   }, () => {});
 }
+
+function boardCardHtml(c) {
+  return `<button type="button" class="board-card" data-card="${esc(c.id)}">
+        <span>#${esc(c.id)} ${esc(c.title)}</span>
+        <span class="board-card-meta">${esc(c.assignee ?? "unassigned")}${c.project ? ` · ${esc(c.project)}` : ""}${
+          boardWaiting[c.id] ? ` <span class="chip chip-warn">${boardWaiting[c.id]} open request${boardWaiting[c.id] > 1 ? "s" : ""}</span>` : ""}${
+          c.blocked_by_count ? ` <span class="chip chip-warn" title="unfinished dependencies">blocked by ${esc(c.blocked_by_count)}</span>` : ""}${
+          c.state === "blocked" ? ` <span class="chip${c.blocked_reason === "cannot" ? " chip-warn" : ""}"${c.waiting_on ? ` title="${esc(c.waiting_on)}"` : ""}>${esc(c.blocked_reason ?? "no reason")}</span>` : ""}${
+          c.state !== "done" ? deliveryChip(c.delivery) : ""}</span>
+      </button>`;
+}
+
+// The filter's dropdowns list what the cards have. A choice that is no longer there falls back to "any".
+function fillBoardFilters() {
+  const fill = (id, label, none, values) => {
+    const select = document.getElementById(id);
+    const chosen = select.value;
+    select.innerHTML = `<option value="">${label}</option><option value="${NONE}">${none}</option>${
+      [...values].sort().map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("")}`;
+    select.value = [...select.options].some((o) => o.value === chosen) ? chosen : "";
+  };
+  fill("board-filter-assignee", "any assignee", "unassigned", new Set(boardCards.map((c) => c.assignee).filter(Boolean)));
+  fill("board-filter-project", "any project", "no project", new Set(boardCards.map((c) => c.project).filter(Boolean)));
+}
+
+function boardFilter() {
+  return {
+    terms: document.getElementById("board-search").value.toLowerCase().split(/\s+/).filter(Boolean),
+    assignee: document.getElementById("board-filter-assignee").value,
+    project: document.getElementById("board-filter-project").value,
+    blocked: document.getElementById("board-filter-blocked").checked,
+  };
+}
+
+// Every word typed must appear somewhere on the card: its number, title, text, agent, project, state, why
+// it is blocked, or what it waits on. Cheap to do here: the board already holds every card.
+function boardMatches(c, f) {
+  if (f.assignee && (c.assignee ?? "") !== (f.assignee === NONE ? "" : f.assignee)) return false;
+  if (f.project && (c.project ?? "") !== (f.project === NONE ? "" : f.project)) return false;
+  if (f.blocked && c.state !== "blocked") return false;
+  if (!f.terms.length) return true;
+  const text = [`#${c.id}`, c.title, c.body, c.assignee, c.project, c.state, c.blocked_reason, c.waiting_on,
+    c.next_action, c.done_when].filter(Boolean).join(" ").toLowerCase();
+  return f.terms.every((t) => text.includes(t));
+}
+
+function drawBoard() {
+  const f = boardFilter();
+  const active = Boolean(f.terms.length || f.assignee || f.project || f.blocked);
+  const now = Date.now() / 1000;
+  const archived = (c) => c.state === "done" && now - c.updated_at >= ARCHIVE_AFTER_SECONDS;
+  const shown = boardCards.filter((c) => boardMatches(c, f));
+  const el = document.getElementById("board-columns");
+  el.innerHTML = BOARD_STATES.map((state) => {
+    const items = shown.filter((c) => c.state === state && !archived(c));
+    return `<div class="board-col"><h2>${state} <span class="hint">${items.length}</span></h2>${items.map(boardCardHtml).join("")}</div>`;
+  }).join("");
+
+  const old = shown.filter(archived);
+  const everOld = boardCards.filter(archived).length;
+  const archive = document.getElementById("board-archive");
+  archive.hidden = everOld === 0;
+  document.getElementById("board-archive-count").textContent = active ? `${old.length} of ${everOld}` : `${everOld}`;
+  document.getElementById("board-archive-list").innerHTML = old.length
+    ? old.map(boardCardHtml).join("") : '<p class="hint">No archived card matches.</p>';
+  if (active && old.length) archive.open = true;  // a search that finds something there should show it
+
+  document.getElementById("board-filter-clear").hidden = !active;
+  document.getElementById("board-filter-count").textContent = active ? `${shown.length} of ${boardCards.length} cards` : "";
+  document.querySelectorAll("#board-columns [data-card], #board-archive-list [data-card]")
+    .forEach((b) => b.addEventListener("click", () => openCard(b.dataset.card)));
+}
+
+["board-search", "board-filter-assignee", "board-filter-project", "board-filter-blocked"].forEach((id) =>
+  document.getElementById(id).addEventListener(id === "board-search" ? "input" : "change", drawBoard));
+document.getElementById("board-filter-clear").addEventListener("click", () => {
+  document.getElementById("board-search").value = "";
+  document.getElementById("board-filter-assignee").value = "";
+  document.getElementById("board-filter-project").value = "";
+  document.getElementById("board-filter-blocked").checked = false;
+  drawBoard();
+});
 
 let assigneeIds = [];
 

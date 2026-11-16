@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Search and filter on the Board.** A search box (every word must appear on the card:
+  number, title, text, agent, project, state, blocked reason, what it waits on), assignee and
+  project dropdowns, and a "blocked only" tick, with a count and a Clear button. Filtering
+  happens in the page on the cards it already holds.
+- **Done cards move to an archive after 48 hours.** A done card older than 48 hours since its
+  last change leaves the Done column for a collapsible Archive under the board. Archived cards
+  open and search like any other; a search that matches one opens the archive.
+
+### Added
+
 - **A reviewer that is not sure can send a request to a person.** `workflow_require_human`
   (and `POST /api/workflows/{id}/require-human`) takes a reason and sets a one-way flag: the
   request stays pending with its plan binding and tier, but from then on only a person in the web

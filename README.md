@@ -821,6 +821,15 @@ records every creation, move, reassignment, and comment, each with its
 author. It also records the A2A `context_id` the work happened under.
 Cards live in the operational store, not in fleet YAML.
 
+**Finding cards, and the archive.** The Board tab has a search box (every word you type must
+appear on the card: its number, title, text, agent, project, state, why it is blocked, or what
+it waits on), dropdowns for assignee and project (including "unassigned" and "no project"), and
+a "blocked only" tick. They filter the cards the page already holds, so nothing is sent to the
+server. A done card stays in the Done column for 48 hours after its last change, then moves to a
+collapsible **Archive** under the board. Archived cards open and search like any other, and a
+search that matches one opens the archive. A comment or any other change brings a done card
+back to the Done column.
+
 **Parents and dependencies.** A card may be part of one other card (`parent_id`; its
 `children` list the cards under it), and may depend on others (`depends_on`). From the
 dependencies Beacon computes `blocked_by`: the dependencies that are not `done`, which
