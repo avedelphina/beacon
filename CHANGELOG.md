@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.39.0] — 2026-11-16
+
 ### Added
 
 - **A client answers for its operator.** A client agent bound to an operator (`acts_for`) reads the
