@@ -563,6 +563,11 @@ class WorkflowResponseRequest(BaseModel):
     context_id: str | None = None
 
 
+class WorkflowEscalateRequest(BaseModel):
+    reason: str
+    context_id: str | None = None
+
+
 class WorkflowReviseRequest(BaseModel):
     plan_revision: str
     plan_hash: str
@@ -804,6 +809,14 @@ def workflow_get(request_id: int, request: Request) -> dict:
 @app.post("/api/workflows/{request_id}/respond")
 def workflow_respond(request_id: int, body: WorkflowResponseRequest, request: Request) -> dict:
     return _respond_workflow(request_id, body, request)
+
+
+@app.post("/api/workflows/{request_id}/require-human")
+def workflow_require_human(request_id: int, body: WorkflowEscalateRequest, request: Request) -> dict:
+    """"I am not sure": send a pending request to a person. From then on only a person in the web
+    page may answer it. One-way; see workflow.escalate."""
+    return workflow.escalate(request_id, actor=_workflow_response_actor(request), human=_workflow_human(request),
+                             reason=body.reason, context_id=body.context_id)
 
 
 @app.post("/api/workflows/{request_id}/revise")

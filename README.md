@@ -834,6 +834,14 @@ change is a card history event with its author and optional `context_id`. A view
 the related cards they may see: a member's own cards and the ones their agents hold, an
 agent's everything except intake cards the operators keep from agents.
 
+**"I am not sure": sending a request to a person.** Whoever may answer a pending request can call
+`workflow_require_human` (`POST /api/workflows/{id}/require-human`) with a reason. A tier belongs
+to the capability, so the request cannot become a T4 one; instead it keeps its plan binding and tier
+and from then on only a person in the web page may answer it (the named person if it names one,
+otherwise any operator, even when it was addressed to an agent). The operators and the requester are
+told, the page and the card's history show the reason, and nothing clears the flag but that person's
+answer. T4 and T5 requests already need a person.
+
 **Asking a person says whether a peer was asked first.** A request to a person (`human`
 or an email) made by an agent carries `consulted`, the peers it asked first with what each
 said and the thread, or `consult_skipped`, why it did not. With neither the request is

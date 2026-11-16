@@ -101,7 +101,10 @@ CREATE TABLE IF NOT EXISTS workflow_requests (
     responded_at        REAL,
     consulted_json      TEXT NOT NULL DEFAULT '[]',  -- peers the requester asked first: [{agent, said, context_id}]
     consult_skipped     TEXT,                        -- why it did not (a request to a person, no peer consulted)
-    consult_flag        TEXT                         -- "missing": an agent asked a person with neither (workflow._consult_flag)
+    consult_flag        TEXT,                        -- "missing": an agent asked a person with neither (workflow._consult_flag)
+    require_human       INTEGER NOT NULL DEFAULT 0,  -- 1: a reviewer sent it to a person; only a person in the browser may answer (workflow.escalate)
+    escalated_by        TEXT,
+    escalated_reason    TEXT
 );
 CREATE INDEX IF NOT EXISTS workflow_requests_by_card ON workflow_requests (card_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS workflow_requests_by_state ON workflow_requests (state, expires_at);
@@ -289,7 +292,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE cards ADD COLUMN {column} {decl}")
     request_columns = {row[1] for row in conn.execute("PRAGMA table_info(workflow_requests)")}
     for column, decl in (("consulted_json", "TEXT NOT NULL DEFAULT '[]'"), ("consult_skipped", "TEXT"),
-                         ("consult_flag", "TEXT")):
+                         ("consult_flag", "TEXT"), ("require_human", "INTEGER NOT NULL DEFAULT 0"),
+                         ("escalated_by", "TEXT"), ("escalated_reason", "TEXT")):
         if column not in request_columns:
             conn.execute(f"ALTER TABLE workflow_requests ADD COLUMN {column} {decl}")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(card_events)")}
