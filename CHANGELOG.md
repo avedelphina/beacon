@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **`cannot` needs a follow-up request.** A card moves to `cannot` only with
+  `waiting_on: workflow:<id>`, an open workflow request on the same card for what the agent
+  lacks. While the request is open nobody is reminded and nobody is emailed twice; when it ends
+  (approved, rejected, expired) the assignee is reminded with what to do about the outcome, and
+  people hear after two reminders. A `cannot` card from before this keeps its plain-text wait
+  and the old handling (people hear at once, again each `remind_after`) and stays editable.
+  Skill 1.20.0.
+
+### Changed
+
 - **The mailbox says who a notice is from.** A notice an agent caused (it assigned a card to
   you, commented on one) now starts `[Notice from <agent> via the Beacon mailbox]`; Beacon's
   own still say `[Notice from the Beacon mailbox]`. Delivery is unchanged: it still arrives

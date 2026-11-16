@@ -76,13 +76,32 @@ def test_unclear_needs_nothing_more_and_forgets_a_wait(fleet):
     assert (got["state"], got["blocked_reason"], got["waiting_on"]) == ("blocked", "unclear", None)
 
 
-@pytest.mark.parametrize("reason", ["waiting", "cannot"])
-def test_waiting_and_cannot_say_what(fleet, reason):
+def test_waiting_says_what_for(fleet):
     card = board.create_card("beacon", "Fix backup")
     with pytest.raises(ValueError, match="waiting_on"):
-        board.update_card("beacon", card["id"], state="blocked", blocked_reason=reason)
+        board.update_card("beacon", card["id"], state="blocked", blocked_reason="waiting")
     with pytest.raises(ValueError, match="at most 200"):
-        board.update_card("beacon", card["id"], state="blocked", blocked_reason=reason, waiting_on="x" * 201)
+        board.update_card("beacon", card["id"], state="blocked", blocked_reason="waiting", waiting_on="x" * 201)
+
+
+def test_cannot_needs_an_open_request_for_what_it_lacks(crew):
+    card, other = board.create_card("beacon", "Fix backup"), board.create_card("beacon", "Other")
+    mine, _ = _request(card["id"])
+    theirs, _ = _request(other["id"])
+    for bad in (None, "write access to the vault", "bravo", "dana@example.com", "workflow:abc"):
+        with pytest.raises(ValueError, match="needs a request to a person"):
+            board.update_card("beacon", card["id"], state="blocked", blocked_reason="cannot", waiting_on=bad)
+    with pytest.raises(ValueError, match="not a request on this card"):
+        board.update_card("beacon", card["id"], state="blocked", blocked_reason="cannot", waiting_on=f"workflow:{theirs['id']}")
+    ok = board.update_card("beacon", card["id"], state="blocked", blocked_reason="cannot", waiting_on=f"workflow:{mine['id']}")
+    assert (ok["blocked_reason"], ok["waiting_on"]) == ("cannot", f"workflow:{mine['id']}")
+    ended, binding = _request(card["id"])
+    workflow.respond(ended["id"], actor="beacon", human=True, action="rejected", response={}, **binding)
+    other_card = board.create_card("beacon", "Third")
+    ended2, binding2 = _request(other_card["id"])
+    workflow.respond(ended2["id"], actor="beacon", human=True, action="rejected", response={}, **binding2)
+    with pytest.raises(ValueError, match="nothing left to wait for"):
+        board.update_card("beacon", other_card["id"], state="blocked", blocked_reason="cannot", waiting_on=f"workflow:{ended2['id']}")
 
 
 def test_waiting_on_a_person_goes_through_a_workflow_on_this_card(crew):
@@ -119,18 +138,19 @@ def test_an_agent_or_something_outside_beacon_is_a_fine_thing_to_wait_for(fleet)
     assert got["waiting_on"] == "CI run on the forge" and got["state"] == "blocked"
 
 
-def test_a_new_reason_needs_its_own_wait_and_leaving_blocked_clears_both(fleet):
-    card = board.create_card("beacon", "Fix backup")
-    board.update_card("beacon", card["id"], state="blocked", blocked_reason="waiting", waiting_on="bravo")
+def test_a_new_reason_needs_its_own_wait_and_leaving_blocked_clears_both(crew):
+    card = board.create_card("beacon", "Fix backup")["id"]
+    request, _ = _request(card)
+    board.update_card("beacon", card, state="blocked", blocked_reason="waiting", waiting_on="bravo")
     with pytest.raises(ValueError, match="waiting_on"):
-        board.update_card("beacon", card["id"], blocked_reason="cannot")  # bravo is not what is missing
-    changed = board.update_card("beacon", card["id"], blocked_reason="cannot", waiting_on="write access to the vault")
-    assert (changed["blocked_reason"], changed["waiting_on"]) == ("cannot", "write access to the vault")
+        board.update_card("beacon", card, blocked_reason="cannot")  # bravo is not a request for what is lacking
+    changed = board.update_card("beacon", card, blocked_reason="cannot", waiting_on=f"workflow:{request['id']}")
+    assert (changed["blocked_reason"], changed["waiting_on"]) == ("cannot", f"workflow:{request['id']}")
 
-    done = board.update_card("beacon", card["id"], state="doing")
+    done = board.update_card("beacon", card, state="doing")
     assert (done["blocked_reason"], done["waiting_on"]) == (None, None)
     with pytest.raises(ValueError, match="belong to a blocked card"):
-        board.update_card("beacon", card["id"], blocked_reason="unclear")
+        board.update_card("beacon", card, blocked_reason="unclear")
 
 
 def test_the_history_says_why_once(fleet):
@@ -163,8 +183,9 @@ def test_rest_and_mcp_ask_for_the_reason_too(client, fleet, monkeypatch):
     card = board.create_card("beacon", "Fix backup")
     url = f"/api/board/cards/{card['id']}"
     assert client.patch(url, json={"state": "blocked"}).status_code == 400
-    ok = client.patch(url, json={"state": "blocked", "blocked_reason": "cannot", "waiting_on": "write access to the vault"})
-    assert ok.status_code == 200 and ok.json()["blocked_reason"] == "cannot"
+    assert client.patch(url, json={"state": "blocked", "blocked_reason": "cannot", "waiting_on": "the vault"}).status_code == 400
+    ok = client.patch(url, json={"state": "blocked", "blocked_reason": "waiting", "waiting_on": "bravo"})
+    assert ok.status_code == 200 and ok.json()["blocked_reason"] == "waiting"
 
     store.upsert_host(Host.model_validate({"id": "h1", "address": "10.0.0.1", "ssh": {"user": "u", "key": "/k"}}))
     store.upsert_agent(_agent("reader"))
@@ -173,8 +194,10 @@ def test_rest_and_mcp_ask_for_the_reason_too(client, fleet, monkeypatch):
     tool = board_mcp.build()._tool_manager.get_tool("card_update").fn
     with pytest.raises(ValueError, match="blocked_reason"):
         tool(ctx=ctx, card_id=card["id"], state="done", blocked_reason="unclear")
-    moved = tool(ctx=ctx, card_id=card["id"], blocked_reason="waiting", waiting_on="bravo")
-    assert (moved["blocked_reason"], moved["waiting_on"]) == ("waiting", "bravo")
+    with pytest.raises(ValueError, match="needs a request to a person"):
+        tool(ctx=ctx, card_id=card["id"], blocked_reason="cannot", waiting_on="write access")
+    moved = tool(ctx=ctx, card_id=card["id"], waiting_on="charlie")
+    assert (moved["blocked_reason"], moved["waiting_on"]) == ("waiting", "charlie")
 
 
 # --- what Beacon does about each reason -------------------------------------------------
@@ -227,8 +250,18 @@ def test_a_card_waiting_on_something_outside_is_chased_by_people_again_and_again
     assert len(crew) == 2 and "it has waited 2 d on CI run on the forge" in crew[1][2]
 
 
-def test_a_card_that_cannot_go_on_reaches_people_at_once_and_is_repeated(crew):
-    card = _blocked("cannot", "write access to the vault")
+def _legacy_cannot(waiting_on, assignee="alpha"):
+    """A card that was `cannot` before a request was needed: a plain-text wait."""
+    card = board.create_card("beacon", "Fix backup", assignee=assignee)["id"]
+    with opstore.connect() as db:
+        db.execute("UPDATE cards SET state = 'blocked', blocked_reason = 'cannot', waiting_on = ? WHERE id = ?",
+                   (waiting_on, card))
+    _quiet(card)
+    return card
+
+
+def test_a_cannot_card_from_before_requests_reaches_people_at_once_and_is_repeated(crew):
+    card = _legacy_cannot("write access to the vault")
     board.remind("bravo", now=0.01 * DAY)          # no waiting for a remind_after
     assert _reminders("alpha") == []
     assert len(crew) == 1
@@ -241,11 +274,70 @@ def test_a_card_that_cannot_go_on_reaches_people_at_once_and_is_repeated(crew):
     assert kinds == ["escalation", "escalation"]
 
 
-def test_any_change_to_a_cannot_card_starts_over(crew):
-    card = _blocked("cannot", "write access to the vault")
+def _cannot_with_request(assignee="alpha"):
+    card = board.create_card("beacon", "Fix backup", assignee=assignee)["id"]
+    request, binding = _request(card)
+    board.update_card("beacon", card, state="blocked", blocked_reason="cannot", waiting_on=f"workflow:{request['id']}")
+    _quiet(card)
+    return card, request, binding
+
+
+def test_a_cannot_card_with_an_open_request_is_left_to_the_request(crew):
+    card, request, _ = _cannot_with_request()
+    board.remind("alpha", now=5 * DAY)
+    board.remind(None, now=9 * DAY)
+    assert _reminders("alpha") == [] and crew == []     # the request's own notices and expiry do the chasing
+
+
+@pytest.mark.parametrize("outcome,words", [
+    ("approved", "approved"), ("rejected", "rejected"), ("expired", "expired")])
+def test_when_the_request_ends_the_agent_is_told_what_to_do_about_it(crew, outcome, words):
+    card, request, binding = _cannot_with_request()
+    if outcome == "expired":
+        with opstore.connect() as db:
+            db.execute("UPDATE workflow_requests SET expires_at = 1 WHERE id = ?", (request["id"],))
+        workflow.expire_due()
+    elif outcome == "approved":
+        workflow.respond(request["id"], actor="beacon", human=True, action="approved", response={}, **binding)
+        with opstore.connect() as db:   # approved and then used or lapsed: no longer open
+            db.execute("UPDATE workflow_requests SET state = 'executed' WHERE id = ?", (request["id"],))
+    else:
+        workflow.respond(request["id"], actor="beacon", human=True, action="rejected", response={}, **binding)
+    _quiet(card)
+
+    board.remind("alpha", now=1.1 * DAY)
+    notice, = _reminders("alpha")
+    assert f"#{card} " in notice and f"workflow:{request['id']}) has ended" in notice
+    assert "carry on and set the card to doing" in notice and "re-plan" in notice and "raise it again" in notice
+    assert crew == []                                   # the agent comes first; people only after two reminders
+
+
+def test_if_the_agent_never_acts_on_the_outcome_people_hear_after_two_reminders(crew):
+    card, request, binding = _cannot_with_request()
+    workflow.respond(request["id"], actor="beacon", human=True, action="rejected", response={}, **binding)
+    _quiet(card)
+    for day in (1.1, 2.2, 3.3):
+        board.remind(None, now=day * DAY)
+    assert len(_reminders("alpha")) == 2 and len(crew) == 1
+    assert "alpha was reminded and nothing changed" in crew[0][2]
+
+
+def test_any_change_to_a_legacy_cannot_card_starts_over(crew):
+    card = _legacy_cannot("write access to the vault")
     board.remind("bravo", now=0.01 * DAY)
     board.update_card("beacon", card, note="asked the operator")
     with opstore.connect() as db:
         db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (0.3 * DAY, card))
     board.remind("bravo", now=0.31 * DAY)          # it changed after people were told: told again, at once
     assert len(crew) == 2
+
+def test_a_legacy_cannot_card_stays_editable_but_cannot_be_restated_without_a_request(crew):
+    card = _legacy_cannot("write access to the vault")
+    board.update_card("beacon", card, next_action="ask the operator", note="still waiting")
+    board.update_card("beacon", card, assignee="bravo")
+    assert board.get_card(card)["waiting_on"] == "write access to the vault"
+    with pytest.raises(ValueError, match="needs a request to a person"):
+        board.update_card("beacon", card, blocked_reason="cannot", waiting_on="the vault, again")
+    request, _ = _request(card)
+    moved = board.update_card("beacon", card, waiting_on=f"workflow:{request['id']}")   # and it can be brought up to date
+    assert moved["waiting_on"] == f"workflow:{request['id']}"

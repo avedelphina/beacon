@@ -847,10 +847,14 @@ try, and people hear only after the reminders), `waiting` (the next step depends
 named thing, `waiting_on`: an agent, which is reminded instead; `workflow:<id>`, a request
 on this card, which is left to its own notices and expiry; or something outside Beacon,
 which people are told about again each `remind_after`) or `cannot` (the agent lacks a
-capability or access, and `waiting_on` says which: people are told at once, and again each
-`remind_after`). Waiting on a person is refused unless it is a workflow request, because a
-request has an owner, an expiry and an answer that moves the card. A card blocked before
-this existed has no reason and is reminded as before until someone sets one.
+capability or access: it must first make a workflow request to a person for exactly what it
+lacks, and `waiting_on` is `workflow:<id>`; while the request is open nobody is reminded, and
+when it ends, approved, rejected or expired, the agent is reminded to act on the outcome, and
+people hear after two reminders). Waiting on a person is refused unless it is a workflow
+request, because a request has an owner, an expiry and an answer that moves the card. A card
+blocked before this existed has no reason and is reminded as before until someone sets one,
+and a `cannot` card from before it needed a request keeps its plain-text wait: people are told
+at once and again each `remind_after`, and it stays editable.
 
 **Who uses it, and how:**
 

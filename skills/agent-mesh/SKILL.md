@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.19.0
+version: 1.20.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -128,10 +128,14 @@ to `blocked` only with a `blocked_reason`:
   (a CI run, someone else's review). Waiting on a person is always a workflow request: make
   it first with `workflow_create`, then set `waiting_on` to `workflow:<id>`. You are not
   reminded to check again while it is open.
-- `cannot`: you lack a capability or access. `waiting_on` says exactly what is missing (for
-  example "write access to the mailbox store"), not a task for a person. A person hears at
-  once, and again each day while the card stays like that. Ask for authority, never for
-  labour you could do with the access.
+- `cannot`: you lack a capability or access. Make a workflow request to a person first
+  (`workflow_create`: a `decision` or `approval` naming exactly what you lack, such as the
+  system, the access or setting, and the scope), then set `waiting_on` to `workflow:<id>`.
+  Without a request the card cannot be `cannot`. Ask for authority, never for labour you could
+  do with the access. While the request is open you are not reminded. When it ends you are:
+  if it was approved, carry on and set the card to `doing`; if it was rejected, re-plan
+  (consult a peer, or close the card with a note); if it expired, raise it again or say why you
+  will not.
 
 If the work is only yours to do, the card is `doing`, not `blocked`.
 

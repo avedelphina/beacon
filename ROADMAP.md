@@ -321,7 +321,7 @@ this", which need different handling.
 - **`waiting` on an agent or an external event is watched, not re-asked.** No
   rechecking reminders go to the waiting agent. Beacon reminds the agent it waits
   on, or notes the external state on the card.
-- **`cannot` names the missing capability.** An agent asks a person for authority
+- **`cannot` names the missing capability, and needs a request.** *(Delivered: a workflow request to a person is required, and its outcome drives the reminders.)* An agent asks a person for authority
   (grant access, approve a risk), never for labour (install software, edit files,
   reset credentials). The agent does the work itself where it can.
 - **Human requests show their consultation.** *(Delivered: flagged, not refused.)* A workflow to a person carries
