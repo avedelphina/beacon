@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Card references.** A card can hold structured pointers to work elsewhere:
+  `provider`, `kind`, `external_id`, `url`, `label`, optionally a `workflow_id`
+  (a workflow on the same card) and a hand-typed `last_seen_state` with
+  `last_seen_at`. Provider and kind are free text, so a new tracker needs no
+  schema change. Nested REST routes (`/api/board/cards/{id}/references`) and board
+  MCP tools (`card_references`, `card_reference_add`, `card_reference_update`,
+  `card_reference_remove`) do the same; each change is a card history event with
+  its author and optional `context_id`. The card view lists references and words
+  the state as a hint Beacon has not checked. `links` are unchanged.
+  Members reach references on the cards they may see. (#95)
+
 ## [0.36.1] — 2026-11-16
 
 ### Fixed

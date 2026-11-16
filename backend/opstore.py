@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS card_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     card_id     INTEGER NOT NULL REFERENCES cards (id),
     author      TEXT NOT NULL,
-    kind        TEXT NOT NULL,     -- created | comment | state | assign | edit | assign_notice | comment_notice | reminder | escalation | answer (an agent's answer to a notice)
+    kind        TEXT NOT NULL,     -- created | comment | state | assign | edit | reference | assign_notice | comment_notice | reminder | escalation | answer (an agent's answer to a notice)
     body        TEXT NOT NULL,
     context_id  TEXT,
     notice_id   INTEGER REFERENCES mailbox (id),  -- assign_notice, comment_notice: the mailbox row carrying the notice
@@ -99,6 +99,27 @@ CREATE TABLE IF NOT EXISTS workflow_events (
     created_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS workflow_events_by_request ON workflow_events (request_id, id);
+
+-- Pointers from a card to work elsewhere (a PR, an issue, a ticket). Free-text provider and
+-- kind: a new provider needs no schema change. last_seen_* is what whoever added it last saw,
+-- typed by hand; Beacon never fetches or verifies it (backend/board.py, "references").
+CREATE TABLE IF NOT EXISTS card_references (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    card_id          INTEGER NOT NULL REFERENCES cards (id),
+    provider         TEXT NOT NULL,
+    kind             TEXT NOT NULL,
+    external_id      TEXT NOT NULL,
+    url              TEXT NOT NULL,
+    label            TEXT NOT NULL,
+    workflow_id      INTEGER REFERENCES workflow_requests (id),  -- a workflow on the same card
+    last_seen_state  TEXT,
+    last_seen_at     REAL,
+    created_by       TEXT NOT NULL,
+    created_at       REAL NOT NULL,
+    updated_at       REAL NOT NULL,
+    UNIQUE (card_id, provider, kind, external_id)
+);
+CREATE INDEX IF NOT EXISTS card_references_by_card ON card_references (card_id, id);
 
 CREATE TABLE IF NOT EXISTS chat_exposure (
     agent       TEXT PRIMARY KEY,

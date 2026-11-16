@@ -1035,6 +1035,18 @@ async function openCard(id) {
   // Links are pointers the card's editors typed, not something Beacon checked.
   const links = c.links.map((l) => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${
     esc(l.label || l.url)}</a></li>`).join("");
+  // References are pointers to work elsewhere. The state on one is a hint that whoever added it
+  // typed, with its age: Beacon does not fetch or check it, so it is worded as a claim, not as state.
+  const refs = (c.references || []).map((r) => {
+    const wf = r.workflow_id ? requests.find((w) => w.id === r.workflow_id) : null;
+    const hint = r.last_seen_state
+      ? ` <span class="hint">· last seen “${esc(r.last_seen_state)}”, typed ${esc(when(r.last_seen_at))}; Beacon has not checked it</span>` : "";
+    const request = r.workflow_id
+      ? ` <span class="hint">· workflow #${esc(r.workflow_id)}${wf ? ` (${esc(wf.state)})` : ""}</span>` : "";
+    return `<li><span class="chip">${esc(r.provider)}</span> ${esc(r.kind.replace(/_/g, " "))}
+      <a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.label)}</a>
+      <code>${esc(r.external_id)}</code>${hint}${request}</li>`;
+  }).join("");
   const reqs = requests.map((w) => `<li><span class="chip">${esc(w.state)}</span> ${esc(w.kind)}: ${esc(w.title)}
     <span class="hint">· responder ${esc(w.eligible_responder)}${
       w.state === "pending" ? ` · expires ${esc(when(w.expires_at))}` : ""}${
@@ -1046,6 +1058,7 @@ async function openCard(id) {
       <dt>Next action</dt><dd>${c.next_action ? esc(c.next_action) : unset}</dd>
       <dt>Done when</dt><dd>${c.done_when ? esc(c.done_when) : unset}</dd>
       ${reqs ? `<dt>Requests</dt><dd><ul class="card-list">${reqs}</ul><span class="hint">Answer in the Workflows tab.</span></dd>` : ""}
+      ${refs ? `<dt>References</dt><dd><ul class="card-list">${refs}</ul></dd>` : ""}
       ${links ? `<dt>Links</dt><dd><ul class="card-list">${links}</ul></dd>` : ""}
     </dl>
     ${c.body ? `<p class="card-body">${esc(c.body)}</p>` : ""}

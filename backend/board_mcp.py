@@ -135,6 +135,53 @@ def build() -> MCPServer:
         return board.comment(_author(ctx), card_id, text, context_id)
 
     @server.tool()
+    def card_references(ctx: Context, card_id: int) -> list[dict]:
+        """A card's references: pointers to a PR, issue or ticket elsewhere, each with provider, kind,
+        external_id, url and label, and sometimes a workflow_id (a workflow on this card) and a
+        last_seen_state with last_seen_at. The state is a hint that whoever added the reference typed;
+        Beacon does not check it, so read the thing itself before relying on it."""
+        return _visible_card(ctx, card_id)["references"]
+
+    @server.tool()
+    def card_reference_add(ctx: Context, card_id: int, provider: str, kind: str, external_id: str,
+                           url: str, label: str, workflow_id: int | None = None,
+                           last_seen_state: str | None = None, last_seen_at: float | None = None,
+                           context_id: str | None = None) -> dict:
+        """Point a card at work elsewhere. provider and kind are free words (gitea, github, mantis;
+        pull_request, issue, ticket). url is http(s) without credentials. workflow_id must be a
+        workflow on this same card. last_seen_state is what you saw there, and is dated now unless
+        you give last_seen_at (Unix time). The change is recorded in the card's history."""
+        _visible_card(ctx, card_id)
+        return board.add_reference(_author(ctx), card_id, provider=provider, kind=kind, external_id=external_id,
+                                   url=url, label=label, workflow_id=workflow_id, last_seen_state=last_seen_state,
+                                   last_seen_at=last_seen_at, context_id=context_id)
+
+    @server.tool()
+    def card_reference_update(ctx: Context, card_id: int, reference_id: int, provider: str | None = None,
+                              kind: str | None = None, external_id: str | None = None, url: str | None = None,
+                              label: str | None = None, workflow_id: int | None = None,
+                              last_seen_state: str | None = None, last_seen_at: float | None = None,
+                              context_id: str | None = None) -> dict:
+        """Change a reference; what you leave out stays. workflow_id=0 removes the workflow link and
+        last_seen_state="" clears the state hint with its time."""
+        _visible_card(ctx, card_id)
+        given = {"provider": provider, "kind": kind, "external_id": external_id, "url": url, "label": label,
+                 "workflow_id": workflow_id, "last_seen_state": last_seen_state, "last_seen_at": last_seen_at}
+        changes = {name: value for name, value in given.items() if value is not None}
+        if changes.get("workflow_id") == 0:
+            changes["workflow_id"] = None
+        if changes.get("last_seen_state") == "":
+            changes["last_seen_state"] = None
+        return board.update_reference(_author(ctx), card_id, reference_id, context_id=context_id, **changes)
+
+    @server.tool()
+    def card_reference_remove(ctx: Context, card_id: int, reference_id: int,
+                              context_id: str | None = None) -> dict:
+        """Remove a reference from a card. The history keeps what it was."""
+        _visible_card(ctx, card_id)
+        return board.remove_reference(_author(ctx), card_id, reference_id, context_id)
+
+    @server.tool()
     def agent_owner(ctx: Context, agent_id: str | None = None) -> dict:
         """Who owns an agent: its owner's email, or null. Leave agent_id out for your own. Use
         the email as workflow_create's eligible_responder to ask that person; "human" asks any
