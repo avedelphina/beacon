@@ -1047,10 +1047,15 @@ async function openCard(id) {
       <a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.label)}</a>
       <code>${esc(r.external_id)}</code>${hint}${request}</li>`;
   }).join("");
-  const reqs = requests.map((w) => `<li><span class="chip">${esc(w.state)}</span> ${esc(w.kind)}: ${esc(w.title)}
-    <span class="hint">· responder ${esc(w.eligible_responder)}${
-      w.state === "pending" ? ` · expires ${esc(when(w.expires_at))}` : ""}${
-      w.response != null ? ` · answer: ${esc(typeof w.response === "string" ? w.response : JSON.stringify(w.response))}` : ""}</span></li>`).join("");
+  // What a request says now, without opening it: who it waits on, until when, and its result.
+  const resultOf = (r) => (r == null ? "" : typeof r === "string" ? r : r.text || r.option || r.note || "");
+  const reqs = requests.map((w) => {
+    const waiting = w.state === "pending" ? ` · waiting for ${w.eligible_responder === "human" ? "an operator" : w.eligible_responder}, expires ${when(w.expires_at)}`
+      : w.state === "changes_requested" ? ` · waiting for ${w.requester} to send a changed plan` : ` · responder ${w.eligible_responder}`;
+    const result = resultOf(w.response);
+    return `<li><span class="chip">${esc(w.state)}</span> ${esc(WORKFLOW_KIND_LABEL[w.kind] || w.kind)}: ${esc(w.title)}
+      <span class="hint">${esc(waiting)}${result ? ` · ${w.state === "changes_requested" ? "asked for" : "answer"}: ${esc(result)}` : ""}</span></li>`;
+  }).join("");
   document.getElementById("card-detail").innerHTML = `
     <h2>#${esc(c.id)} ${esc(c.title)}</h2>
     <p class="hint">${esc(c.state)} · ${esc(c.assignee ?? "unassigned")} · ${esc(c.project ?? "no project")} · created by ${esc(c.created_by)} · ${when(c.created_at)}</p>
@@ -1156,7 +1161,7 @@ function workflowWhen(t) {
   return t ? new Date(t * 1000).toLocaleString() : "-";
 }
 
-const WORKFLOW_KIND_LABEL = { decision: "Decision", question: "Question", review: "Review", approval: "Approval" };
+const WORKFLOW_KIND_LABEL = { decision: "Decision", question: "Question", review: "Review", approval: "Approval", handoff: "Handoff" };
 
 // Summaries are Markdown written by agents, so they are escaped before any markup
 // is added. Only a small subset is drawn: headings, lists, bold, code and code blocks.
@@ -1227,9 +1232,9 @@ function renderWorkflowItems(items) {
     ].join("") : [
       isDecision
         ? `<button class="btn primary" data-workflow-action="choose_option" data-workflow-id="${id}">Choose this option</button>`
-        : `<button class="btn primary" data-workflow-action="approved" data-workflow-id="${id}">Approve</button>`,
+        : `<button class="btn primary" data-workflow-action="approved" data-workflow-id="${id}">${w.kind === "handoff" ? "Accept handoff" : "Approve"}</button>`,
       `<button class="btn" data-workflow-action="changes_requested" data-workflow-id="${id}">Request changes</button>`,
-      `<button class="btn danger" data-workflow-action="rejected" data-workflow-id="${id}">Reject</button>`,
+      `<button class="btn danger" data-workflow-action="rejected" data-workflow-id="${id}">${w.kind === "handoff" ? "Decline" : "Reject"}</button>`,
     ].join("");
     // Options are the labels the plan explains; the first one starts selected.
     const choice = isDecision && pending ? `<fieldset class="wf-choice"><legend>Pick one</legend>${
@@ -1290,7 +1295,7 @@ async function respondWorkflow(button) {
     response = { text };
   }
   if (action === "approved" || action === "choose_option") {
-    if (!confirm(`${action === "choose_option" ? "Choose an option for" : "Approve"} “${item.title}”?`)) return;
+    if (!confirm(`${action === "choose_option" ? "Choose an option for" : item.kind === "handoff" ? "Accept the handoff:" : "Approve"} “${item.title}”?`)) return;
   }
   if (action === "choose_option" && item.kind === "decision") {
     response.option = document.querySelector(`input[data-workflow-option="${CSS.escape(id)}"]:checked`)?.value;

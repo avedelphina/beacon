@@ -4,6 +4,19 @@
 
 ### Added
 
+- **Workflow changes are on the card's history.** Creating, answering, asking for
+  changes, revising, expiring, claiming and finishing a workflow request each
+  add an event to the card with the actor, the time, and an optional `context_id`
+  (`workflow_create`, `workflow_respond`, `workflow_revise` and the REST bodies take
+  one). It is written in the same transaction as the change, so the two cannot
+  disagree. The detailed `workflow_events` ledger is unchanged. A workflow event also
+  counts as the card changing. A notice that fails to send no longer fails the change.
+- **Handoff.** A fourth request kind, `handoff`: no options; the responder accepts
+  (`approved`), declines (`rejected`), or sends it back (`changes_requested`). When the
+  responder is an agent and accepts, the card is assigned to it, recorded as an
+  assignment in the card's history. A handoff to a person or to "human" assigns nothing.
+- The card view shows each request's status, who it waits on, when it expires, and
+  its result.
 - **Card references.** A card can hold structured pointers to work elsewhere:
   `provider`, `kind`, `external_id`, `url`, `label`, optionally a `workflow_id`
   (a workflow on the same card) and a hand-typed `last_seen_state` with

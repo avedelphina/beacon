@@ -538,6 +538,7 @@ class WorkflowCreateRequest(BaseModel):
     plan_revision: str
     plan_hash: str
     expires_at: float | None = None
+    context_id: str | None = None  # the A2A thread the request was made under, kept in the card's history
 
 
 class WorkflowResponseRequest(BaseModel):
@@ -545,6 +546,7 @@ class WorkflowResponseRequest(BaseModel):
     response: object = None
     plan_revision: str
     plan_hash: str
+    context_id: str | None = None
 
 
 class WorkflowReviseRequest(BaseModel):
@@ -555,6 +557,7 @@ class WorkflowReviseRequest(BaseModel):
     options: list[str] | None = None
     target: dict | None = None
     expires_at: float | None = None
+    context_id: str | None = None
 
 
 def _workflow_human(request: Request) -> bool:
@@ -635,7 +638,7 @@ def _create_workflow(card_id: int, body: WorkflowCreateRequest, request: Request
         eligible_responder=body.eligible_responder, capability=body.capability,
         tier=body.tier, title=body.title, summary=body.summary, options=body.options,
         target=body.target, plan_revision=body.plan_revision, plan_hash=body.plan_hash,
-        expires_at=body.expires_at,
+        expires_at=body.expires_at, context_id=body.context_id,
     )
 
 
@@ -643,7 +646,7 @@ def _respond_workflow(request_id: int, body: WorkflowResponseRequest, request: R
     return workflow.respond(
         request_id, actor=_workflow_response_actor(request), human=_workflow_human(request),
         action=body.action, response=body.response,
-        plan_revision=body.plan_revision, plan_hash=body.plan_hash,
+        plan_revision=body.plan_revision, plan_hash=body.plan_hash, context_id=body.context_id,
     )
 
 

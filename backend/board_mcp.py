@@ -200,20 +200,22 @@ def build() -> MCPServer:
 
     @server.tool()
     def workflow_respond(ctx: Context, request_id: int, action: str, plan_revision: str,
-                         plan_hash: str, response: object = None) -> dict:
+                         plan_hash: str, response: object = None, context_id: str | None = None) -> dict:
         """Respond to an eligible workflow request. action is approved, rejected, changes_requested,
         choose_option (a decision: response {"option": ...}), or answered (a question: response
-        {"text": ...}). T4/T5 responses always need a human browser session."""
+        {"text": ...}). For a handoff, approved accepts it (the card becomes yours) and rejected
+        declines it. T4/T5 responses always need a human browser session. context_id links an
+        A2A thread; the answer is also written to the card's history."""
         return workflow.respond(
             request_id, actor=_author(ctx), human=False, action=action, response=response,
-            plan_revision=plan_revision, plan_hash=plan_hash,
+            plan_revision=plan_revision, plan_hash=plan_hash, context_id=context_id,
         )
 
     @server.tool()
     def workflow_revise(ctx: Context, request_id: int, title: str | None = None, summary: str | None = None,
                         options: list[str] | None = None, target: dict | None = None,
                         expires_at: float | None = None, plan_revision: str | None = None,
-                        plan_hash: str | None = None) -> dict:
+                        plan_hash: str | None = None, context_id: str | None = None) -> dict:
         """After a responder asked for changes (state "changes_requested"), send the changed plan: the
         request goes back to pending for the same responder. Only the requester may; give only what
         changed. Leave out plan_revision and plan_hash and Beacon binds the new text itself."""
@@ -227,20 +229,23 @@ def build() -> MCPServer:
                  "target": old["target"] if target is None else target}).values()
         return workflow.revise(
             request_id, actor=_author(ctx), title=title, summary=summary, options=options, target=target,
-            expires_at=expires_at, plan_revision=plan_revision, plan_hash=plan_hash)
+            expires_at=expires_at, plan_revision=plan_revision, plan_hash=plan_hash, context_id=context_id)
 
     @server.tool()
     def workflow_create(ctx: Context, card_id: int, kind: str, eligible_responder: str,
                         capability: str, tier: int, title: str, summary: str,
                         options: list[str] | None = None, target: dict | None = None,
                         expires_at: float | None = None, plan_revision: str | None = None,
-                        plan_hash: str | None = None) -> dict:
+                        plan_hash: str | None = None, context_id: str | None = None) -> dict:
         """Create a pending typed workflow request attached to a board card. summary is Markdown:
         its first line says what you need, then the short plan. kind: decision (the
         responder picks one of options), question (the responder writes a free-text answer;
-        no options), review, or approval. Leave out plan_revision and plan_hash and Beacon
-        binds the request to its own text: a response then has to name that exact plan, and
-        an edited plan cannot be approved."""
+        no options), handoff (ask an agent to take the card over: no options; when it approves,
+        the card is assigned to it), review, or approval. Leave out plan_revision and plan_hash
+        and Beacon binds the request to its own text: a response then has to name that exact
+        plan, and an edited plan cannot be approved. context_id links an A2A thread; every change
+        to the request is also written to the card's history."""
+        _visible_card(ctx, card_id)
         workflow.validate_kind_for_tier(kind, tier)
         workflow.validate_participants(_author(ctx), eligible_responder)
         if (plan_revision is None) != (plan_hash is None):
@@ -253,6 +258,7 @@ def build() -> MCPServer:
             card_id=card_id, kind=kind, requester=_author(ctx), eligible_responder=eligible_responder,
             capability=capability, tier=tier, title=title, summary=summary, options=options,
             target=target, plan_revision=plan_revision, plan_hash=plan_hash, expires_at=expires_at,
+            context_id=context_id,
         )
 
     @server.tool()
