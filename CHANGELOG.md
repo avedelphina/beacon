@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-11-16
+
 ### Changed
 
 - **`cannot` needs a follow-up request.** A card moves to `cannot` only with
