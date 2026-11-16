@@ -359,6 +359,8 @@ td[data-label="ID"] .chip { margin-left: 0.4rem; }
 .board-archive { margin-top: 1.2rem; border-top: 1px solid var(--line-soft); padding-top: 0.7rem; }
 .board-archive summary { cursor: pointer; font-family: var(--font-display); text-transform: uppercase; font-size: 0.85rem; }
 .board-archive-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.5rem; margin-top: 0.5rem; }
+.clients-panel { margin-top: 2rem; }
+.clients-panel h2 { font-size: 1.05rem; margin: 0; }
 .workflow-list { display: flex; flex-direction: column; gap: 0.9rem; max-width: 880px; }
 .workflow-item { border: 1px solid var(--line-soft); border-left: 4px solid var(--line); background: var(--surface); padding: 1.1rem 1.3rem; }
 .wf-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }

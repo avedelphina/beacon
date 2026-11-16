@@ -6,7 +6,10 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from backend import auth, availability, board, board_mcp, mesh, policy, store, workflow
+import re
+
+from backend import auth, availability, board, board_mcp, clients, mesh, policy, store, workflow
+from backend import opstore
 from backend.schemas import Agent, Host
 
 SECRET = "client-test-secret"
@@ -31,6 +34,9 @@ def world(fleet, monkeypatch):
 
 
 def _bearer(agent_id):
+    """A client presents a token of its own (minted, shown once); a fleet agent its derived pull token."""
+    if store.get_agent(agent_id).client is not None:
+        return f"Bearer {clients.mint(agent_id, 'test')[1]}"
     return f"Bearer {mesh.token(agent_id, mesh.BEACON_PEER)}"
 
 
@@ -58,6 +64,8 @@ def test_the_clients_own_token_is_its_identity_on_the_board_and_workflows(world)
     assert board_mcp.author_for(_bearer("claude-op")) == "claude-op"
     assert board_mcp.author_for("Bearer not-a-token") is None
     assert board_mcp.author_for(_bearer("alpha")) == "alpha"               # an ordinary agent is unchanged
+    derived = f"Bearer {mesh.token('claude-op', mesh.BEACON_PEER)}"        # what a fleet agent holds: not a client's way in
+    assert board_mcp.author_for(derived) is None and auth.agent_for_authorization(derived) is None
 
 
 def test_a_client_without_board_access_gets_no_board(world):
@@ -73,16 +81,20 @@ def test_the_client_token_command_prints_what_to_paste_and_only_for_a_board_clie
     monkeypatch.setenv(mesh.PUBLIC_URL_ENV, "https://beacon.example.test")
     assert mesh.main(["client-token", "claude-op"]) == 0
     out = capsys.readouterr().out
-    assert mesh.token("claude-op", mesh.BEACON_PEER) in out
+    shown = re.search(r"Bearer token: (\S+)", out).group(1)
+    assert clients.resolve(shown) == "claude-op" and mesh.token("claude-op", mesh.BEACON_PEER) not in out
     assert "https://beacon.example.test/board/mcp" in out and "claude mcp add --transport http beacon-board" in out
     for bad in ("claude-quiet", "alpha", "nobody"):
         assert mesh.main(["client-token", bad]) == 1
     assert "error:" in capsys.readouterr().err
+    with opstore.connect() as db:                                              # Beacon keeps a hash, not the token
+        assert db.execute("SELECT count(*) FROM client_tokens WHERE token_hash = ?", (shown,)).fetchone()[0] == 0
 
 
 def test_the_api_never_returns_the_clients_token(world, client):
-    body = client.get("/api/agents/claude-op").text + client.get("/api/agents").text
-    assert mesh.token("claude-op", mesh.BEACON_PEER) not in body
+    token = _bearer("claude-op").removeprefix("Bearer ")
+    body = client.get("/api/agents/claude-op").text + client.get("/api/agents").text + client.get("/api/clients").text
+    assert token not in body and mesh.token("claude-op", mesh.BEACON_PEER) not in body
 
 
 # --- acting as itself -------------------------------------------------------------------------------
@@ -106,7 +118,8 @@ def test_a_client_asks_a_person_and_the_request_is_its_own(world, client):
     denied = client.post(f"/api/board/cards/{card}/workflows", headers={"Authorization": _bearer("claude-quiet")}, json={
         "kind": "question", "eligible_responder": "human", "capability": "ask", "tier": 1, "title": "Which?",
         "summary": "Tell me", "plan_revision": "r", "plan_hash": "h"})
-    assert denied.status_code == 403
+    # No identity for it: in open mode an unrecognised bearer is just Beacon's own, as for any route there.
+    assert denied.status_code == 200 and denied.json()["requester"] != "claude-quiet"
 
 
 # --- never called, assigned, or asked ---------------------------------------------------------------
@@ -164,4 +177,4 @@ def test_a_client_is_not_pursued_by_reminders_or_the_mailbox_and_shows_as_a_clie
 
 def test_status_and_deploy_of_a_client_stop_at_the_missing_ssh(world, client):
     assert client.get("/api/agents/claude-op/status").status_code in (200, 409)
-    assert client.get("/api/agents/claude-op").json()["client"] == {"board": True}
+    assert client.get("/api/agents/claude-op").json()["client"] == {"board": True, "acts_for": None, "max_tier": 3, "enabled": True}

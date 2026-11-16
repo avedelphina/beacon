@@ -152,8 +152,32 @@ class AgentReach(BaseModel):
 # tools with its own token (`python -m backend.mesh client-token <id>`). That is why an agent
 # has a client block or a reach block, never both. Without a reach block it is inventory-only to
 # everything that treats the mesh (peers, the mailbox, reminders, availability).
+#
+# `acts_for` binds the client to one operator (an email): it is whose requests the client reads and
+# answers (backend/workflow.py), up to `max_tier` and never above T3. `enabled` is the off switch.
+# They change only through /api/clients, by a person in a browser session; the client cannot.
 class AgentClient(BaseModel):
     board: bool = True
+    acts_for: str | None = None
+    max_tier: int = 3
+    enabled: bool = True
+
+    @field_validator("max_tier")
+    @classmethod
+    def _tier_below_four(cls, v: int) -> int:
+        if v < 0 or v > 3:
+            raise ValueError("max_tier is 0 to 3: tier 4 and above are for a person in the web page")
+        return v
+
+    @field_validator("acts_for")
+    @classmethod
+    def _an_operator_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip().casefold()
+        if "@" not in v or len(v) > 254 or any(c.isspace() for c in v):
+            raise ValueError(f"acts_for {v!r} must be an operator's email address")
+        return v
 
 
 # Names the mesh uses for itself or as workflow eligibility sentinels; no

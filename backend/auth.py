@@ -79,11 +79,13 @@ def agent_for_authorization(authorization: str | None) -> str | None:
     """Resolve an agent's own derived mesh token without widening bearer auth."""
     if not isinstance(authorization, str) or not authorization.startswith("Bearer "):
         return None
-    from . import mesh, store
+    from . import clients, mesh, store
     presented = authorization.removeprefix("Bearer ")
+    if (own := clients.resolve(presented)) is not None:
+        return own  # an operator's client: its own random token, revocable (backend/clients.py)
     try:
         for agent in store.list_agents():
-            if (agent.reach or agent.client) and hmac.compare_digest(presented, mesh.token(agent.id, mesh.BEACON_PEER)):
+            if agent.reach and hmac.compare_digest(presented, mesh.token(agent.id, mesh.BEACON_PEER)):
                 return agent.id
     except mesh.MissingSecret:
         return None

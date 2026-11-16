@@ -65,6 +65,23 @@
       </table>
     </div>
     <p class="empty" id="agents-empty" hidden>No agents yet. Add one to get started.</p>
+
+    <section class="clients-panel op-only" id="clients-panel">
+      <div class="view-head">
+        <h2>AI clients</h2>
+        <button class="btn" id="add-client" type="button">+ Add my client</button>
+      </div>
+      <p class="hint">Your own Claude Code, Codex or other MCP client, with an identity and a token of its own, so what it does is
+      recorded under its name. It is an agent, not you: it is never called or given cards, and it never answers tier 4 or 5.
+      A token is shown once, when you make it; revoke one here the moment it leaks.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Client</th><th>Acts for</th><th>May answer up to</th><th>State</th><th>Tokens</th><th></th></tr></thead>
+          <tbody id="clients-body"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="clients-empty" hidden>No clients yet.</p>
+    </section>
   </section>
 
   <section id="templates-view" class="view">
@@ -468,6 +485,43 @@
       <button type="submit" class="btn primary">Save</button>
     </div>
   </form>
+</div>
+
+<div class="modal-backdrop" id="client-modal">
+  <form class="modal" id="client-form">
+    <h2>Add my client</h2>
+    <p class="hint">Makes an identity bound to you (<span id="client-person">you</span>) and its first token.
+    You can have one per kind. It acts for you only, and never above the tier you choose here, at most T3.</p>
+    <div class="field-row">
+      <label>Which client <select name="kind">
+        <option value="claude">Claude Code (claude-…)</option>
+        <option value="codex">Codex (codex-…)</option>
+        <option value="client">Another MCP client (client-…)</option>
+      </select></label>
+      <label>May answer up to <select name="max_tier">
+        <option value="3" selected>T3: independent review</option><option value="2">T2</option>
+        <option value="1">T1</option><option value="0">T0</option>
+      </select></label>
+    </div>
+    <label>Label <span class="hint">(which machine or install; for you to tell tokens apart)</span><input name="label" placeholder="laptop"></label>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary">Make client and token</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal-backdrop" id="client-token-modal">
+  <div class="modal">
+    <h2 id="client-token-title">Token</h2>
+    <p class="wf-flag">Shown only now. Beacon keeps a hash, so if you lose it you make another. Treat it like a password.</p>
+    <p class="hint">Paste this into the client (Claude Code: run the command; another client: add the server and the header):</p>
+    <pre id="client-token-settings" class="inspect-status"></pre>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="client-token-copy">Copy</button>
+      <button type="button" class="btn primary" data-close>Done</button>
+    </div>
+  </div>
 </div>
 
 <script src="app.js"></script>

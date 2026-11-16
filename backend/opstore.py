@@ -124,6 +124,21 @@ CREATE INDEX IF NOT EXISTS workflow_events_by_request ON workflow_events (reques
 -- Pointers from a card to work elsewhere (a PR, an issue, a ticket). Free-text provider and
 -- kind: a new provider needs no schema change. last_seen_* is what whoever added it last saw,
 -- typed by hand; Beacon never fetches or verifies it (backend/board.py, "references").
+-- The tokens a client agent (an operator's own AI client) presents to the board: random, shown once when
+-- minted, kept only as a hash, revocable one by one (backend/clients.py).
+CREATE TABLE IF NOT EXISTS client_tokens (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id      TEXT NOT NULL,
+    token_hash    TEXT NOT NULL UNIQUE,
+    label         TEXT NOT NULL DEFAULT '',
+    created_by    TEXT NOT NULL,
+    created_at    REAL NOT NULL,
+    last_used_at  REAL,
+    revoked_at    REAL,
+    revoked_by    TEXT
+);
+CREATE INDEX IF NOT EXISTS client_tokens_by_agent ON client_tokens (agent_id);
+
 -- Deliveries accepted from outside (backend/intake.py): a second one with the same id is a replay.
 CREATE TABLE IF NOT EXISTS intake_deliveries (
     source       TEXT NOT NULL,

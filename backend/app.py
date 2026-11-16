@@ -14,10 +14,10 @@ from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import audit, auth, availability, board, bus, cron_store, fleet, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow
+from . import audit, auth, availability, board, bus, clients, cron_store, fleet, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
-from .schemas import Agent, CronJob, Host
+from .schemas import Agent, AgentClient, CronJob, Host
 from .tiers import TIER_LABELS, CAPABILITY_TIERS, requires_confirm, tier_for
 
 
@@ -1129,7 +1129,131 @@ def put_agent(id_: str, agent: Agent, request: Request) -> Agent:
     # change them would be a way around it.
     if _access_fields(existing) != _access_fields(agent):
         _require_human_session(request, "set_agent_access")
+    # A client's binding (whom it acts for, how far, on or off) is changed only through /api/clients, where
+    # who may change it is checked: here any operator could point it at themselves.
+    if (existing.client if existing else None) != agent.client:
+        raise HTTPException(400, "a client agent is made and changed through /api/clients, not by editing the agent")
     return store.upsert_agent(agent)
+
+
+class ClientCreate(BaseModel):
+    kind: str = "claude"  # claude | codex | client: the first part of its id
+    max_tier: int = 3  # what it may answer for you, up to T3
+    label: str = ""
+    confirm: bool = False
+
+
+class ClientTokenRequest(BaseModel):
+    label: str = ""
+    revoke_others: bool = False  # a rotation: the new token replaces the rest
+    confirm: bool = False
+
+
+class ClientUpdate(BaseModel):
+    enabled: bool | None = None
+    max_tier: int | None = None
+    confirm: bool = False
+
+
+def _client_person(request: Request) -> str:
+    """The signed-in operator a client is made for or changed by: it is bound to a person, so it
+    needs one, and open mode (no sign-in) has none."""
+    user = request.session.get("user") if "session" in request.scope else None
+    email = (user or {}).get("email")
+    if not email:
+        raise HTTPException(400, "a client is bound to the person who makes it: sign in first")
+    if auth.role_for_email(email) != "operator":
+        raise HTTPException(403, "only an operator may have a client")
+    return email.casefold()
+
+
+def _client_agent(id_: str) -> Agent:
+    agent = store.get_agent(id_)  # 404 first
+    if agent.client is None:
+        raise HTTPException(404, f"{id_!r} is not a client agent")
+    return agent
+
+
+def _client_view(agent: Agent) -> dict:
+    return {"id": agent.id, **agent.client.model_dump(), "tokens": clients.tokens(agent.id)}
+
+
+@app.get("/api/clients")
+def clients_list() -> list[dict]:
+    """The client agents, with what is known of each token (never the token): who made it, when it was
+    last used, whether it is revoked."""
+    return [_client_view(a) for a in store.list_agents() if a.client is not None]
+
+
+@app.post("/api/clients")
+def client_create(body: ClientCreate, request: Request) -> dict:
+    """Make the signed-in operator's client agent and mint its first token, shown once. A person in a
+    browser session (T4), and only for themselves."""
+    _require_human_session(request, "create_client")
+    person = _client_person(request)
+    ident = clients.client_id(body.kind, person)  # ValueError -> 400
+    AgentClient(max_tier=body.max_tier)  # validated: 0 to 3
+    summary = f"create the client agent {ident!r} acting for {person} (answers up to T{body.max_tier}) and mint its token"
+    if (gate := _confirm_gate("create_client", body.confirm, summary, target=ident)) is not None:
+        return gate
+    agent = clients.create(body.kind, person, body.max_tier)
+    token_id, token = clients.mint(agent.id, person, body.label)
+    logger.warning("client agent %s created by %s", agent.id, person)
+    return {"agent": _client_view(agent), "token": token, "token_id": token_id,
+            "settings": mesh.client_settings(agent.id, token)}
+
+
+@app.post("/api/clients/{id_}/tokens")
+def client_mint(id_: str, body: ClientTokenRequest, request: Request) -> dict:
+    """A new token for a client, shown once; `revoke_others` makes it a rotation. Only the operator the
+    client acts for."""
+    _require_human_session(request, "mint_client_token")
+    agent = _client_agent(id_)
+    person = _client_person(request)
+    if agent.client.acts_for != person:
+        raise HTTPException(403, "only the operator this client acts for may mint its tokens")
+    summary = f"mint a token for {id_!r}" + (" and revoke its others" if body.revoke_others else "")
+    if (gate := _confirm_gate("mint_client_token", body.confirm, summary, target=id_)) is not None:
+        return gate
+    token_id, token = clients.mint(id_, person, body.label)
+    if body.revoke_others:
+        clients.revoke_all(id_, person, keep=token_id)
+    return {"token": token, "token_id": token_id, "settings": mesh.client_settings(id_, token)}
+
+
+@app.delete("/api/clients/{id_}/tokens/{token_id}")
+def client_revoke(id_: str, token_id: int, request: Request, confirm: bool = False) -> dict:
+    """Revoke one token. Any operator: taking access away is what whoever notices a leak must be able to do."""
+    _client_agent(id_)
+    if (gate := _confirm_gate("disable_client", confirm, f"revoke token #{token_id} of {id_!r}", target=id_)) is not None:
+        return gate
+    if not clients.revoke(id_, token_id, _board_author(request)):
+        raise HTTPException(404, f"no active token #{token_id} on {id_!r}")
+    return {"revoked": token_id}
+
+
+@app.patch("/api/clients/{id_}")
+def client_update(id_: str, body: ClientUpdate, request: Request) -> dict:
+    """Turn a client off or lower its `max_tier` (any operator), or turn it back on or raise `max_tier`
+    (a person in a browser session, and only the operator it acts for)."""
+    agent = _client_agent(id_)
+    current = agent.client
+    if body.enabled is None and body.max_tier is None:
+        raise HTTPException(400, "give enabled or max_tier")
+    new = AgentClient(**{**current.model_dump(), **{k: v for k, v in (("enabled", body.enabled), ("max_tier", body.max_tier)) if v is not None}})
+    widening = (new.enabled and not current.enabled) or new.max_tier > current.max_tier
+    if widening:
+        _require_human_session(request, "update_client")
+        if current.acts_for != _client_person(request):
+            raise HTTPException(403, "only the operator this client acts for may widen it")
+        capability = "update_client"
+    else:
+        capability = "disable_client"
+    summary = f"change {id_!r}: " + ", ".join(f"{k} {getattr(current, k)} -> {getattr(new, k)}" for k in ("enabled", "max_tier")
+                                                if getattr(current, k) != getattr(new, k))
+    if (gate := _confirm_gate(capability, body.confirm, summary, target=id_)) is not None:
+        return gate
+    return _client_view(store.upsert_agent(agent.model_copy(update={"client": new})))
 
 
 @app.post("/api/agents/{id_}/enroll")

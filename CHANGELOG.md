@@ -4,14 +4,20 @@
 
 ### Added
 
-- **Client agents.** An agent with a `client` block (`client: {board: true}`) instead of a `reach`
-  block is an operator's own AI client: Claude Code, Codex, any MCP client. It has its own identity
-  and uses the board and workflow tools with its own token, so its cards, comments and requests are
-  recorded under its name and the access policy applies to what it assigns. It is never called (not
-  even by Beacon), assigned a card, sent mail, listed as a peer, or asked for an answer. The Agents
-  tab shows it as `client`. `python -m backend.mesh client-token <id>` prints its token and the
-  settings to paste into the client; the API never returns the token. An agent has a client block or
-  a reach block, not both. The binding to an operator, and answering requests for them, are next.
+- **Client agents.** An agent with a `client` block (`client: {board, acts_for, max_tier, enabled}`)
+  instead of a `reach` block is an operator's own AI client: Claude Code, Codex, any MCP client. It
+  has its own identity and uses the board and workflow tools with its own token, so its cards,
+  comments and requests are recorded under its name and the access policy applies to what it
+  assigns. It is never called (not even by Beacon), assigned a card, sent mail, listed as a peer, or
+  asked for an answer. The Agents tab shows it as `client`.
+- **Making a client from the page.** The Agents tab has an **AI clients** panel: an operator makes
+  their own client (`claude-<you>`, `codex-<you>`, with a ceiling of T0 to T3), mints, rotates and
+  revokes its tokens, and turns it off. A client's token is random, shown once, and kept only as a
+  hash, with who made it and when it was last used; it replaces the derived pull token, which no
+  longer works for a client. Making clients and tokens is T4 (a browser session, for yourself);
+  any operator can revoke a token or turn a client off. `PUT /api/agents/{id}` refuses changes to
+  the `client` block, and `python -m backend.mesh client-token <id>` mints a token from the command
+  line. Answering requests for the operator is the next step.
 
 ### Added
 

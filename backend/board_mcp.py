@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from mcp.server.mcpserver import Context, MCPServer
 from starlette.responses import JSONResponse
 
-from . import auth, board, intake, mesh, onboarding, store, workflow
+from . import auth, board, clients, intake, mesh, onboarding, store, workflow
 
 INSTRUCTIONS = """The Beacon fleet board: shared cards for work that spans agents, hosts, or days.
 Use it to hand work to another agent, to record progress where others can see it, and to find
@@ -39,6 +39,8 @@ def author_for(authorization: str | None) -> str | None:
     if not isinstance(authorization, str) or not authorization.startswith("Bearer "):
         return None
     presented = authorization.removeprefix("Bearer ")
+    if (own := clients.resolve(presented)) is not None:
+        return own  # an operator's own AI client: a token of its own, not a derived pull token
     try:
         # Only agents opted in with reach.board, and not while their chat is
         # open to anyone. Every agent holds its pull token, so without this
@@ -46,7 +48,7 @@ def author_for(authorization: str | None) -> str | None:
         # configured, not whether the board answers.
         exposure = mesh.open_chats()
         for agent in store.list_agents():
-            if mesh.board_allowed(agent, exposure) and hmac.compare_digest(
+            if agent.client is None and mesh.board_allowed(agent, exposure) and hmac.compare_digest(
                     presented, mesh.token(agent.id, mesh.BEACON_PEER)):
                 return agent.id
     except mesh.MissingSecret:

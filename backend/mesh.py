@@ -297,26 +297,32 @@ def print_policy() -> int:
 
 
 def client_token_text(agent_id: str) -> str:
-    """The token a client agent presents to the board MCP endpoint, with the settings to paste into
-    the client. Printed on the operator's own terminal and never returned by the API, so the token
-    does not travel through the web page: pipe it to where the client keeps its settings, do not
-    keep the output. It is the agent's own pull token: it reaches the board and the workflow tools
-    as that agent, and nothing else."""
+    """A new token for a client agent, with the settings to paste into the client. Printed once on the
+    operator's own terminal: Beacon keeps only its hash, so lose it and mint another. Pipe it to where
+    the client keeps its settings, do not keep the output. It reaches the board and the workflow tools
+    as that agent, and nothing else; the Agents tab revokes it. The page mints them too, for the signed-in
+    operator."""
+    from . import clients
     agent = store.get_agent(agent_id)
     if agent.client is None or not agent.client.board:
         raise ValueError(f"{agent_id!r} is not a client agent with board access (set `client: {{board: true}}` on it)")
+    _, secret = clients.mint(agent.id, "command line", "client-token command")
+    return client_settings(agent.id, secret)
+
+
+def client_settings(agent_id: str, secret: str) -> str:
+    """What to paste into the client, for a token that was just minted."""
     url = (public_url() or "https://<your-beacon-url>") + "/board/mcp"
-    secret = token(agent.id, BEACON_PEER)
     return (
-        f"Client agent: {agent.id}\n"
+        f"Client agent: {agent_id}\n"
         f"Board MCP endpoint: {url}\n"
         f"Bearer token: {secret}\n\n"
         "Claude Code:\n"
         f"  claude mcp add --transport http beacon-board {url} --header \"Authorization: Bearer {secret}\"\n\n"
         "Any MCP client with streamable-HTTP servers (Codex and others): add a server named beacon-board with\n"
         f"  url {url} and the header  Authorization: Bearer {secret}\n\n"
-        "Treat the token like a password: it acts as this agent on the board. Rotating BEACON_A2A_SECRET\n"
-        "changes every token.\n")
+        "Treat the token like a password: it acts as this agent on the board. It is shown only now; revoke\n"
+        "it from the Agents tab if it leaks.\n")
 
 
 def main(argv: list[str] | None = None) -> int:
