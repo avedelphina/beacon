@@ -1183,9 +1183,26 @@ function renderMarkdown(source) {
 
 // One card per request, in the order a reader needs it: what is asked, the plan,
 // the answer box or choice, then the technical details the approver signs against.
+// The badge counts requests waiting for an answer from this viewer: pending ones.
+function setWorkflowBadge(items) {
+  const badge = document.getElementById("workflows-badge");
+  const open = items.filter((w) => w.state === "pending").length;
+  badge.textContent = String(open);
+  badge.hidden = open === 0;
+}
+
+async function updateWorkflowBadge() {
+  try {
+    setWorkflowBadge(await api.listWorkflows());
+  } catch (err) {
+    // no badge when the list cannot be read; the page itself shows the error
+  }
+}
+
 function renderWorkflowItems(items) {
   const list = document.getElementById("workflow-list");
   document.getElementById("workflows-empty").hidden = items.length > 0;
+  setWorkflowBadge(items);
   list.innerHTML = items.map((w) => {
     const pending = w.state === "pending";
     const isQuestion = w.kind === "question";
@@ -1466,6 +1483,7 @@ async function start() {
 start();
 
 setInterval(() => {
+  updateWorkflowBadge();
   if (document.getElementById("agents-view").classList.contains("active")) renderAgents();
   // Agents change the board too; keep it current while it's open.
   if (document.getElementById("board-view").classList.contains("active")) renderBoard();
