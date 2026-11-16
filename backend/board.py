@@ -63,7 +63,11 @@ def list_cards(project: str | None = None, assignee: str | None = None, state: s
     with opstore.connect() as db:
         rows = db.execute(f"SELECT * FROM cards {where} ORDER BY updated_at DESC", params).fetchall()
         delivery = _deliveries(db)
-    return [_card(row) | {"delivery": delivery.get(row["id"])} for row in rows]
+        open_deps = {r["card_id"]: r["n"] for r in db.execute(
+            "SELECT d.card_id, count(*) AS n FROM card_dependencies d JOIN cards c ON c.id = d.depends_on_id"
+            " WHERE c.state != 'done' GROUP BY d.card_id")}
+    return [_card(row) | {"delivery": delivery.get(row["id"]), "blocked_by_count": open_deps.get(row["id"], 0)}
+            for row in rows]
 
 
 def _deliveries(db) -> dict[int, dict]:
@@ -108,6 +112,16 @@ def get_card(card_id: int) -> dict:
         events = db.execute("SELECT * FROM card_events WHERE card_id = ? ORDER BY id", (card_id,)).fetchall()
         references = [dict(r) for r in db.execute(
             "SELECT * FROM card_references WHERE card_id = ? ORDER BY id", (card_id,))]
+        parent = db.execute("SELECT id, title, state, assignee, created_by FROM cards WHERE id = ?",
+                            (card["parent_id"],)).fetchone() if card["parent_id"] else None
+        children = [dict(r) for r in db.execute(
+            "SELECT id, title, state, assignee, created_by FROM cards WHERE parent_id = ? ORDER BY id", (card_id,))]
+        depends_on = [dict(r) for r in db.execute(
+            "SELECT c.id, c.title, c.state, c.assignee, c.created_by FROM card_dependencies d"
+            " JOIN cards c ON c.id = d.depends_on_id WHERE d.card_id = ? ORDER BY c.id", (card_id,))]
+        blocks = [dict(r) for r in db.execute(
+            "SELECT c.id, c.title, c.state, c.assignee, c.created_by FROM card_dependencies d"
+            " JOIN cards c ON c.id = d.card_id WHERE d.depends_on_id = ? ORDER BY c.id", (card_id,))]
         notice_ids = [e["notice_id"] for e in events if e["notice_id"] is not None]
         notices = {}
         if notice_ids:
@@ -122,7 +136,11 @@ def get_card(card_id: int) -> dict:
         if e["notice_id"] is not None:
             event["notice"] = notices.get(e["notice_id"])
         out_events.append(event)
-    return {**_card(card), "references": references, "events": out_events}
+    return {**_card(card), "references": references, "events": out_events,
+            "parent": dict(parent) if parent else None, "children": children, "depends_on": depends_on,
+            # Computed on every read from the dependencies and their cards' states, never stored:
+            # it is gone the moment the last unfinished dependency reaches done.
+            "blocked_by": [c for c in depends_on if c["state"] != "done"], "blocks": blocks}
 
 
 def create_card(author: str, title: str, body: str = "", project: str | None = None,
@@ -207,6 +225,110 @@ def comment(author: str, card_id: int, text: str, context_id: str | None = None)
         db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (time.time(), card_id))
     _notify_comment(card_id, author, text)
     return get_card(card_id)
+
+
+# --- relationships: a parent, and what a card depends on ----------------------
+
+
+def restrict(card: dict, may_see) -> dict:
+    """The card with the related cards its viewer may not see taken out. A related card
+    is only a title and a state, but a title is still something to keep from someone who
+    may not read that card. `may_see` gets each related card's id, title, state, assignee
+    and creator."""
+    out = {**card}
+    for key in ("children", "depends_on", "blocked_by", "blocks"):
+        out[key] = [c for c in card[key] if may_see(c)]
+    if card["parent"] is not None and not may_see(card["parent"]):
+        out["parent"], out["parent_id"] = None, None
+    return out
+
+
+def set_parent(author: str, card_id: int, parent_id: int | None, context_id: str | None = None) -> dict:
+    """Make a card part of another (`parent_id`), or free it (None). A card has at most one
+    parent, and a card cannot sit under itself or under anything below it."""
+    card = get_card(card_id)
+    if parent_id is None:
+        if card["parent_id"] is None:
+            return card
+        body = f"no longer part of #{card['parent_id']}"
+    else:
+        parent_id = _card_number(parent_id, "parent_id")
+        if parent_id == card_id:
+            raise ValueError("a card cannot be its own parent")
+        parent = get_card(parent_id)  # not found, before anything else
+        if parent_id == card["parent_id"]:
+            return card
+        body = f"part of #{parent_id}: {parent['title'][:80]}"
+    now = time.time()
+    with opstore.connect() as db:
+        if parent_id is not None and card_id in _ancestors(db, parent_id):
+            raise ValueError(f"#{parent_id} is already part of #{card_id}: that would make a loop")
+        db.execute("UPDATE cards SET parent_id = ?, updated_at = ? WHERE id = ?", (parent_id, now, card_id))
+        _event(db, card_id, author, "relation", body, context_id)
+    return get_card(card_id)
+
+
+def add_dependency(author: str, card_id: int, depends_on_id: int, context_id: str | None = None) -> dict:
+    """The card cannot finish until `depends_on_id` is done. Beacon computes the card's
+    `blocked_by` from this; the card's own state is not touched."""
+    get_card(card_id)
+    depends_on_id = _card_number(depends_on_id, "depends_on")
+    if depends_on_id == card_id:
+        raise ValueError("a card cannot depend on itself")
+    target = get_card(depends_on_id)
+    now = time.time()
+    with opstore.connect() as db:
+        if db.execute("SELECT 1 FROM card_dependencies WHERE card_id = ? AND depends_on_id = ?",
+                      (card_id, depends_on_id)).fetchone():
+            raise ValueError(f"#{card_id} already depends on #{depends_on_id}")
+        if card_id in _dependencies_of(db, depends_on_id):
+            raise ValueError(f"#{depends_on_id} already depends on #{card_id}, directly or through other cards: "
+                             "that would make a loop")
+        db.execute("INSERT INTO card_dependencies (card_id, depends_on_id, created_by, created_at) VALUES (?, ?, ?, ?)",
+                   (card_id, depends_on_id, author, now))
+        db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (now, card_id))
+        _event(db, card_id, author, "relation", f"depends on #{depends_on_id}: {target['title'][:80]}", context_id)
+    return get_card(card_id)
+
+
+def remove_dependency(author: str, card_id: int, depends_on_id: int, context_id: str | None = None) -> dict:
+    get_card(card_id)
+    depends_on_id = _card_number(depends_on_id, "depends_on")
+    now = time.time()
+    with opstore.connect() as db:
+        if db.execute("DELETE FROM card_dependencies WHERE card_id = ? AND depends_on_id = ?",
+                      (card_id, depends_on_id)).rowcount == 0:
+            raise store.NotFound(f"#{card_id} does not depend on #{depends_on_id}")
+        db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (now, card_id))
+        _event(db, card_id, author, "relation", f"no longer depends on #{depends_on_id}", context_id)
+    return get_card(card_id)
+
+
+def _card_number(value, what: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{what} must be a card number")
+    return value
+
+
+def _ancestors(db, card_id: int) -> set[int]:
+    """The card and every card above it, following parents."""
+    seen, cursor = set(), card_id
+    while cursor is not None and cursor not in seen:
+        seen.add(cursor)
+        row = db.execute("SELECT parent_id FROM cards WHERE id = ?", (cursor,)).fetchone()
+        cursor = row["parent_id"] if row else None
+    return seen
+
+
+def _dependencies_of(db, card_id: int) -> set[int]:
+    """Every card this one depends on, directly or through others."""
+    seen, todo = set(), [card_id]
+    while todo:
+        for row in db.execute("SELECT depends_on_id FROM card_dependencies WHERE card_id = ?", (todo.pop(),)):
+            if row["depends_on_id"] not in seen:
+                seen.add(row["depends_on_id"])
+                todo.append(row["depends_on_id"])
+    return seen
 
 
 # --- references: structured pointers to work elsewhere -----------------------

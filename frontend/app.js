@@ -998,6 +998,7 @@ async function renderBoard() {
         <span>#${esc(c.id)} ${esc(c.title)}</span>
         <span class="board-card-meta">${esc(c.assignee ?? "unassigned")}${c.project ? ` · ${esc(c.project)}` : ""}${
           waiting[c.id] ? ` <span class="chip chip-warn">${waiting[c.id]} open request${waiting[c.id] > 1 ? "s" : ""}</span>` : ""}${
+          c.blocked_by_count ? ` <span class="chip chip-warn" title="unfinished dependencies">blocked by ${esc(c.blocked_by_count)}</span>` : ""}${
           c.state === "blocked" ? ` <span class="chip${c.blocked_reason === "cannot" ? " chip-warn" : ""}"${c.waiting_on ? ` title="${esc(c.waiting_on)}"` : ""}>${esc(c.blocked_reason ?? "no reason")}</span>` : ""}${
           c.state !== "done" ? deliveryChip(c.delivery) : ""}</span>
       </button>`).join("")}</div>`;
@@ -1050,6 +1051,10 @@ async function openCard(id) {
   }).join("");
   // What a request says now, without opening it: who it waits on, until when, and its result.
   const resultOf = (r) => (r == null ? "" : typeof r === "string" ? r : r.text || r.option || r.note || "");
+  // Related cards: each opens in place. Beacon computes "blocked by" from the dependencies and their
+  // states each time; it is not something anyone typed.
+  const related = (cards) => cards.map((r) => `<li><a href="#" data-open-card="${esc(r.id)}">#${esc(r.id)} ${esc(r.title)}</a>
+    <span class="chip">${esc(r.state)}</span></li>`).join("");
   const reqs = requests.map((w) => {
     const waiting = w.state === "pending" ? ` · waiting for ${w.eligible_responder === "human" ? "an operator" : w.eligible_responder}, expires ${when(w.expires_at)}`
       : w.state === "changes_requested" ? ` · waiting for ${w.requester} to send a changed plan` : ` · responder ${w.eligible_responder}`;
@@ -1066,12 +1071,20 @@ async function openCard(id) {
       ${c.state === "blocked" ? `<dt>Blocked</dt><dd>${c.blocked_reason ? esc(c.blocked_reason) : '<span class="hint">no reason given (blocked before reasons existed)</span>'}${
         c.waiting_on ? ` · ${esc(c.waiting_on)}` : ""}</dd>` : ""}
       ${reqs ? `<dt>Requests</dt><dd><ul class="card-list">${reqs}</ul><span class="hint">Answer in the Workflows tab.</span></dd>` : ""}
+      ${c.blocked_by.length ? `<dt>Blocked by</dt><dd><ul class="card-list">${related(c.blocked_by)}</ul></dd>` : ""}
+      ${c.parent ? `<dt>Part of</dt><dd><ul class="card-list">${related([c.parent])}</ul></dd>` : ""}
+      ${c.children.length ? `<dt>Child cards</dt><dd><ul class="card-list">${related(c.children)}</ul></dd>` : ""}
+      ${c.blocks.length ? `<dt>Blocks</dt><dd><ul class="card-list">${related(c.blocks)}</ul></dd>` : ""}
       ${refs ? `<dt>References</dt><dd><ul class="card-list">${refs}</ul></dd>` : ""}
       ${links ? `<dt>Links</dt><dd><ul class="card-list">${links}</ul></dd>` : ""}
     </dl>
     ${c.body ? `<p class="card-body">${esc(c.body)}</p>` : ""}
     <h3 class="card-section">History <span class="hint">${c.events.length}</span></h3>
     <ol class="card-history">${c.events.map((e) => cardEvent(e, when)).join("")}</ol>`;
+  document.querySelectorAll("#card-detail [data-open-card]").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    openCard(a.dataset.openCard);
+  }));
   const form = document.getElementById("card-update-form");
   form.dataset.card = c.id;
   form.state.value = c.state;
