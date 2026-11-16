@@ -551,6 +551,8 @@ class WorkflowCreateRequest(BaseModel):
     plan_hash: str
     expires_at: float | None = None
     context_id: str | None = None  # the A2A thread the request was made under, kept in the card's history
+    consulted: list[dict] = []  # peers asked first: [{agent, said, context_id?}]
+    consult_skipped: str | None = None  # why none was, when asking a person
 
 
 class WorkflowResponseRequest(BaseModel):
@@ -651,6 +653,7 @@ def _create_workflow(card_id: int, body: WorkflowCreateRequest, request: Request
         tier=body.tier, title=body.title, summary=body.summary, options=body.options,
         target=body.target, plan_revision=body.plan_revision, plan_hash=body.plan_hash,
         expires_at=body.expires_at, context_id=body.context_id,
+        consulted=body.consulted, consult_skipped=body.consult_skipped,
     )
 
 

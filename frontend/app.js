@@ -1276,6 +1276,13 @@ function renderWorkflowItems(items) {
     const waiting = w.state === "changes_requested"
       ? '<p class="hint">Waiting for the requester to send a changed plan.</p>' : "";
     const responder = w.eligible_responder === "human" ? "any operator" : w.eligible_responder;
+    // Whether the requester asked a peer before asking a person: its own account, shown so the
+    // person can judge the question. A request that did neither is flagged.
+    const consulted = (w.consulted || []).length
+      ? `<div class="wf-consulted"><strong>Consulted first</strong><ul>${w.consulted.map((c) =>
+        `<li><strong>${esc(c.agent)}</strong>: ${esc(c.said)}${c.context_id ? ` <code>${esc(c.context_id)}</code>` : ""}</li>`).join("")}</ul></div>`
+      : w.consult_skipped ? `<p class="hint">No peer consulted: ${esc(w.consult_skipped)}</p>`
+      : w.consult_flag ? '<p class="wf-flag">No peer was consulted before asking.</p>' : "";
     return `<article class="workflow-item">
       <header class="wf-head">
         <div>
@@ -1286,6 +1293,7 @@ function renderWorkflowItems(items) {
       </header>
       <p class="wf-from">From <strong>${esc(w.requester)}</strong> to <strong>${esc(responder)}</strong> · card #${esc(w.card_id)} · expires ${esc(workflowWhen(w.expires_at))}</p>
       <div class="wf-plan">${renderMarkdown(w.summary)}</div>
+      ${consulted}
       ${note}${answered}${waiting}
       ${choice}${answerBox}
       ${buttons ? `<div class="workflow-actions">${buttons}</div>` : ""}

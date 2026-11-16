@@ -324,7 +324,7 @@ this", which need different handling.
 - **`cannot` names the missing capability.** An agent asks a person for authority
   (grant access, approve a risk), never for labour (install software, edit files,
   reset credentials). The agent does the work itself where it can.
-- **Human requests show their consultation.** A workflow to a person carries
+- **Human requests show their consultation.** *(Delivered: flagged, not refused.)* A workflow to a person carries
   `consulted`: the agents asked, what they said, and the thread. A request with no
   consultation is flagged on the page. Straightforward questions are exempt.
 - **Choices use decisions, not approvals.** A workflow with several paths is a

@@ -4,6 +4,15 @@
 
 ### Added
 
+- **Requests to people say whether a peer was consulted.** `workflow_create` (and the REST
+  body) take `consulted`, the peers asked first with what each said and the thread, and
+  `consult_skipped`, why none was. An agent asking `human` or an email with neither is
+  flagged for the person: on the Workflows page, in the email, and in the card's history
+  ("no peer consulted"). It is never refused, a plain `question` is exempt, and requests to
+  agents or from people are not flagged. Beacon does not verify the account. Skill 1.18.0.
+
+### Added
+
 - **The scheduler tick also reminds, escalates and expires.** `python -m backend.scheduler tick`
   (every minute, as before) now runs housekeeping after the cron jobs: workflow requests past
   their time expire, and stale board cards are reminded and escalated for every agent. The

@@ -98,7 +98,10 @@ CREATE TABLE IF NOT EXISTS workflow_requests (
     expires_at          REAL NOT NULL,
     created_at          REAL NOT NULL,
     updated_at          REAL NOT NULL,
-    responded_at        REAL
+    responded_at        REAL,
+    consulted_json      TEXT NOT NULL DEFAULT '[]',  -- peers the requester asked first: [{agent, said, context_id}]
+    consult_skipped     TEXT,                        -- why it did not (a request to a person, no peer consulted)
+    consult_flag        TEXT                         -- "missing": an agent asked a person with neither (workflow._consult_flag)
 );
 CREATE INDEX IF NOT EXISTS workflow_requests_by_card ON workflow_requests (card_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS workflow_requests_by_state ON workflow_requests (state, expires_at);
@@ -275,6 +278,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
                          ("parent_id", "INTEGER REFERENCES cards (id)")):
         if column not in card_columns:
             conn.execute(f"ALTER TABLE cards ADD COLUMN {column} {decl}")
+    request_columns = {row[1] for row in conn.execute("PRAGMA table_info(workflow_requests)")}
+    for column, decl in (("consulted_json", "TEXT NOT NULL DEFAULT '[]'"), ("consult_skipped", "TEXT"),
+                         ("consult_flag", "TEXT")):
+        if column not in request_columns:
+            conn.execute(f"ALTER TABLE workflow_requests ADD COLUMN {column} {decl}")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(card_events)")}
     if "notice_id" not in columns:
         conn.execute("ALTER TABLE card_events ADD COLUMN notice_id INTEGER REFERENCES mailbox (id)")

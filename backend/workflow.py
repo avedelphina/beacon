@@ -73,7 +73,8 @@ def plan_binding(payload: dict[str, Any], revision: str | None = None) -> dict[s
 
 def _decode(row: Any) -> dict:
     result = dict(row)
-    for column, fallback in (("options_json", []), ("response_json", None), ("target_json", {})):
+    for column, fallback in (("options_json", []), ("response_json", None), ("target_json", {}),
+                             ("consulted_json", [])):
         raw = result.pop(column, None)
         if raw is None:
             result[column.removesuffix("_json")] = fallback
@@ -122,7 +123,12 @@ def _event(db, request_id: int, actor: str, kind: str, from_state: str | None,
 def _card_text(request_id: int, row, kind: str, from_state: str | None, to_state: str | None, payload: dict) -> str:
     label = f"workflow #{request_id} ({row['kind']}) {row['title'][:80]}"
     if kind == "created":
-        return f"{label}: asked {row['eligible_responder']}"
+        text = f"{label}: asked {row['eligible_responder']}"
+        if payload.get("consulted"):
+            return text + f" (after consulting {', '.join(payload['consulted'])})"
+        if payload.get("consult_skipped"):
+            return text + f" (no peer consulted: {payload['consult_skipped'][:120]})"
+        return text + (" (no peer consulted)" if payload.get("consult_flag") else "")
     if kind == "responded":
         response = payload.get("response")
         detail = (response.get("note") or response.get("option") or response.get("text")
@@ -159,6 +165,52 @@ def _expire_due(db, now: float) -> int:
         )
         _event(db, row["id"], "beacon", "expired", row["state"], "expired")
     return len(rows)
+
+
+MAX_CONSULTED = 5
+
+
+def _consulted(consulted) -> list[dict]:
+    """Who the requester asked before asking a person, and what they said: [{agent, said,
+    context_id}]. It is the requester's own account, shown to the person; Beacon does not
+    check it against the mailbox."""
+    consulted = consulted or []
+    if not isinstance(consulted, list) or len(consulted) > MAX_CONSULTED:
+        raise WorkflowError(f"consulted is a list of at most {MAX_CONSULTED} entries")
+    out = []
+    for entry in consulted:
+        agent = entry.get("agent") if isinstance(entry, dict) else None
+        said = entry.get("said") if isinstance(entry, dict) else None
+        thread = entry.get("context_id") if isinstance(entry, dict) else None
+        if not isinstance(agent, str) or not agent.strip() or len(agent) > 64 \
+                or not isinstance(said, str) or not said.strip() \
+                or not (thread is None or (isinstance(thread, str) and len(thread) <= 200)):
+            raise WorkflowError("each consulted entry is {agent, said, context_id?}: who you asked, and what they said")
+        out.append({"agent": agent.strip(), "said": said.strip()[:500], "context_id": thread})
+    return out
+
+
+def _consult_skipped(reason) -> str | None:
+    if reason is None or reason == "":
+        return None
+    if not isinstance(reason, str) or len(reason.strip()) > 300:
+        raise WorkflowError("consult_skipped is a short reason, at most 300 characters")
+    return reason.strip()
+
+
+def _consult_flag(requester: str, eligible_responder: str, kind: str, consulted: list, skipped: str | None) -> str | None:
+    """"missing" when an agent asks a person and neither consulted a peer nor said why not.
+    Flagged, never refused: the person sees it and judges. Not for a request to an agent
+    (that is itself the asking of a peer), not from a person, and not for a plain question."""
+    if consulted or skipped or kind == "question":
+        return None
+    if eligible_responder != "human" and "@" not in eligible_responder:
+        return None
+    try:
+        asker = store.get_agent(requester)
+    except (store.NotFound, store.InvalidId):
+        return None
+    return "missing" if asker.reach is not None else None
 
 
 def _validate_actor(actor: str) -> str:
@@ -249,7 +301,8 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
            capability: str, tier: int, title: str, summary: str,
            options: list[str] | None, target: dict[str, Any] | None,
            plan_revision: str, plan_hash: str, expires_at: float | None = None,
-           now: float | None = None, context_id: str | None = None) -> dict:
+           now: float | None = None, context_id: str | None = None,
+           consulted: list[dict] | None = None, consult_skipped: str | None = None) -> dict:
     """Create one pending request and its initial history event, on the card as well."""
     if kind not in REQUEST_KINDS:
         raise WorkflowError(f"kind must be one of {', '.join(REQUEST_KINDS)}")
@@ -284,6 +337,9 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
     target = target or {}
     if not isinstance(target, dict):
         raise WorkflowError("target must be an object")
+    consulted = _consulted(consulted)
+    consult_skipped = _consult_skipped(consult_skipped)
+    flag = _consult_flag(requester, eligible_responder, kind, consulted, consult_skipped)
     now = time.time() if now is None else now
     expires_at = now + 24 * 60 * 60 if expires_at is None else expires_at
     if not isinstance(expires_at, (int, float)) or expires_at <= now:
@@ -294,13 +350,16 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
             raise WorkflowNotFound(f"card {card_id} not found")
         request_id = db.execute(
             "INSERT INTO workflow_requests (card_id, kind, state, requester, eligible_responder, capability, tier, "
-            "title, summary, options_json, target_json, plan_revision, plan_hash, expires_at, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "title, summary, options_json, target_json, plan_revision, plan_hash, expires_at, created_at, updated_at,"
+            " consulted_json, consult_skipped, consult_flag) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (card_id, kind, "pending", requester, eligible_responder, capability.strip(), tier, title.strip(), summary.strip(),
-             json_text(options), json_text(target), plan_revision.strip(), plan_hash.strip(), expires_at, now, now),
+             json_text(options), json_text(target), plan_revision.strip(), plan_hash.strip(), expires_at, now, now,
+             json_text(consulted), consult_skipped, flag),
         ).lastrowid
         _event(db, request_id, requester, "created", None, "pending", {
             "kind": kind, "capability": capability.strip(), "tier": tier,
+            "consulted": [c["agent"] for c in consulted], "consult_skipped": consult_skipped, "consult_flag": flag,
         }, context_id)
     created = get(request_id)
     _tell(notify.workflow_created, created)  # after the commit: a notice must never undo the request
