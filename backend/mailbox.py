@@ -168,9 +168,19 @@ def receive_push(recipient_id: str, message_id: int, payload: dict) -> str | Non
     return _record_result(message_id, text or f"(no text; task state {status['state']})")
 
 
-def recent(limit: int = 50) -> list[dict]:
+def recent(limit: int = 50, *, sender: str | None = None, recipient: str | None = None,
+           kind: str | None = None) -> list[dict]:
+    """Newest first. `sender` is the real author of each row (a reply's is the agent that
+    answered, though it is delivered under Beacon's token), so this is where "who wrote to
+    whom" is answered, whatever an agent's own log calls the peer."""
+    clauses, params = [], []
+    for column, value in (("sender", sender), ("recipient", recipient), ("kind", kind)):
+        if value:
+            clauses.append(f"{column} = ?")
+            params.append(value)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with opstore.connect() as db:
-        rows = db.execute("SELECT * FROM mailbox ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        rows = db.execute(f"SELECT * FROM mailbox {where} ORDER BY id DESC LIMIT ?", (*params, limit)).fetchall()
     return [dict(row) for row in rows]
 
 
@@ -488,7 +498,11 @@ def _framed(row) -> str:
         about = f" to your message of {_when(original['created_at'])}: \"{original['body'][:SNIPPET]}\"" if original else ""
         return (f"[Reply from {row['sender']} via the Beacon mailbox{about}. No answer is needed; "
                 f"anything you say here is not passed on.]\n\n{row['body']}")
-    return f"[Notice from the Beacon mailbox]\n\n{row['body']}"
+    # A notice an agent caused (it assigned a card, commented on one) carries that agent as its sender
+    # in Beacon's records. It is delivered under Beacon's own token, so the receiving agent's log says
+    # "beacon"; the first line says who it is from.
+    source = "the Beacon mailbox" if row["sender"] == mesh.BEACON_PEER else f"{row['sender']} via the Beacon mailbox"
+    return f"[Notice from {source}]\n\n{row['body']}"
 
 
 def _when(timestamp: float) -> str:

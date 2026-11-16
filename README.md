@@ -676,6 +676,15 @@ new sync (0.27.0); an older one reports nothing and heals nothing.
 
 ### Mailbox: relay and voicemail
 
+**Who a message is from.** A message from a peer is delivered under the sender's own token,
+so the receiving agent's log shows the sender. A reply or a notice is delivered under Beacon's
+token (an answer must not need the answerer to be allowed to call back), so that log shows the
+peer `beacon`. Two places say who wrote it: the first line of the text (`[Reply from <peer>
+via the Beacon mailbox ...]`, `[Notice from <agent> via the Beacon mailbox]`), and Beacon's own
+mailbox records, where `sender` is the real author of every row. `GET /api/mailbox` lists them
+and filters by `sender`, `recipient` and `kind`. Direct agent-to-agent traffic is not recorded
+centrally.
+
 `POST /a2a/{agent}` is an A2A endpoint that Beacon serves for each agent.
 Every agent's peer list has two entries per peer: `<peer>`, which is
 direct, and `<peer>-mailbox`, which goes through Beacon. An agent uses the
