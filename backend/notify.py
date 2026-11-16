@@ -86,6 +86,35 @@ def workflow_escalated(request: dict, actor: str) -> None:
         logger.exception("escalation notice for request %s failed", request.get("id"))
 
 
+def workflow_answered_for(request: dict, client: str, person: str) -> None:
+    """The operator hears what their client answered for them, as it happens: they did not see it first,
+    and an answer cannot be taken back."""
+    try:
+        response = request.get("response")
+        detail = (response.get("note") or response.get("option") or response.get("text")
+                  if isinstance(response, dict) else response)
+        _tell({person.casefold()}, f"Beacon: {client} answered for you: {request['title'][:80]}",
+              f"{client}, your client, answered {_what(request)} for you: workflow request #{request['id']}, "
+              f"\"{request['title'][:200]}\" ({request['state']}), asked by {request['requester']}.\n"
+              + (f"\nIt said: {str(detail)[:300]}\n" if detail else "")
+              + "\nYou did not see it first, and an answer cannot be taken back. If it was wrong, ask the requester "
+                f"for a new request. Revoke or turn off the client in the Agents tab: {mesh.public_url() or 'your Beacon page'}\n")
+    except Exception:
+        logger.exception("answered-for notice for request %s failed", request.get("id"))
+
+
+def client_needs_person(request: dict, client: str, person: str) -> None:
+    """Tier 4 and above arrived where a client could see it: it cannot answer, so the operator is told."""
+    try:
+        _tell({person.casefold()}, f"Beacon: tier {request['tier']} needs you: {request['title'][:80]}",
+              f"{request['requester']} asked for {_what(request)} at tier T{request['tier']}: workflow request "
+              f"#{request['id']}, \"{request['title'][:200]}\". Your client {client} saw it and cannot answer it: "
+              "tier 4 and above are for you in the web page.\n\n"
+              f"Open the Workflows tab: {mesh.public_url() or 'your Beacon page'}\n")
+    except Exception:
+        logger.exception("tier-4 notice for request %s failed", request.get("id"))
+
+
 def _what(request: dict) -> str:
     return {"approval": "an approval", "review": "a review", "decision": "a decision", "question": "a question", "handoff": "a handoff"}.get(request["kind"], "an answer")
 
@@ -225,6 +254,8 @@ def _created_body(request: dict) -> str:
         + "\n".join("  > " + line for line in request["summary"][:SUMMARY_CHARS].splitlines())
         + ("\n  > [cut]" if len(request["summary"]) > SUMMARY_CHARS else "")
         + _consult_line(request)
+        + ("\n\nThis is tier 4 or above: only you, in the web page, can answer it. Your AI clients cannot."
+           if request["tier"] >= 4 else "")
         + f"\n\nOpen the Workflows tab to read it in full and answer: {link or 'your Beacon page'}\n"
     )
 

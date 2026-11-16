@@ -4,6 +4,19 @@
 
 ### Added
 
+- **A client answers for its operator.** A client agent bound to an operator (`acts_for`) reads the
+  workflow requests that operator reads (addressed to them or to `human`) and answers them for
+  them up to its `max_tier`, at most T3, which is an independent agent review, not their approval.
+  Each request shows what the client may do (`delegate.can_answer`, with `why_not`). It never answers
+  tier 4 or 5 (the operator is told at once when one arrives), a request it or its operator made, a
+  request sent to a person (`workflow_require_human` works for it too), one addressed to another operator,
+  or one above its ceiling; turning it off, revoking its tokens, or removing the operator stops it at
+  once. Answers are recorded under both names (`answered_by`, `on_behalf_of`) on the request, in the card's
+  history and on the page, and the operator is told by push and email what was answered for them. The
+  board tools' descriptions tell an AI client how to behave as a delegate.
+
+### Added
+
 - **Client agents.** An agent with a `client` block (`client: {board, acts_for, max_tier, enabled}`)
   instead of a `reach` block is an operator's own AI client: Claude Code, Codex, any MCP client. It
   has its own identity and uses the board and workflow tools with its own token, so its cards,

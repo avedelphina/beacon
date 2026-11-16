@@ -367,8 +367,8 @@ not the operator: Beacon says so everywhere it is recorded.
   satisfies; it is not human approval, and the docs and the page say so.
 - **Independence.** The responder must differ from the requester, as at T3 today, and the check
   covers both identities: a client cannot answer a request that it or its own operator made, or
-  it could ask as one and approve as the other. It does not create requests addressed to its own
-  operator.
+  it could ask as one and approve as the other. It may ask its own operator a question: it
+  simply cannot answer that request itself.
 - **Escalate when unsure: `require_human`.** A tier belongs to the capability (a T3 action stays
   T3 when Beacon runs it), so a request cannot become a T4 one. Any eligible reviewer, the client
   included, may instead set a one-way flag with a reason: the request keeps its plan binding and
@@ -377,6 +377,10 @@ not the operator: Beacon says so everywhere it is recorded.
 - **Audit.** A response records who answered and for whom (`answered_by`, `on_behalf_of`): on the
   request, in the card's history, and on the page ("answered by `<client>` for `<operator>`").
   The operator gets a short digest of what was answered for them.
+
+**Delivered** (the client kind, the binding and the page's AI clients panel, `require_human`,
+reading and answering for the operator, the audit fields and the notice to the operator). Not built: a
+batched digest (each answer is notified as it happens), a binding expiry, and a rate limit on answers.
 
 **Acceptance:** a client with `acts_for` and `max_tier: 3` answers a T2 decision and a T3 review
 addressed to its operator, and one addressed to `human`; its answer is recorded with both names; it

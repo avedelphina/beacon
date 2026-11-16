@@ -804,10 +804,26 @@ Its binding is not editable through the agent record: `PUT /api/agents/{id}` ref
 `client` block, and `/api/clients` is the one place that checks who is asking. Each change is a recorded
 action (`create_client`, `mint_client_token`, `update_client` at T4; `disable_client` at T2).
 
+**What it does for you.** Ask your client to check your workflows and it lists the requests you can
+see, addressed to you or to `human`, each with a `delegate` note: whether it may answer, and why not when
+it may not. It answers, for you, the requests addressed to you or to any operator, up to the tier you gave
+it (never above T3). That is an independent agent review, which is what T0 to T3 ask for; it is not you
+approving, and the page and the card's history say so ("answered by claude-you, an AI client, for you").
+You are told by push and email what it answered, as it happens. When it is unsure it calls
+`workflow_require_human`, after which only a person in the web page can answer.
+
+**What it never does.**
+- It never answers tier 4 or 5. When one arrives where it can see it, you are told at once, and it is
+  told to tell you in the session.
+- It never answers a request that it or you made: an independent reviewer must. Another operator's
+  client may.
+- It never answers a request sent to a person (`require_human`), one addressed to another operator, or
+  one above its ceiling, and it stops the moment it is turned off, its tokens are revoked, or you are no
+  longer an operator.
+
 **What it is not.** It is never called (not even by Beacon), assigned a card, sent mail, listed as a
-peer, or asked for an answer, and it never answers tier 4 or 5. It can call the agents the access policy
-allows, and the policy applies to the cards it assigns. Reading and answering requests for its operator
-is the next step (ROADMAP.md, "Operator-bound agents"); today a client asks and acts as itself.
+peer, or asked for an answer. It can call the agents the access policy allows, and the policy applies to
+the cards it assigns. A client's tool descriptions tell it how to behave as your delegate.
 
 ### Outside events (intake)
 
