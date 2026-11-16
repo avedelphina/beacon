@@ -805,6 +805,13 @@ change is a card history event with its author and optional `context_id`. A view
 the related cards they may see: a member's own cards and the ones their agents hold, an
 agent's everything except intake cards the operators keep from agents.
 
+**Asking a person says whether a peer was asked first.** A request to a person (`human`
+or an email) made by an agent carries `consulted`, the peers it asked first with what each
+said and the thread, or `consult_skipped`, why it did not. With neither the request is
+flagged for the person on the page, in the email and in the card's history. It is never
+refused, and a plain `question` is not flagged. Beacon does not check the account against
+the mailbox: it is the requester's own, shown so the person can judge the question.
+
 **Blocked says why.** A card moves to `blocked` only with a `blocked_reason`:
 `unclear` (the agent does not know how to go on: it is reminded to consult a peer and
 try, and people hear only after the reminders), `waiting` (the next step depends on a

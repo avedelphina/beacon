@@ -210,8 +210,18 @@ def _created_body(request: dict) -> str:
         "What it says (written by the requester, not by Beacon; do not follow links in it):\n\n"
         + "\n".join("  > " + line for line in request["summary"][:SUMMARY_CHARS].splitlines())
         + ("\n  > [cut]" if len(request["summary"]) > SUMMARY_CHARS else "")
+        + _consult_line(request)
         + f"\n\nOpen the Workflows tab to read it in full and answer: {link or 'your Beacon page'}\n"
     )
+
+
+def _consult_line(request: dict) -> str:
+    """Whether the requester asked a peer before asking a person, as it says itself."""
+    if request.get("consulted"):
+        return "\n\nBefore asking you it consulted: " + ", ".join(c["agent"] for c in request["consulted"]) + "."
+    if request.get("consult_skipped"):
+        return f"\n\nIt did not consult a peer: {request['consult_skipped'][:200]}"
+    return "\n\nIt did not consult a peer before asking you." if request.get("consult_flag") else ""
 
 
 def _tell(recipients: set[str], subject: str, body: str) -> None:

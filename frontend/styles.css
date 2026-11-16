@@ -368,6 +368,9 @@ td[data-label="ID"] .chip { margin-left: 0.4rem; }
 .wf-note { border-left: 3px solid var(--line-soft); padding: 0.1rem 0 0.1rem 0.8rem; margin: 0.8rem 0; max-width: 68ch; }
 .wf-note strong { display: block; font-size: 0.8rem; color: var(--slate); margin-bottom: 0.2rem; }
 .wf-note p { margin: 0.2rem 0; }
+.wf-consulted { max-width: 68ch; margin: 0.4rem 0 0.9rem; font-size: 0.85rem; color: var(--slate); }
+.wf-consulted ul { margin: 0.2rem 0 0; padding-left: 1.2rem; }
+.wf-flag { max-width: 68ch; margin: 0.4rem 0 0.9rem; font-size: 0.85rem; color: var(--crit); }
 .wf-choice { border: 0; padding: 0; margin: 0.9rem 0 0; display: flex; flex-direction: column; gap: 0.4rem; }
 .wf-choice legend { font-size: 0.8rem; color: var(--slate); margin-bottom: 0.3rem; }
 .wf-choice label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }

@@ -279,8 +279,14 @@ def build() -> MCPServer:
                         capability: str, tier: int, title: str, summary: str,
                         options: list[str] | None = None, target: dict | None = None,
                         expires_at: float | None = None, plan_revision: str | None = None,
-                        plan_hash: str | None = None, context_id: str | None = None) -> dict:
-        """Create a pending typed workflow request attached to a board card. summary is Markdown:
+                        plan_hash: str | None = None, context_id: str | None = None,
+                        consulted: list[dict] | None = None, consult_skipped: str | None = None) -> dict:
+        """Create a pending typed workflow request attached to a board card. When you ask a person
+        (eligible_responder "human" or an email), first consult at least one peer you may call about
+        the problem and your plan, and pass what you learned as consulted: [{"agent": "<peer>",
+        "said": "<what they answered>", "context_id": "<thread, optional>"}]. If a peer cannot help
+        (a plain yes/no, nobody to ask), say why in consult_skipped. A request to a person with neither
+        is flagged for them as "no peer consulted"; it is not refused. summary is Markdown:
         its first line says what you need, then the short plan. kind: decision (the
         responder picks one of options), question (the responder writes a free-text answer;
         no options), handoff (ask an agent to take the card over: no options; when it approves,
@@ -301,7 +307,7 @@ def build() -> MCPServer:
             card_id=card_id, kind=kind, requester=_author(ctx), eligible_responder=eligible_responder,
             capability=capability, tier=tier, title=title, summary=summary, options=options,
             target=target, plan_revision=plan_revision, plan_hash=plan_hash, expires_at=expires_at,
-            context_id=context_id,
+            context_id=context_id, consulted=consulted, consult_skipped=consult_skipped,
         )
 
     @server.tool()
