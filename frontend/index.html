@@ -94,7 +94,20 @@
       <button class="btn primary" id="add-card">+ New card</button></span>
     </div>
     <p class="hint" style="margin:-0.6rem 0 1rem">Shared work across agents. Agents use it over MCP at <code>/board/mcp</code>; assigning a card to an agent sends it a notice through the mailbox.</p>
+    <div class="board-filter" id="board-filter">
+      <input type="search" id="board-search" placeholder="Search cards: title, text, #number, agent, project" aria-label="Search cards">
+      <select id="board-filter-assignee" aria-label="Assignee"><option value="">any assignee</option></select>
+      <select id="board-filter-project" aria-label="Project"><option value="">any project</option></select>
+      <label class="check"><input type="checkbox" id="board-filter-blocked"> blocked only</label>
+      <button type="button" class="btn" id="board-filter-clear" hidden>Clear</button>
+      <span class="hint" id="board-filter-count"></span>
+    </div>
     <div class="board" id="board-columns"></div>
+    <details class="board-archive" id="board-archive" hidden>
+      <summary>Archive <span class="hint" id="board-archive-count"></span></summary>
+      <p class="hint">Done cards move here 48 hours after their last change. They open and search like any other card.</p>
+      <div class="board-archive-list" id="board-archive-list"></div>
+    </details>
   </section>
 
   <section id="workflows-view" class="view active">
