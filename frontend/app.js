@@ -1294,6 +1294,7 @@ function renderWorkflowItems(items) {
       <p class="wf-from">From <strong>${esc(w.requester)}</strong> to <strong>${esc(responder)}</strong> · card #${esc(w.card_id)} · expires ${esc(workflowWhen(w.expires_at))}</p>
       <div class="wf-plan">${renderMarkdown(w.summary)}</div>
       ${consulted}
+      ${w.require_human ? `<p class="wf-flag">Needs a person: ${esc(w.escalated_reason || "")} <span class="hint">(sent by ${esc(w.escalated_by || "a reviewer")})</span></p>` : ""}
       ${note}${answered}${waiting}
       ${choice}${answerBox}
       ${buttons ? `<div class="workflow-actions">${buttons}</div>` : ""}

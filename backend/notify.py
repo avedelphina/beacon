@@ -72,6 +72,20 @@ def workflow_answered(request: dict, actor: str) -> None:
         logger.exception("workflow answer notice for request %s failed", request.get("id"))
 
 
+def workflow_escalated(request: dict, actor: str) -> None:
+    """A reviewer sent a request to a person: tell the people who may answer it, and the requester."""
+    try:
+        reason = request.get("escalated_reason") or ""
+        _tell(_people_to_ask(request) - {actor.casefold()}, f"Beacon: {request['title'][:80]} needs a person",
+              f"{actor} sent {_what(request)} to a person: workflow request #{request['id']}, \"{request['title'][:200]}\".\n\n"
+              f"Why: {reason}\n\nOpen the Workflows tab to read it and answer: {mesh.public_url() or 'your Beacon page'}\n")
+        _agent_notice(request["requester"], request,
+                      f"Your workflow request #{request['id']} ({request['title']}) was sent to a person by {actor}"
+                      f": {reason}\n\nIt stays pending. Only a person can answer it now.", skip=actor)
+    except Exception:
+        logger.exception("escalation notice for request %s failed", request.get("id"))
+
+
 def _what(request: dict) -> str:
     return {"approval": "an approval", "review": "a review", "decision": "a decision", "question": "a question", "handoff": "a handoff"}.get(request["kind"], "an answer")
 
@@ -191,7 +205,7 @@ def _people_to_ask(request: dict) -> set[str]:
     responder = request["eligible_responder"]
     if "@" in responder:
         people = {responder}
-    elif responder == "human":
+    elif responder == "human" or request.get("require_human"):
         about = request.get("target") or {}
         agents = {request["requester"], about.get("agent_id") or about.get("agent")}
         people = set(auth.ALLOWED_EMAILS) | {a.owner.casefold() for a in store.list_agents()

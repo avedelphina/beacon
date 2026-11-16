@@ -73,6 +73,7 @@ def plan_binding(payload: dict[str, Any], revision: str | None = None) -> dict[s
 
 def _decode(row: Any) -> dict:
     result = dict(row)
+    result["require_human"] = bool(result.get("require_human"))
     for column, fallback in (("options_json", []), ("response_json", None), ("target_json", {}),
                              ("consulted_json", [])):
         raw = result.pop(column, None)
@@ -94,7 +95,7 @@ def _visible(request: dict, actor: str, human: bool = False) -> bool:
     return (
         actor == request["requester"]
         or _is_responder(actor, eligible_responder)
-        or (human and eligible_responder == "human")
+        or (human and (eligible_responder == "human" or bool(request["require_human"])))
     )
 
 
@@ -136,6 +137,8 @@ def _card_text(request_id: int, row, kind: str, from_state: str | None, to_state
         return f"{label}: {to_state}" + (f": {str(detail)[:300]}" if detail else "")
     if kind == "revised":
         return f"{label}: plan revised, pending again"
+    if kind == "escalated":
+        return f"{label}: needs a person: {payload.get('reason', '')[:200]}"
     if kind == "expired":
         return (f"{label}: expired, no changed plan was sent" if from_state == "changes_requested"
                 else f"{label}: expired without an answer")
@@ -237,6 +240,12 @@ def validate_kind_for_tier(kind: str, tier: int) -> None:
 
 def _eligible(request: dict, actor: str, human: bool) -> bool:
     eligible_responder = request["eligible_responder"]
+    if request["require_human"]:
+        # Sent to a person: only a person in the browser answers. The named person if it names one;
+        # otherwise (an agent, or any operator) any operator, since the agent it named may not.
+        if not human or (request["tier"] >= 3 and actor.casefold() == request["requester"].casefold()):
+            return False
+        return actor.casefold() == eligible_responder.casefold() if "@" in eligible_responder else True
     # `human` is an eligibility sentinel, never an agent identity. A browser
     # session is required even if an untrusted caller uses the same string.
     if eligible_responder == "human":
@@ -383,7 +392,8 @@ def list_requests(*, card_id: int | None = None, state: str | None = None,
             clauses.append("state NOT IN ('executed', 'verified', 'failed', 'execution_uncertain', 'rejected', 'withdrawn', 'expired', 'stale', 'answered')")
         if actor is not None:
             if human:
-                clauses.append("(requester = ? OR lower(eligible_responder) = lower(?) OR eligible_responder = 'human')")
+                clauses.append("(requester = ? OR lower(eligible_responder) = lower(?) OR eligible_responder = 'human'"
+                               " OR require_human = 1)")
             else:
                 clauses.append("(requester = ? OR (eligible_responder != 'human' AND lower(eligible_responder) = lower(?)))")
             params.extend((actor, actor))
@@ -426,6 +436,9 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
             if request["state"] == "expired":
                 db.commit()
             raise WorkflowError(f"workflow request {request_id} is {request['state']}")
+        if request["require_human"] and not human:
+            raise HumanApprovalRequired(f"workflow request {request_id} was sent to a person: only a person in the "
+                                        f"web page may answer it ({request['escalated_reason']})")
         if not _eligible(request, actor, human):
             raise UnauthorizedResponder(f"{actor} is not eligible to respond to workflow request {request_id}")
         if request["tier"] >= 4 and not human:
@@ -506,6 +519,39 @@ def _hand_over(db, request: dict, actor: str, context_id: str | None) -> None:
         " VALUES (?, ?, 'assign', ?, ?, NULL, ?)",
         (request["card_id"], actor, f"{card['assignee'] or '-'} -> {agent.id} (handoff #{request['id']} accepted)",
          context_id or None, now))
+
+
+def escalate(request_id: int, *, actor: str, human: bool, reason: str, context_id: str | None = None) -> dict:
+    """Send a pending request to a person. A tier belongs to the capability (a T3 action stays T3 when
+    Beacon runs it), so a request cannot become a T4 one; this is the one-way step instead. Whoever may
+    answer it, an agent reviewing it included, can say "I am not sure, a person should look at this".
+    The request keeps its plan binding and tier, and from then on only a person in the browser may
+    answer it. Nothing clears the flag but that person's answer. T4 and T5 requests already need one."""
+    actor = _validate_actor(actor)
+    if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 300:
+        raise WorkflowError("say why a person should look at it, in at most 300 characters")
+    reason = reason.strip()
+    with opstore.connect() as db:
+        _expire_due(db, time.time())
+        row = db.execute("SELECT * FROM workflow_requests WHERE id = ?", (request_id,)).fetchone()
+        if row is None:
+            raise WorkflowNotFound(f"workflow request {request_id} not found")
+        request = _decode(row)
+        if request["state"] != "pending":
+            raise WorkflowError(f"workflow request {request_id} is {request['state']}")
+        if request["tier"] >= 4:
+            raise WorkflowError("T4 and T5 requests already need a person in the web page")
+        if request["require_human"]:
+            return get(request_id)  # already sent to a person: nothing to add, nothing to record
+        if not _eligible(request, actor, human):
+            raise UnauthorizedResponder(f"{actor} is not eligible to answer workflow request {request_id}, so it "
+                                        "cannot send it to a person either")
+        db.execute("UPDATE workflow_requests SET require_human = 1, escalated_by = ?, escalated_reason = ?,"
+                   " updated_at = ? WHERE id = ?", (actor, reason, time.time(), request_id))
+        _event(db, request_id, actor, "escalated", "pending", "pending", {"reason": reason}, context_id)
+    escalated = get(request_id)
+    _tell(notify.workflow_escalated, escalated, actor)
+    return escalated
 
 
 def revise(request_id: int, *, actor: str, plan_revision: str, plan_hash: str,

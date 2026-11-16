@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A reviewer that is not sure can send a request to a person.** `workflow_require_human`
+  (and `POST /api/workflows/{id}/require-human`) takes a reason and sets a one-way flag: the
+  request stays pending with its plan binding and tier, but from then on only a person in the web
+  page may answer it. A request addressed to an agent becomes visible to every operator. The
+  operators and the requester are told, and the page and the card's history show the reason. Only
+  someone who could answer the request may do it, and nothing but a person's answer clears it.
+  Skill 1.21.0.
+
 ## [0.38.0] — 2026-11-16
 
 ### Changed
