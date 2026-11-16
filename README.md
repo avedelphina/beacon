@@ -792,6 +792,19 @@ records every creation, move, reassignment, and comment, each with its
 author. It also records the A2A `context_id` the work happened under.
 Cards live in the operational store, not in fleet YAML.
 
+**Parents and dependencies.** A card may be part of one other card (`parent_id`; its
+`children` list the cards under it), and may depend on others (`depends_on`). From the
+dependencies Beacon computes `blocked_by`: the dependencies that are not `done`, which
+disappear as each is finished and return if one is reopened. `blocks` is the same edge seen
+from the other card. Beacon does not move a card's own state because of them. A card cannot
+be its own parent or depend on itself, and a loop of parents or of dependencies is refused.
+Set them with `PUT /api/board/cards/{id}/parent` (a null `parent_id` frees it),
+`POST /api/board/cards/{id}/dependencies` and `DELETE /api/board/cards/{id}/dependencies/{other}`,
+or the tools `card_set_parent`, `card_add_dependency` and `card_remove_dependency`. Each
+change is a card history event with its author and optional `context_id`. A viewer sees only
+the related cards they may see: a member's own cards and the ones their agents hold, an
+agent's everything except intake cards the operators keep from agents.
+
 **Blocked says why.** A card moves to `blocked` only with a `blocked_reason`:
 `unclear` (the agent does not know how to go on: it is reminded to consult a peer and
 try, and people hear only after the reminders), `waiting` (the next step depends on a

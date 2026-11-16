@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.14.0
+version: 1.15.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -131,6 +131,11 @@ to `blocked` only with a `blocked_reason`:
   labour you could do with the access.
 
 If the work is only yours to do, the card is `doing`, not `blocked`.
+
+**Relate cards instead of describing it.** If a card cannot finish until another card is done,
+`card_add_dependency(card_id, depends_on)`: the card's `blocked_by` then lists what is unfinished
+and drops each when it is done, so nobody has to keep a note up to date. If a card is a part of a
+bigger one, `card_set_parent`. A card cannot depend on itself or on anything that depends on it.
 
 **Create a card when:**
 

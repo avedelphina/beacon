@@ -503,6 +503,16 @@ class CardComment(BaseModel):
     context_id: str | None = None
 
 
+class ParentSet(BaseModel):
+    parent_id: int | None = None  # null frees the card
+    context_id: str | None = None
+
+
+class DependencyAdd(BaseModel):
+    depends_on: int
+    context_id: str | None = None
+
+
 class ReferenceCreate(BaseModel):
     provider: str
     kind: str
@@ -686,9 +696,23 @@ def board_list(request: Request, project: str | None = None, assignee: str | Non
     return cards
 
 
+def _for_viewer(request: Request, card: dict) -> dict:
+    """A member sees the cards a card is related to only if they may see those cards too."""
+    if member := _member(request):
+        return board.restrict(card, lambda c: members.card_visible(member, c))
+    return card
+
+
+def _member_may_see(request: Request, card_id: int | None) -> None:
+    """A member cannot relate a card to one they may not see: the answer would say it exists."""
+    member = _member(request)
+    if member and card_id is not None and not members.card_visible(member, board.get_card(card_id)):
+        raise store.NotFound(f"card {card_id} not found")
+
+
 @app.get("/api/board/cards/{card_id}")
-def board_card(card_id: int) -> dict:
-    return board.get_card(card_id)
+def board_card(card_id: int, request: Request) -> dict:
+    return _for_viewer(request, board.get_card(card_id))
 
 
 @app.post("/api/board/cards")
@@ -701,12 +725,30 @@ def board_create(body: CardCreate, request: Request) -> dict:
 @app.patch("/api/board/cards/{card_id}")
 def board_update(card_id: int, body: CardUpdate, request: Request) -> dict:
     _member_may_assign(request, body.assignee, board.get_card(card_id)["assignee"])
-    return board.update_card(_board_author(request), card_id, **body.model_dump())
+    return _for_viewer(request, board.update_card(_board_author(request), card_id, **body.model_dump()))
 
 
 @app.post("/api/board/cards/{card_id}/comments")
 def board_comment(card_id: int, body: CardComment, request: Request) -> dict:
-    return board.comment(_board_author(request), card_id, body.text, body.context_id)
+    return _for_viewer(request, board.comment(_board_author(request), card_id, body.text, body.context_id))
+
+
+@app.put("/api/board/cards/{card_id}/parent")
+def card_parent(card_id: int, body: ParentSet, request: Request) -> dict:
+    """Make the card part of another, or free it with a null parent_id."""
+    _member_may_see(request, body.parent_id)
+    return _for_viewer(request, board.set_parent(_board_author(request), card_id, body.parent_id, body.context_id))
+
+
+@app.post("/api/board/cards/{card_id}/dependencies")
+def card_dependency_add(card_id: int, body: DependencyAdd, request: Request) -> dict:
+    _member_may_see(request, body.depends_on)
+    return _for_viewer(request, board.add_dependency(_board_author(request), card_id, body.depends_on, body.context_id))
+
+
+@app.delete("/api/board/cards/{card_id}/dependencies/{depends_on}")
+def card_dependency_remove(card_id: int, depends_on: int, request: Request, context_id: str | None = None) -> dict:
+    return _for_viewer(request, board.remove_dependency(_board_author(request), card_id, depends_on, context_id))
 
 
 @app.get("/api/board/cards/{card_id}/references")

@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Parents and dependencies on cards.** A card has at most one `parent_id` and any number
+  of `depends_on` edges. `children`, `depends_on`, `blocks` and a computed `blocked_by` (the
+  dependencies that are not `done`) are in the card, and the board list carries a
+  `blocked_by_count`. Self-links, missing cards and loops are refused. REST
+  (`PUT .../parent`, `POST|DELETE .../dependencies`) and board MCP tools (`card_set_parent`,
+  `card_add_dependency`, `card_remove_dependency`) do the same, and each change is a card
+  history event with its author and optional `context_id`. The card view shows a Blocked by
+  list, the parent, child cards and what the card blocks; the board shows "blocked by N".
+  A member or agent sees only the related cards they may see, and cannot relate a card to one
+  they may not see. Existing databases gain the column and table. (#96)
 - **Blocked says why.** Moving a card to `blocked` needs `blocked_reason`: `unclear`,
   `waiting` or `cannot` (REST `PATCH`, the `card_update` tool and the card form), and
   `waiting_on` for the last two. Waiting on a person is refused unless it is

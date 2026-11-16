@@ -52,19 +52,32 @@ CREATE TABLE IF NOT EXISTS cards (
     done_when   TEXT,                        -- what has to be true to close it
     links       TEXT NOT NULL DEFAULT '[]',  -- JSON [{url, label}]: pointers out (PRs, issues), never state
     blocked_reason TEXT,                     -- while blocked: unclear | waiting | cannot (board.BLOCKED_REASONS); NULL on cards blocked before it existed
-    waiting_on  TEXT                         -- waiting: what the card waits on (an agent, workflow:<id>, something outside); cannot: what is missing
+    waiting_on  TEXT,                        -- waiting: what the card waits on (an agent, workflow:<id>, something outside); cannot: what is missing
+    parent_id   INTEGER REFERENCES cards (id)  -- the card this one is part of, if any (board.set_parent: no cycles)
 );
 CREATE TABLE IF NOT EXISTS card_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     card_id     INTEGER NOT NULL REFERENCES cards (id),
     author      TEXT NOT NULL,
-    kind        TEXT NOT NULL,     -- created | comment | state | assign | edit | reference | workflow | assign_notice | comment_notice | reminder | escalation | answer (an agent's answer to a notice)
+    kind        TEXT NOT NULL,     -- created | comment | state | assign | edit | reference | relation | workflow | assign_notice | comment_notice | reminder | escalation | answer (an agent's answer to a notice)
     body        TEXT NOT NULL,
     context_id  TEXT,
     notice_id   INTEGER REFERENCES mailbox (id),  -- assign_notice, comment_notice: the mailbox row carrying the notice
     created_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS card_events_by_card ON card_events (card_id);
+
+-- "card_id cannot finish until depends_on_id is done". A card's blocked_by is computed from these
+-- edges and the other card's state, never stored (board.get_card). No cycles (board.add_dependency).
+CREATE TABLE IF NOT EXISTS card_dependencies (
+    card_id        INTEGER NOT NULL REFERENCES cards (id),
+    depends_on_id  INTEGER NOT NULL REFERENCES cards (id),
+    created_by     TEXT NOT NULL,
+    created_at     REAL NOT NULL,
+    PRIMARY KEY (card_id, depends_on_id),
+    CHECK (card_id != depends_on_id)
+);
+CREATE INDEX IF NOT EXISTS card_dependencies_by_target ON card_dependencies (depends_on_id);
 
 CREATE TABLE IF NOT EXISTS workflow_requests (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -258,7 +271,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     card_columns = {row[1] for row in conn.execute("PRAGMA table_info(cards)")}
     for column, decl in (("reminded_at", "REAL"), ("reminders", "INTEGER NOT NULL DEFAULT 0"),
                          ("escalated_at", "REAL"), ("next_action", "TEXT"), ("done_when", "TEXT"),
-                         ("links", "TEXT NOT NULL DEFAULT '[]'"), ("blocked_reason", "TEXT"), ("waiting_on", "TEXT")):
+                         ("links", "TEXT NOT NULL DEFAULT '[]'"), ("blocked_reason", "TEXT"), ("waiting_on", "TEXT"),
+                         ("parent_id", "INTEGER REFERENCES cards (id)")):
         if column not in card_columns:
             conn.execute(f"ALTER TABLE cards ADD COLUMN {column} {decl}")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(card_events)")}

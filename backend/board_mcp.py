@@ -55,11 +55,19 @@ def author_for(authorization: str | None) -> str | None:
 
 
 def _visible_card(ctx: Context, card_id: int) -> dict:
-    """The card, or not found when the operators keep intake cards from agents."""
+    """The card, or not found when the operators keep intake cards from agents. Related cards
+    an agent may not see are left out of it."""
     card = board.get_card(card_id)
-    if not intake.agent_may_see(_author(ctx), card):
+    author = _author(ctx)
+    if not intake.agent_may_see(author, card):
         raise store.NotFound(f"card {card_id} not found")
-    return card
+    return board.restrict(card, lambda c: intake.agent_may_see(author, c))
+
+
+def _visible_after(ctx: Context, card: dict) -> dict:
+    """A card an agent just changed, as that agent may see it."""
+    author = _author(ctx)
+    return board.restrict(card, lambda c: intake.agent_may_see(author, c))
 
 
 def _author(ctx: Context) -> str:
@@ -142,6 +150,32 @@ def build() -> MCPServer:
         """Add progress or a question to a card's history. context_id links an A2A thread."""
         _visible_card(ctx, card_id)
         return board.comment(_author(ctx), card_id, text, context_id)
+
+    @server.tool()
+    def card_set_parent(ctx: Context, card_id: int, parent_id: int | None = None,
+                        context_id: str | None = None) -> dict:
+        """Make a card part of another (parent_id), or leave parent_id out to free it. A card has
+        one parent and cannot sit under itself or anything below it. The card's `children` list
+        shows what is part of it. Recorded in the card's history."""
+        _visible_card(ctx, card_id)
+        if parent_id is not None:
+            _visible_card(ctx, parent_id)
+        return _visible_after(ctx, board.set_parent(_author(ctx), card_id, parent_id, context_id))
+
+    @server.tool()
+    def card_add_dependency(ctx: Context, card_id: int, depends_on: int, context_id: str | None = None) -> dict:
+        """The card cannot finish until the card `depends_on` is done. Beacon then lists the unfinished
+        ones in the card's `blocked_by` and drops each when it reaches done; it does not move the card's
+        own state. A card cannot depend on itself or on anything that depends on it."""
+        _visible_card(ctx, card_id)
+        _visible_card(ctx, depends_on)
+        return _visible_after(ctx, board.add_dependency(_author(ctx), card_id, depends_on, context_id))
+
+    @server.tool()
+    def card_remove_dependency(ctx: Context, card_id: int, depends_on: int, context_id: str | None = None) -> dict:
+        """Remove a dependency the card has on the card `depends_on`."""
+        _visible_card(ctx, card_id)
+        return _visible_after(ctx, board.remove_dependency(_author(ctx), card_id, depends_on, context_id))
 
     @server.tool()
     def card_references(ctx: Context, card_id: int) -> list[dict]:
