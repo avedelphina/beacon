@@ -4,6 +4,17 @@
 
 ### Added
 
+- **Client agents.** An agent with a `client` block (`client: {board: true}`) instead of a `reach`
+  block is an operator's own AI client: Claude Code, Codex, any MCP client. It has its own identity
+  and uses the board and workflow tools with its own token, so its cards, comments and requests are
+  recorded under its name and the access policy applies to what it assigns. It is never called (not
+  even by Beacon), assigned a card, sent mail, listed as a peer, or asked for an answer. The Agents
+  tab shows it as `client`. `python -m backend.mesh client-token <id>` prints its token and the
+  settings to paste into the client; the API never returns the token. An agent has a client block or
+  a reach block, not both. The binding to an operator, and answering requests for them, are next.
+
+### Added
+
 - **Search and filter on the Board.** A search box (every word must appear on the card:
   number, title, text, agent, project, state, blocked reason, what it waits on), assignee and
   project dropdowns, and a "blocked only" tick, with a count and a Clear button. Filtering

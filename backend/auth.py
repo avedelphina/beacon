@@ -83,7 +83,7 @@ def agent_for_authorization(authorization: str | None) -> str | None:
     presented = authorization.removeprefix("Bearer ")
     try:
         for agent in store.list_agents():
-            if agent.reach and hmac.compare_digest(presented, mesh.token(agent.id, mesh.BEACON_PEER)):
+            if (agent.reach or agent.client) and hmac.compare_digest(presented, mesh.token(agent.id, mesh.BEACON_PEER)):
                 return agent.id
     except mesh.MissingSecret:
         return None
@@ -266,9 +266,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.url.path.startswith("/api/workflows")
             or (request.url.path.startswith("/api/board/cards/") and request.url.path.endswith("/workflows"))
         ):
-            from . import store
+            from . import mesh, store
             record = store.get_agent(agent)
-            if not record.reach or not record.reach.board:
+            if not mesh.has_board(record):
                 return JSONResponse({"detail": "agent is not authorized for workflow board access"}, status_code=403)
             request.state.workflow_agent = agent
             return await call_next(request)

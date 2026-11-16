@@ -285,7 +285,7 @@ def validate_participants(requester: str, eligible_responder: str) -> None:
         source = store.get_agent(requester) if requester != mesh.BEACON_PEER else None
     except (store.NotFound, store.InvalidId):
         source = None  # a person (a REST call from the page), not an agent
-    if source is not None and (not source.reach or not source.reach.board):
+    if source is not None and not mesh.has_board(source):
         raise UnauthorizedWorkflowAccess(f"{requester} is not authorized for workflow board access")
     if eligible_responder in {"human", requester}:
         return
@@ -302,6 +302,9 @@ def validate_participants(requester: str, eligible_responder: str) -> None:
             f"{eligible_responder!r} is not someone a request can be addressed to. Use \"human\" for any "
             "operator, an agent id, or the email of an operator or of an agent's owner (agent_owner tells "
             "you who owns an agent)") from None
+    if target.client is not None:
+        raise WorkflowError(f"{eligible_responder!r} is an operator's client: it is not asked. Ask its operator "
+                            "(agent_owner tells you whose it is), or use \"human\" for any operator")
     if source is not None and not mesh.may_call(requester, target):
         raise UnauthorizedWorkflowAccess(f"{eligible_responder} does not accept workflow requests from {requester}")
 

@@ -776,6 +776,36 @@ old instance's `BEACON_PUBLIC_URL` to the new URL. Every agent's sync
 switches over on its next pull, and nobody has to touch the agents' hosts.
 Keep the old instance until every agent has moved.
 
+### Client agents: an operator's own AI client
+
+Claude Code, Codex, or any MCP client can take part in Beacon under its own identity, so what
+it does is recorded under its name and the access policy applies to it. It is an agent in the
+fleet with a `client` block instead of a `reach` block:
+
+```yaml
+# fleet/hosts.yaml: a place for clients, with no SSH, so nothing runs there
+- id: clients
+  address: none.invalid
+# fleet/agents/claude-<operator>.yaml
+id: claude-<operator>
+type: client
+host: clients
+client: {board: true}
+```
+
+A client is never called, assigned a card, sent mail, or asked for an answer: it has no endpoint,
+and it is in nobody's peer list. It uses the board and workflow tools (`/board/mcp`) with its own
+token and can call agents the access policy allows. The token is the agent's own pull token. Print
+it, with the settings to paste into the client, on Beacon's host:
+
+```sh
+docker compose exec -T beacon python -m backend.mesh client-token claude-<operator>
+```
+
+The API never returns it, and rotating `BEACON_A2A_SECRET` changes it. A client with an
+operator-bound identity that answers requests for that operator is the next step (ROADMAP.md,
+"Operator-bound agents"); today a client asks and acts as itself.
+
 ### Outside events (intake)
 
 A forge, a monitor, or anything that can sign a POST sends an event to

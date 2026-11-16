@@ -146,6 +146,16 @@ class AgentReach(BaseModel):
         return v
 
 
+# An operator's own AI client (Claude Code, Codex, any MCP client) as a member of the fleet. It
+# is not an A2A endpoint: it is never called, never assigned a card, never sent mail. It has its
+# own identity so what it does is recorded under its own name, and it uses the board and workflow
+# tools with its own token (`python -m backend.mesh client-token <id>`). That is why an agent
+# has a client block or a reach block, never both. Without a reach block it is inventory-only to
+# everything that treats the mesh (peers, the mailbox, reminders, availability).
+class AgentClient(BaseModel):
+    board: bool = True
+
+
 # Names the mesh uses for itself or as workflow eligibility sentinels; no
 # agent may take one (see Agent.id).
 RESERVED_AGENT_IDS = frozenset({"beacon", "human"})
@@ -174,6 +184,14 @@ class Agent(BaseModel):
     # Absent means this agent is inventory-only: Beacon can still deploy and
     # observe it, but call_agent refuses it until a reach block exists.
     reach: AgentReach | None = None
+    # Present for an operator's own AI client instead of a reach block (see AgentClient).
+    client: AgentClient | None = None
+
+    @model_validator(mode="after")
+    def _client_has_no_reach(self):
+        if self.client is not None and self.reach is not None:
+            raise ValueError("an agent is either a client (it uses the board) or has a reach block (it is called), not both")
+        return self
 
     @field_validator("tags")
     @classmethod
