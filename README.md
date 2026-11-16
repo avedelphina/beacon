@@ -1010,7 +1010,13 @@ YAML; a template that an agent still uses cannot be deleted.
 A scheduled, recurring Beacon action against one or more agents. The scheduler
 is external: a system cron/launchd/k8s CronJob calls
 `python -m backend.scheduler tick` every minute; Beacon itself has no
-background scheduler process.
+background scheduler process. The same tick also does what Beacon owes by the clock:
+it expires workflow requests that ran out of time (including requests waiting for
+their requester to send a changed plan), and reminds and escalates stale board
+cards for every agent, so neither waits for an agent to pull. Run the tick where
+Beacon's own environment is (its mail settings and state directory), for example
+`docker compose exec -T beacon python -m backend.scheduler tick`; `--dry-run` runs
+none of it.
 
 ```yaml
 id: nightly-restart

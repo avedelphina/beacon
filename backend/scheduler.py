@@ -4,7 +4,10 @@ Beacon persists cron jobs as YAML in fleet/cron_jobs/ but does *not* run a
 long-lived scheduler process. Instead, an external minute-level trigger
 (system cron, launchd, k8s CronJob, etc.) calls
 `python -m backend.scheduler tick`, which evaluates every enabled job and
-dispatches the ones that are due.
+dispatches the ones that are due. The same tick also does what Beacon owes by
+the clock (`housekeeping`): it expires workflow requests that ran out of time and
+reminds and escalates stale board cards, so neither waits for an agent to pull.
+Run it where Beacon's own environment is (mail settings, the state directory).
 
 This keeps scheduling separate from the web server, avoids adding a
 background-thread/asyncio complexity to FastAPI, and keeps the same
@@ -167,6 +170,19 @@ def tick(now: datetime.datetime | None = None, dry_run: bool = False) -> list[di
     return results
 
 
+def housekeeping() -> None:
+    """What Beacon does by the clock instead of when something pulls: expire workflow
+    requests that ran out of time, then remind and escalate stale board cards for every
+    agent (backend/board.py, remind). Each part is isolated: one failing must not stop the
+    other, or the cron jobs of the same tick."""
+    from . import board, workflow
+    for name, step in (("workflow expiry", workflow.expire_due), ("board reminders", board.remind)):
+        try:
+            step()
+        except Exception as exc:  # a cron-triggered process: log it and carry on
+            print(f"housekeeping: {name} failed: {exc}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Beacon cron scheduler")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -184,6 +200,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "tick":
         results = tick(now=now, dry_run=args.dry_run)
         print(yaml.safe_dump(results, sort_keys=False))
+        if not args.dry_run:
+            housekeeping()  # after the jobs: it sends mail, which must not delay them
         return 0
 
     if args.command == "list":

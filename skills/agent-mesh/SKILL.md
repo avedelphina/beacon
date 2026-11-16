@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.16.0
+version: 1.17.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -260,7 +260,8 @@ the request's expiry, 24 hours by default.
 `workflow_list(card_id=N)` shows the requests on a card. States: `pending`,
 `approved`, `answered` (a question was answered: the text is in `response.text`), `rejected`,
 `changes_requested` (read the answer, then send the changed plan
-with `workflow_revise`: the request goes back to `pending` for the same responder), `expired`, `withdrawn`. An `approved` answer is for that exact
+with `workflow_revise` within 24 hours, or the request expires: it goes back to `pending` for the same
+responder), `expired`, `withdrawn`. An `approved` answer is for that exact
 text only. If you want something different, make a new request.
 
 **A choice is not an approval of the change.** A `decision` records which option a person
