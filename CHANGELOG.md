@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-11-16
+
 ### Added
 
 - **Parents and dependencies on cards.** A card has at most one `parent_id` and any number
