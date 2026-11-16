@@ -813,11 +813,15 @@ def workflow_revise(request_id: int, body: WorkflowReviseRequest, request: Reque
 
 
 @app.get("/api/mailbox")
-def mailbox_recent(limit: int = 50) -> list[dict]:
+def mailbox_recent(limit: int = 50, sender: str | None = None, recipient: str | None = None,
+                   kind: str | None = None) -> list[dict]:
     """What the mailbox holds, newest first: queued, delivered, and replies
     addressed to Beacon (recipient "beacon") — the voicemail MCP callers left.
+    `sender` is the real author of each row, also for replies and notices an agent caused,
+    which an agent's own log shows as the peer "beacon". Filter by sender, recipient, kind
+    (message, reply, notice).
     """
-    return mailbox.recent(min(max(limit, 1), 500))
+    return mailbox.recent(min(max(limit, 1), 500), sender=sender, recipient=recipient, kind=kind)
 
 
 @app.get("/api/mailbox/tasks/{task_id}")

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The mailbox says who a notice is from.** A notice an agent caused (it assigned a card to
+  you, commented on one) now starts `[Notice from <agent> via the Beacon mailbox]`; Beacon's
+  own still say `[Notice from the Beacon mailbox]`. Delivery is unchanged: it still arrives
+  under Beacon's token, so an agent's own log still shows the peer `beacon`.
+- `GET /api/mailbox` filters by `sender`, `recipient` and `kind`. `sender` is the real author of
+  each row, including replies and notices, which is where "who wrote to whom" is answered.
+  The README ("Mailbox") explains the difference from an agent's own log. Skill 1.19.0.
+
 ### Added
 
 - **Intake: one secret per source, and no replays.** `BEACON_INTAKE_SECRET_<SOURCE>` (upper
