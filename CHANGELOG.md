@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- **The scheduler tick also reminds, escalates and expires.** `python -m backend.scheduler tick`
+  (every minute, as before) now runs housekeeping after the cron jobs: workflow requests past
+  their time expire, and stale board cards are reminded and escalated for every agent. The
+  reminder waits in the agent's mailbox until its next pull, and people are told even if no
+  agent syncs at all. A reminder still goes out at most twice, one per `remind_after`.
+  `--dry-run` runs none of it. Run the tick where Beacon's environment is.
+- **A request waiting for a revision expires.** When a responder asks for changes the requester
+  gets a fresh 24 hours to send the changed plan; after that the request expires like any
+  other, and the card history says no changed plan was sent. Before, such a request, and
+  the card blocked on it, could wait forever.
+
 ## [0.37.0] — 2026-11-16
 
 ### Added

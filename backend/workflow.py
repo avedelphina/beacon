@@ -18,6 +18,8 @@ from . import mesh, notify, opstore, store
 
 logger = logging.getLogger(__name__)
 
+CHANGES_WINDOW_SECONDS = 24 * 60 * 60  # how long a requester has to send a changed plan
+
 REQUEST_KINDS = ("decision", "review", "approval", "question", "handoff")
 STATES = (
     "pending", "approved", "claimed", "rejected", "changes_requested", "expired", "withdrawn",
@@ -129,14 +131,26 @@ def _card_text(request_id: int, row, kind: str, from_state: str | None, to_state
     if kind == "revised":
         return f"{label}: plan revised, pending again"
     if kind == "expired":
-        return f"{label}: expired without an answer"
+        return (f"{label}: expired, no changed plan was sent" if from_state == "changes_requested"
+                else f"{label}: expired without an answer")
     reason = payload.get("reason")
     return f"{label}: {from_state or '-'} -> {to_state or '-'}" + (f" ({reason})" if reason else "")
 
 
-def _expire_due(db, now: float) -> None:
+def expire_due(now: float | None = None) -> int:
+    """Expire everything past its time, for the scheduler: a request nobody reads is
+    otherwise only swept when someone next looks. Returns how many."""
+    with opstore.connect() as db:
+        return _expire_due(db, time.time() if now is None else now)
+
+
+def _expire_due(db, now: float) -> int:
+    """A request still waiting for its responder (pending), for someone to carry it out
+    (approved), or for its requester to send the changed plan (changes_requested) expires
+    at its time, so a card cannot wait on one forever."""
     rows = db.execute(
-        "SELECT id, state FROM workflow_requests WHERE state IN ('pending', 'approved') AND expires_at <= ?", (now,)
+        "SELECT id, state FROM workflow_requests WHERE state IN ('pending', 'approved', 'changes_requested')"
+        " AND expires_at <= ?", (now,)
     ).fetchall()
     for row in rows:
         db.execute(
@@ -144,6 +158,7 @@ def _expire_due(db, now: float) -> None:
             (now, row["id"]),
         )
         _event(db, row["id"], "beacon", "expired", row["state"], "expired")
+    return len(rows)
 
 
 def _validate_actor(actor: str) -> str:
@@ -392,9 +407,14 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
         else:  # defensive; action is validated above
             raise WorkflowError(f"unsupported response action {action!r}")
         now = time.time()
+        # Asking for changes starts the requester's own window to send them, so a responder who
+        # took most of the request's time does not leave the requester almost none.
+        expires_at = max(request["expires_at"], now + CHANGES_WINDOW_SECONDS) if state == "changes_requested" \
+            else request["expires_at"]
         db.execute(
-            "UPDATE workflow_requests SET state = ?, response_json = ?, responded_at = ?, updated_at = ? WHERE id = ?",
-            (state, json_text(response), now, now, request_id),
+            "UPDATE workflow_requests SET state = ?, response_json = ?, responded_at = ?, updated_at = ?,"
+            " expires_at = ? WHERE id = ?",
+            (state, json_text(response), now, now, expires_at, request_id),
         )
         _event(db, request_id, actor, "responded", "pending", state, {
             "action": action, "plan_revision": plan_revision, "plan_hash": plan_hash, "response": response,

@@ -669,9 +669,12 @@ def _responsible(card: dict) -> str | None:
     return card["created_by"]
 
 
-def remind(puller: str, now: float | None = None) -> None:
+def remind(puller: str | None = None, now: float | None = None) -> None:
     """Called on every mesh pull: the puller is online right now, so a reminder
-    to it starts a turn soon (it rides this very pull's inbox). Each stale card
+    to it starts a turn soon (it rides this very pull's inbox). The scheduler
+    calls it with no puller (`python -m backend.scheduler tick`): then every agent
+    is reminded, the notice waits in its mailbox until its next pull, and cards
+    are escalated to people even if no agent syncs at all. Each stale card
     gets at most REMINDERS reminders, one per `remind_after` of no change, and
     all of one agent's cards go in one notice, so a reminder costs one turn.
     After that, or when no agent can move the card (a person has to, or the
@@ -695,7 +698,7 @@ def remind(puller: str, now: float | None = None) -> None:
         cards = [dict(row) for row in db.execute("SELECT * FROM cards WHERE state != 'done' ORDER BY id")]
         open_requests = {row["id"] for row in db.execute(
             "SELECT id FROM workflow_requests WHERE state IN ('pending', 'changes_requested', 'approved')")}
-    mine, stuck = [], []
+    mine, stuck = {}, []  # agent id -> its cards
     for card in cards:
         who = _responsible(card)
         reason = card["blocked_reason"] if card["state"] == "blocked" else None
@@ -724,18 +727,19 @@ def remind(puller: str, now: float | None = None) -> None:
         if this_round and now - card["reminded_at"] < wait:
             continue
         if agent and sent < REMINDERS and mesh.board_allowed(agent, exposure):
-            if agent.id == puller and _claim(card, "reminded_at = ?, reminders = ?", (now, sent + 1), "reminded_at"):
-                mine.append({**card, "reminders": sent + 1, "_note": note})
+            if (puller is None or agent.id == puller) \
+                    and _claim(card, "reminded_at = ?, reminders = ?", (now, sent + 1), "reminded_at"):
+                mine.setdefault(agent.id, []).append({**card, "reminders": sent + 1, "_note": note})
         elif (card["escalated_at"] is None or card["escalated_at"] < card["updated_at"]
               or (again and now - card["escalated_at"] >= wait)) \
                 and _claim(card, "escalated_at = ?", (now,), "escalated_at"):
             stuck.append((card, who, _why_stuck(card, who, agent, sent, now)))
-    if mine:
-        notice_id = mailbox.enqueue(mesh.BEACON_PEER, puller, "notice", _reminder_text(mine, now))
+    for agent_id, reminded in mine.items():
+        notice_id = mailbox.enqueue(mesh.BEACON_PEER, agent_id, "notice", _reminder_text(reminded, now))
         with opstore.connect() as db:
-            for card in mine:
+            for card in reminded:
                 _event(db, card["id"], mesh.BEACON_PEER, "reminder",
-                       f"reminded {puller} ({card['reminders']} of {REMINDERS})", notice_id=notice_id)
+                       f"reminded {agent_id} ({card['reminders']} of {REMINDERS})", notice_id=notice_id)
     if stuck:
         with opstore.connect() as db:
             for card, _, why in stuck:

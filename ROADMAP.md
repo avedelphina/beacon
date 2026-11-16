@@ -330,12 +330,13 @@ this", which need different handling.
 - **Choices use decisions, not approvals.** A workflow with several paths is a
   `decision` with options. An approval has one answer, so an approval with a
   choice behind it is approved with nothing chosen.
-- **Reminders run on the scheduler, not only on pulls.** *(Open. People are now told again
-  each `remind_after` for `waiting` and `cannot` cards, but only when something pulls.)* The reminder and
+- **Reminders run on the scheduler, not only on pulls.** *(Delivered: the scheduler tick runs
+  the reminder and escalation pass for every agent, and people are told again each
+  `remind_after` for `waiting` and `cannot` cards.)* The reminder and
   escalation pass runs from `python -m backend.scheduler tick`, so a card does not
   wait for its agent to pull. People are emailed about a card again each
   `remind_after` while it stays blocked, not once.
-- **Changes-requested requests expire.** *(Open.)* A request waiting on a revision is swept
+- **Changes-requested requests expire.** *(Delivered: a fresh 24 hours for the requester, then expiry.)* A request waiting on a revision is swept
   like a pending one, so a card cannot wait on it forever.
 - **Mailbox is the default route between agents.** Direct calls are an explicit
   fallback (`<peer>-direct`), and the host sync falls back to them automatically
