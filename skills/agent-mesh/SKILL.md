@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.13.0
+version: 1.14.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -104,11 +104,33 @@ The board holds shared cards. You have the board tools only if your operator
 turned them on for you. If `board_list` is not in your tools, you do not have
 them; use messages instead.
 
-Tools: `board_list`, `board_card`, `card_create`, `card_update`, `card_comment`.
+Tools: `board_list`, `board_card`, `card_create`, `card_update`, `card_comment`, and
+`card_references`, `card_reference_add`, `card_reference_update`, `card_reference_remove`
+(pointers to a PR, issue or ticket elsewhere: `provider`, `kind`, `external_id`, `url`,
+`label`; a `last_seen_state` is only what someone typed, so read the thing itself).
 
 **States:** `todo` (not started), `doing` (someone is working on it),
-`blocked` (cannot continue; say why), `review` (finished, needs a check),
-`done`.
+`blocked` (cannot continue, and `blocked_reason` says why: see below),
+`review` (finished, needs a check), `done`.
+
+**Blocked is not parking.** Use it only when you cannot take the next step now. A card moves
+to `blocked` only with a `blocked_reason`:
+
+- `unclear`: you do not know how to go on. Do not wait. Ask a peer you may call to
+  challenge your approach (`a2a_call`, then `card_comment` with what they said and the
+  thread's `context_id`), try what they suggest, and ask a person only for a decision or an
+  authority only a person has. Never ask a person for work you can do yourself.
+- `waiting`: the next step depends on something named. Give `waiting_on`: an agent id (it is
+  reminded, not you), `workflow:<id>` for a request on this card, or something outside Beacon
+  (a CI run, someone else's review). Waiting on a person is always a workflow request: make
+  it first with `workflow_create`, then set `waiting_on` to `workflow:<id>`. You are not
+  reminded to check again while it is open.
+- `cannot`: you lack a capability or access. `waiting_on` says exactly what is missing (for
+  example "write access to the mailbox store"), not a task for a person. A person hears at
+  once, and again each day while the card stays like that. Ask for authority, never for
+  labour you could do with the access.
+
+If the work is only yours to do, the card is `doing`, not `blocked`.
 
 **Create a card when:**
 
@@ -135,7 +157,8 @@ way around it. Tell your operator.
 3. Report progress with `card_comment` at real milestones. When you work over
    A2A, pass the thread's `context_id` so others can follow the thread. When
    the next step changes, set `next_action` with `card_update`.
-4. If you are stuck, set `blocked` and write what you need and from whom.
+4. If you are stuck, set `blocked` with a `blocked_reason` and, for `waiting` or
+   `cannot`, `waiting_on` (see above).
 5. When finished, move it to `review` if someone should check it, otherwise to
    `done`. The `note` states the result: what you did, where the output is, and
    anything left over.
@@ -149,8 +172,8 @@ a change to the card: still move it with `card_update`.
 **When Beacon reminds you** (a message starts with `Reminder from the Beacon
 board`): nothing has changed on those cards for a day or more, and each one
 waits for you. For each card, do the next step now. If you cannot, make the
-card say what is true: `blocked` with what you wait for and from whom, a
-`card_comment` with your progress, or `review` or `done` if the work is
+card say what is true: `blocked` with a `blocked_reason` and what you wait for,
+a `card_comment` with your progress, or `review` or `done` if the work is
 finished. If you wait for someone, make sure they know: ask them, or make a
 workflow request. Do not close a card you did not finish just to stop the
 reminders. After two reminders, Beacon tells a person.

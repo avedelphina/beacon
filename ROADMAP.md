@@ -305,7 +305,9 @@ request's CI), and several were agents parking work they could still do. The
 same state covered "I don't know what to do", "I am waiting", and "I cannot do
 this", which need different handling.
 
-- **Reason on every move to `blocked`.** `unclear` (the agent does not know the
+- **Reason on every move to `blocked`.** *(Delivered, with the `waiting`-on-a-person rule
+  below and the per-reason reminders. Cards blocked earlier keep no reason until someone
+  sets one.)* `unclear` (the agent does not know the
   next step), `waiting` (the next step depends on a named thing), `cannot` (the
   agent lacks a capability or access). The card names what it waits on: an agent,
   a person, a workflow request, or an external link. Existing blocked cards are
@@ -328,11 +330,12 @@ this", which need different handling.
 - **Choices use decisions, not approvals.** A workflow with several paths is a
   `decision` with options. An approval has one answer, so an approval with a
   choice behind it is approved with nothing chosen.
-- **Reminders run on the scheduler, not only on pulls.** The reminder and
+- **Reminders run on the scheduler, not only on pulls.** *(Open. People are now told again
+  each `remind_after` for `waiting` and `cannot` cards, but only when something pulls.)* The reminder and
   escalation pass runs from `python -m backend.scheduler tick`, so a card does not
   wait for its agent to pull. People are emailed about a card again each
   `remind_after` while it stays blocked, not once.
-- **Changes-requested requests expire.** A request waiting on a revision is swept
+- **Changes-requested requests expire.** *(Open.)* A request waiting on a revision is swept
   like a pending one, so a card cannot wait on it forever.
 - **Mailbox is the default route between agents.** Direct calls are an explicit
   fallback (`<peer>-direct`), and the host sync falls back to them automatically

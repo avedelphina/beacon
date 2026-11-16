@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Blocked says why.** Moving a card to `blocked` needs `blocked_reason`: `unclear`,
+  `waiting` or `cannot` (REST `PATCH`, the `card_update` tool and the card form), and
+  `waiting_on` for the last two. Waiting on a person is refused unless it is
+  `workflow:<id>`, an open request on the same card. Reminders follow the reason: an
+  unclear card's agent is reminded to consult a peer and try; a waiting card's agent is not
+  reminded to check again (an agent it waits on is reminded instead, an open request is left
+  to its own expiry, and anything outside Beacon is chased by people each `remind_after`
+  instead of once); a cannot card reaches people at once, and again each `remind_after`.
+  The board shows the reason on each blocked card. Cards blocked before this have no reason
+  and behave as before. The agent skill (1.14.0) explains the three reasons.
 - **Workflow changes are on the card's history.** Creating, answering, asking for
   changes, revising, expiring, claiming and finishing a workflow request each
   add an event to the card with the actor, the time, and an optional `context_id`

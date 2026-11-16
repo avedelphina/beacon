@@ -494,6 +494,8 @@ class CardUpdate(BaseModel):
     links: list[dict] | None = None  # replaces the card's list
     note: str | None = None
     context_id: str | None = None
+    blocked_reason: str | None = None  # unclear | waiting | cannot: required when the card moves to blocked
+    waiting_on: str | None = None  # what a waiting card waits on, or what a cannot card lacks
 
 
 class CardComment(BaseModel):

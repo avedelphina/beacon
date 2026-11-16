@@ -433,6 +433,15 @@
       </select></label>
       <label>Assignee <select name="assignee" data-assignees><option value="">unassigned</option></select></label>
     </div>
+    <div class="field-row" id="blocked-fields" hidden>
+      <label>Why blocked <select name="blocked_reason">
+        <option value="">choose a reason</option>
+        <option value="unclear">unclear: do not know how to go on</option>
+        <option value="waiting">waiting: depends on something named</option>
+        <option value="cannot">cannot: lacks a capability or access</option>
+      </select></label>
+      <label>Waiting on / missing <input name="waiting_on" placeholder="an agent, workflow:12, or what is missing"></label>
+    </div>
     <label>Next action <input name="next_action"></label>
     <label>Done when <input name="done_when"></label>
     <label>Links <span class="hint">(one per line: URL, then an optional label)</span>

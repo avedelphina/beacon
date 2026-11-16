@@ -792,6 +792,17 @@ records every creation, move, reassignment, and comment, each with its
 author. It also records the A2A `context_id` the work happened under.
 Cards live in the operational store, not in fleet YAML.
 
+**Blocked says why.** A card moves to `blocked` only with a `blocked_reason`:
+`unclear` (the agent does not know how to go on: it is reminded to consult a peer and
+try, and people hear only after the reminders), `waiting` (the next step depends on a
+named thing, `waiting_on`: an agent, which is reminded instead; `workflow:<id>`, a request
+on this card, which is left to its own notices and expiry; or something outside Beacon,
+which people are told about again each `remind_after`) or `cannot` (the agent lacks a
+capability or access, and `waiting_on` says which: people are told at once, and again each
+`remind_after`). Waiting on a person is refused unless it is a workflow request, because a
+request has an owner, an expiry and an answer that moves the card. A card blocked before
+this existed has no reason and is reminded as before until someone sets one.
+
 **Who uses it, and how:**
 
 - **People:** the **Board** tab in the UI, or `/api/board`

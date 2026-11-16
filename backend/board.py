@@ -41,6 +41,11 @@ from urllib.parse import urlsplit
 from . import mailbox, mesh, opstore, store
 
 STATES = ("todo", "doing", "blocked", "review", "done")
+# Why a card is blocked. Each needs different handling, so each is reminded differently (remind()):
+# unclear: the agent does not know how to go on, so it consults a peer and tries; waiting: the next
+# step depends on a named thing, which is watched, not re-asked; cannot: the agent lacks a capability
+# or access, and a person is told now.
+BLOCKED_REASONS = ("unclear", "waiting", "cannot")
 NOTICE_BODY = 600
 ANSWER_CHARS = 1500
 
@@ -144,15 +149,24 @@ def create_card(author: str, title: str, body: str = "", project: str | None = N
 def update_card(author: str, card_id: int, *, state: str | None = None, assignee: str | None = None,
                 title: str | None = None, body: str | None = None, project: str | None = None,
                 next_action: str | None = None, done_when: str | None = None, links: list | None = None,
-                note: str | None = None, context_id: str | None = None) -> dict:
+                note: str | None = None, context_id: str | None = None, blocked_reason: str | None = None,
+                waiting_on: str | None = None) -> dict:
     """Change what's given; each change is its own event. `assignee=""`
     unassigns, `next_action=""`/`done_when=""` clear, `links` replaces the list.
-    `note` explains the change and is recorded with it."""
+    `note` explains the change and is recorded with it. Moving a card to blocked
+    needs `blocked_reason` (and `waiting_on` for waiting and cannot): see _blocked_fields."""
     card = get_card(card_id)
     changes = []
     if state is not None and state != card["state"]:
         _check_state(state)
         changes.append(("state", "state", state, f"{card['state']} -> {state}"))
+    reason, on = _blocked_fields(card, state if state is not None else card["state"], blocked_reason, waiting_on)
+    if reason != card["blocked_reason"]:
+        changes.append(("blocked_reason", "edit", reason, _blocked_summary(reason, on)))
+        if on != card["waiting_on"]:
+            changes.append(("waiting_on", "edit", on, None))  # said in the reason's event
+    elif on != card["waiting_on"]:
+        changes.append(("waiting_on", "edit", on, f"waiting on: {on or '-'}"))
     if assignee is not None and (assignee or None) != card["assignee"]:
         if assignee:
             _check_may_assign(author, assignee)
@@ -173,7 +187,8 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
     with opstore.connect() as db:
         for column, kind, value, summary in changes:
             db.execute(f"UPDATE cards SET {column} = ?, updated_at = ? WHERE id = ?", (value, now, card_id))
-            _event(db, card_id, author, kind, f"{summary}" + (f": {note}" if note else ""), context_id)
+            if summary is not None:
+                _event(db, card_id, author, kind, f"{summary}" + (f": {note}" if note else ""), context_id)
         if note and not changes:
             _event(db, card_id, author, "comment", note, context_id)
             db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (now, card_id))
@@ -417,6 +432,62 @@ def _is_agent(name: str) -> bool:
         return False
 
 
+def _blocked_fields(card: dict, new_state: str, blocked_reason: str | None,
+                    waiting_on: str | None) -> tuple[str | None, str | None]:
+    """The reason and the wait the card has afterwards. Only a blocked card has them. A card
+    moving into blocked must say why; one that was blocked before reasons existed keeps working
+    until someone touches its reason. Waiting on a person is refused: a person's answer is a
+    workflow request, which has an owner, an expiry and an answer that moves the card, so the
+    wait is `workflow:<id>` on an open request of this card."""
+    if new_state != "blocked":
+        if blocked_reason or waiting_on:
+            raise ValueError("blocked_reason and waiting_on belong to a blocked card")
+        return None, None
+    if card["state"] == "blocked" and card["blocked_reason"] is None and blocked_reason is None and waiting_on is None:
+        return None, card["waiting_on"]  # blocked before reasons existed: left as it is
+    reason = blocked_reason if blocked_reason is not None else card["blocked_reason"]
+    if reason not in BLOCKED_REASONS:
+        raise ValueError("a blocked card says why: blocked_reason is unclear (you do not know how to go on), "
+                         "waiting (the next step depends on something named) or cannot (you lack a capability or access)")
+    if waiting_on is not None:
+        on = _text(waiting_on)
+    else:
+        on = card["waiting_on"] if reason == card["blocked_reason"] else None  # a new reason needs its own wait
+    if reason == "unclear":
+        return reason, None
+    if not on:
+        raise ValueError("waiting_on says what the card waits on (waiting) or what is missing (cannot)" if reason == "cannot"
+                         else "waiting_on says what the card waits on: an agent, workflow:<id>, or something outside Beacon")
+    if len(on) > 200:
+        raise ValueError("waiting_on must be at most 200 characters")
+    if reason == "waiting":
+        _check_wait(card["id"], on)
+    return reason, on
+
+
+def _check_wait(card_id: int, on: str) -> None:
+    if on.startswith("workflow:"):
+        try:
+            request_id = int(on[len("workflow:"):])
+        except ValueError:
+            raise ValueError("a workflow wait is workflow:<id>") from None
+        with opstore.connect() as db:
+            row = db.execute("SELECT card_id, state FROM workflow_requests WHERE id = ?", (request_id,)).fetchone()
+        if row is None or row["card_id"] != card_id:
+            raise ValueError(f"workflow {request_id} is not a request on this card")
+        if row["state"] not in ("pending", "changes_requested", "approved"):
+            raise ValueError(f"workflow {request_id} is {row['state']}, so there is nothing left to wait for")
+    elif "@" in on or on.casefold() == "human":
+        raise ValueError("waiting on a person goes through a workflow request: ask with workflow_create, "
+                         "then set waiting_on to workflow:<id>")
+
+
+def _blocked_summary(reason: str | None, on: str | None) -> str | None:
+    if reason is None:
+        return None  # the state event says the card is no longer blocked
+    return f"blocked: {reason}" + (f", {on}" if on else "")
+
+
 def _check_state(state: str) -> None:
     if state not in STATES:
         raise ValueError(f"state {state!r} must be one of {', '.join(STATES)}")
@@ -485,6 +556,14 @@ def remind(puller: str, now: float | None = None) -> None:
     agent has no board tools), people are told by email, once until the card
     changes. Any change to the card (state, comment, edit) starts over.
 
+    A blocked card is handled by its reason (see BLOCKED_REASONS). `unclear`: its agent is
+    reminded to consult a peer and try, then people hear. `waiting`: nobody is reminded to
+    check again. An agent it waits on is reminded; a workflow it waits on is left to the
+    request's own notices and expiry, and once the request has ended the assignee is
+    reminded to carry on; anything else is people's to chase. `cannot`: no agent can move
+    it, so people are told at once. Where people are the only ones left, they are told
+    again each `remind_after` while the card stays as it is, not once.
+
     Cards waiting on an agent that never pulls wait too: its quiet notice
     already tells people it is gone."""
     from . import notify, policy
@@ -492,25 +571,43 @@ def remind(puller: str, now: float | None = None) -> None:
     rules, fleet, exposure = policy.load(), {a.id: a for a in store.list_agents()}, mesh.open_chats()
     with opstore.connect() as db:
         cards = [dict(row) for row in db.execute("SELECT * FROM cards WHERE state != 'done' ORDER BY id")]
+        open_requests = {row["id"] for row in db.execute(
+            "SELECT id FROM workflow_requests WHERE state IN ('pending', 'changes_requested', 'approved')")}
     mine, stuck = [], []
     for card in cards:
         who = _responsible(card)
+        reason = card["blocked_reason"] if card["state"] == "blocked" else None
+        note = None  # which reminder the agent gets, when it is not the card's ordinary one
+        if reason == "waiting":
+            target = card["waiting_on"] or ""
+            if target.startswith("workflow:"):
+                if target[len("workflow:"):].isdigit() and int(target[len("workflow:"):]) in open_requests:
+                    continue  # the request tells its responder and expires: nothing to remind
+                who, note = card["assignee"], "ended"
+            elif fleet.get(target) is not None and fleet[target].reach is not None:
+                who, note = target, "waits-on-you"
+            else:
+                who = None  # a person, or something outside Beacon: people chase it
+        elif reason == "cannot":
+            who = None  # no agent can move it: a person has to, and hears now
         agent = fleet.get(who or "")
         agent = agent if agent and agent.reach else None
         subject = agent or fleet.get(card["assignee"] or "")  # whose policy sets the wait
         wait = (policy.health_for(rules, subject) if subject else policy.HEALTH_DEFAULTS)["remind_after"]
-        if wait is None or now - card["updated_at"] < wait:
+        if wait is None or now - card["updated_at"] < (0 if reason == "cannot" else wait):
             continue
+        again = reason in ("waiting", "cannot") and agent is None  # people only: repeated, not once
         this_round = card["reminded_at"] is not None and card["reminded_at"] >= card["updated_at"]
         sent = card["reminders"] if this_round else 0
         if this_round and now - card["reminded_at"] < wait:
             continue
         if agent and sent < REMINDERS and mesh.board_allowed(agent, exposure):
             if agent.id == puller and _claim(card, "reminded_at = ?, reminders = ?", (now, sent + 1), "reminded_at"):
-                mine.append({**card, "reminders": sent + 1})
-        elif (card["escalated_at"] is None or card["escalated_at"] < card["updated_at"]) \
+                mine.append({**card, "reminders": sent + 1, "_note": note})
+        elif (card["escalated_at"] is None or card["escalated_at"] < card["updated_at"]
+              or (again and now - card["escalated_at"] >= wait)) \
                 and _claim(card, "escalated_at = ?", (now,), "escalated_at"):
-            stuck.append((card, who, _why_stuck(card, who, agent, sent)))
+            stuck.append((card, who, _why_stuck(card, who, agent, sent, now)))
     if mine:
         notice_id = mailbox.enqueue(mesh.BEACON_PEER, puller, "notice", _reminder_text(mine, now))
         with opstore.connect() as db:
@@ -532,7 +629,13 @@ def _claim(card: dict, assignments: str, values: tuple, column: str) -> bool:
                           (*values, card["id"], card["updated_at"], card[column])).rowcount == 1
 
 
-def _why_stuck(card: dict, who: str | None, agent, sent: int) -> str:
+def _why_stuck(card: dict, who: str | None, agent, sent: int, now: float | None = None) -> str:
+    now = time.time() if now is None else now
+    reason = card["blocked_reason"] if card["state"] == "blocked" else None
+    if reason == "cannot":
+        return f"the agent cannot go on and says it lacks: {card['waiting_on']}"
+    if reason == "waiting" and agent is None:
+        return f"it has waited {_idle(now - card['updated_at'])} on {card['waiting_on']}"
     if agent and sent:
         return f"{who} was reminded and nothing changed"
     if agent:
@@ -559,6 +662,17 @@ def _reminder_text(cards: list[dict], now: float) -> str:
             what = "nobody is assigned: assign it to someone, do it yourself, or close it"
         elif card["state"] == "todo":
             what = "assigned to you and not started"
+        elif card.get("_note") == "waits-on-you":
+            what = (f"blocked, and it waits on you (assigned to {card['assignee'] or 'nobody'}): read the card"
+                    " with board_card, then do what it needs, or say on the card what stops you")
+        elif card.get("_note") == "ended":
+            what = (f"blocked, waiting on {card['waiting_on']}, which has ended: read it with workflow_get,"
+                    " then carry on, or say on the card what is still missing")
+        elif card["state"] == "blocked" and card["blocked_reason"] == "unclear":
+            what = ("blocked because you did not know how to go on. Do not wait: ask a peer you may call to"
+                    " challenge your approach (a2a_call, then card_comment with what they said and the thread's"
+                    " context_id), try what they suggest, and ask a person only for a decision or an authority"
+                    " only a person has, never for work you can do yourself")
         elif card["state"] == "blocked":
             what = ("blocked: if what you waited for has come, carry on; if not, make sure whoever you wait"
                     " for knows, and say on the card who it is")
@@ -569,6 +683,7 @@ def _reminder_text(cards: list[dict], now: float) -> str:
     return ("Reminder from the Beacon board: nothing has changed on these cards for a while, and they wait"
             " for you.\n\n" + "\n".join(lines) + "\n\n"
             "For each card, do the next step now, or make the card say what is true: card_update to doing,"
-            " blocked, review or done with a note, or card_comment with what you wait for and from whom. If"
+            " blocked (with blocked_reason unclear, waiting or cannot, and waiting_on for the last two),"
+            " review or done with a note, or card_comment with what you wait for and from whom. If"
             " you cannot do it, say so on the card. Do not close a card you did not finish. After"
             f" {REMINDERS} reminders without a change, Beacon tells a person.")
