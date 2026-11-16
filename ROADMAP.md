@@ -347,6 +347,45 @@ on a person has an open workflow request; a card with `unclear` shows a peer
 consultation before any human request; a card waiting on a changes-request
 expires; the reminder pass runs without a pull.
 
+## Operator-bound agents — an operator's own AI client works for them
+
+**Goal:** an operator's AI client (Claude Code, Codex, any MCP client) takes part in Beacon under
+its own identity, bound to that operator, and handles the workflow requests that need an
+independent agent review, so the operator is asked only for what needs a person. It is an agent,
+not the operator: Beacon says so everywhere it is recorded.
+
+- **Identity.** A new kind of agent, a *client*: it has no endpoint, is never called, assigned a
+  card or sent mail, and uses the board and workflow tools with its own token. Named for the
+  client and the operator (`claude-<operator>`, `codex-<operator>`). Any operator may have one.
+  It replaces the placeholder endpoint a client would need today.
+- **Binding.** `acts_for` (an operator's email) and `max_tier` (0 to 3, never higher). Saved only
+  from a browser session, with history, like the access policy; the client cannot widen or set
+  its own binding, and one switch turns it off.
+- **What it may answer.** Workflow requests at T0 to T3 addressed to its operator's email, or to
+  `human` (any operator), as long as that operator still is one. T4 and T5 stay a person in the
+  browser, as they are today. A T3 request asks for an independent agent review, which this
+  satisfies; it is not human approval, and the docs and the page say so.
+- **Independence.** The responder must differ from the requester, as at T3 today, and the check
+  covers both identities: a client cannot answer a request that it or its own operator made, or
+  it could ask as one and approve as the other. It does not create requests addressed to its own
+  operator.
+- **Escalate when unsure: `require_human`.** A tier belongs to the capability (a T3 action stays
+  T3 when Beacon runs it), so a request cannot become a T4 one. Any eligible reviewer, the client
+  included, may instead set a one-way flag with a reason: the request keeps its plan binding and
+  tier, but only a person in the browser may answer it from then on, and the operator is told.
+  Nothing but a person's answer clears it.
+- **Audit.** A response records who answered and for whom (`answered_by`, `on_behalf_of`): on the
+  request, in the card's history, and on the page ("answered by `<client>` for `<operator>`").
+  The operator gets a short digest of what was answered for them.
+
+**Acceptance:** a client with `acts_for` and `max_tier: 3` answers a T2 decision and a T3 review
+addressed to its operator, and one addressed to `human`; its answer is recorded with both names; it
+is refused at T4 and T5, on its own and its operator's requests, and when its binding is off; it
+raises `require_human` on a T3 review, after which its own approval is refused and a person's is
+accepted; it cannot change its binding.
+
+**Open:** whether to expire a binding after a set time, and rate limits on answers per hour.
+
 ## Horizon 1 — Make observation first-class
 
 **Goal:** Beacon tells the operator what is wrong without requiring a human to
