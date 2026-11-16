@@ -812,7 +812,8 @@ that waits (`pending` or `changes_requested`) carries a badge.
   `workflow_create`, `workflow_list`, `workflow_get`, `workflow_respond`, and
   `workflow_revise` (the requester's answer to "changes requested": a changed plan, pending again),
   plus `agent_owner` (below) and `enroll_request` and `enroll_claim` for enrollment
-  (decisions, reviews, and approvals attached to a card; the agent skill
+  (decisions, questions, handoffs, reviews, and approvals attached to a card; every change to
+  one is also an event in the card's history, with an optional `context_id`; the agent skill
   explains when to use them, and an agent may leave out `plan_revision` and
   `plan_hash` so that Beacon binds the request to its own text). It is served at the address agents
   already reach for their mesh config. An agent authenticates with its own

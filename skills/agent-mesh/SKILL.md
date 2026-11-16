@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.12.0
+version: 1.13.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -179,7 +179,9 @@ only then.
 - `kind`: `decision` (give `options`, at least one, and the person picks one: short
   labels such as `canary` or `all hosts`, each explained in the summary),
   `question` (ask for something in words: no `options`, the answer is free
-  text), `review` (check work) or `approval` (permission to do something);
+  text), `handoff` (ask an agent to take the card over: no `options`; when it
+  approves, the card is assigned to it, and if it declines, nothing changes),
+  `review` (check work) or `approval` (permission to do something);
 - `eligible_responder`: who may answer. Beacon refuses any name that is not one
   of these three, so a first name on its own does not work:
   - `human`: any operator using Beacon's web page. Use it when it does not
@@ -212,6 +214,12 @@ only then.
 
 Leave out `plan_revision` and `plan_hash`. Beacon ties the request to its own
 text. Then wait: do not do the thing until the state is `approved`.
+
+Every change to a request (asked, answered, changes requested, revised, expired,
+approved, claimed, done) is also written to the card's history, so read the card
+to see where its requests stand. Pass `context_id` (the A2A thread you are in)
+to `workflow_create`, `workflow_respond` or `workflow_revise` and the card's
+history links to that thread.
 
 **You are told.** When the request is answered, Beacon sends you a notice
 (a mailbox message from Beacon, on your next sync, so within minutes) with the

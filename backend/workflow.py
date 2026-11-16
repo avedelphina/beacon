@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 from typing import Any
 
 from . import mesh, notify, opstore, store
 
-REQUEST_KINDS = ("decision", "review", "approval", "question")
+logger = logging.getLogger(__name__)
+
+REQUEST_KINDS = ("decision", "review", "approval", "question", "handoff")
 STATES = (
     "pending", "approved", "claimed", "rejected", "changes_requested", "expired", "withdrawn",
     "stale", "executed", "verified", "failed", "execution_uncertain", "answered",
@@ -45,6 +48,15 @@ class HumanApprovalRequired(PermissionError):
 
 class StalePlan(WorkflowError):
     pass
+
+
+def _tell(send, *args, **kwargs) -> None:
+    """Send a notice after the change is committed. A failed notice is logged and costs
+    neither the workflow change nor the card history that already record it."""
+    try:
+        send(*args, **kwargs)
+    except Exception:
+        logger.exception("workflow notice failed")
 
 
 def json_text(value: Any) -> str:
@@ -84,12 +96,42 @@ def _visible(request: dict, actor: str, human: bool = False) -> bool:
 
 
 def _event(db, request_id: int, actor: str, kind: str, from_state: str | None,
-           to_state: str | None, payload: Any = None) -> None:
+           to_state: str | None, payload: Any = None, context_id: str | None = None) -> None:
+    """Record a lifecycle change twice, in one transaction: in the detailed workflow ledger,
+    and on the card's own timeline, so the card shows what was asked, answered and decided
+    without the reader opening the request. Every mutation passes through here."""
+    now = time.time()
     db.execute(
         "INSERT INTO workflow_events (request_id, actor, kind, from_state, to_state, payload_json, created_at)"
         " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (request_id, actor, kind, from_state, to_state, json_text(payload or {}), time.time()),
+        (request_id, actor, kind, from_state, to_state, json_text(payload or {}), now),
     )
+    row = db.execute("SELECT card_id, kind, title, eligible_responder FROM workflow_requests WHERE id = ?",
+                     (request_id,)).fetchone()
+    if row is not None:
+        db.execute(
+            "INSERT INTO card_events (card_id, author, kind, body, context_id, notice_id, created_at)"
+            " VALUES (?, ?, 'workflow', ?, ?, NULL, ?)",
+            (row["card_id"], actor, _card_text(request_id, row, kind, from_state, to_state, payload or {}),
+             context_id or None, now))
+        db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (now, row["card_id"]))
+
+
+def _card_text(request_id: int, row, kind: str, from_state: str | None, to_state: str | None, payload: dict) -> str:
+    label = f"workflow #{request_id} ({row['kind']}) {row['title'][:80]}"
+    if kind == "created":
+        return f"{label}: asked {row['eligible_responder']}"
+    if kind == "responded":
+        response = payload.get("response")
+        detail = (response.get("note") or response.get("option") or response.get("text")
+                  if isinstance(response, dict) else response)
+        return f"{label}: {to_state}" + (f": {str(detail)[:300]}" if detail else "")
+    if kind == "revised":
+        return f"{label}: plan revised, pending again"
+    if kind == "expired":
+        return f"{label}: expired without an answer"
+    reason = payload.get("reason")
+    return f"{label}: {from_state or '-'} -> {to_state or '-'}" + (f" ({reason})" if reason else "")
 
 
 def _expire_due(db, now: float) -> None:
@@ -192,8 +234,8 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
            capability: str, tier: int, title: str, summary: str,
            options: list[str] | None, target: dict[str, Any] | None,
            plan_revision: str, plan_hash: str, expires_at: float | None = None,
-           now: float | None = None) -> dict:
-    """Create one pending request and its initial history event."""
+           now: float | None = None, context_id: str | None = None) -> dict:
+    """Create one pending request and its initial history event, on the card as well."""
     if kind not in REQUEST_KINDS:
         raise WorkflowError(f"kind must be one of {', '.join(REQUEST_KINDS)}")
     requester = _validate_actor(requester)
@@ -222,8 +264,8 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
         raise WorkflowError("options must not contain duplicates")
     if kind == "decision" and not options:
         raise WorkflowError("decision requests require at least one option")
-    if kind == "question" and options:
-        raise WorkflowError("question requests take no options: the responder writes the answer")
+    if kind in ("question", "handoff") and options:
+        raise WorkflowError(f"{kind} requests take no options")
     target = target or {}
     if not isinstance(target, dict):
         raise WorkflowError("target must be an object")
@@ -244,9 +286,9 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
         ).lastrowid
         _event(db, request_id, requester, "created", None, "pending", {
             "kind": kind, "capability": capability.strip(), "tier": tier,
-        })
+        }, context_id)
     created = get(request_id)
-    notify.workflow_created(created)  # after the commit: a notice must never undo the request
+    _tell(notify.workflow_created, created)  # after the commit: a notice must never undo the request
     return created
 
 
@@ -295,7 +337,7 @@ def get(request_id: int, actor: str | None = None, human: bool = False) -> dict:
 
 
 def respond(request_id: int, *, actor: str, human: bool, action: str,
-            response: Any, plan_revision: str, plan_hash: str) -> dict:
+            response: Any, plan_revision: str, plan_hash: str, context_id: str | None = None) -> dict:
     """Record a response if actor, plan binding, and lifecycle all permit it."""
     actor = _validate_actor(actor)
     if action not in RESPONSE_ACTIONS:
@@ -333,6 +375,8 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
                 response = {"text": text.strip()}
         elif action == "answered":
             raise WorkflowError("only question requests take action answered")
+        if request["kind"] == "handoff" and action == "choose_option":
+            raise WorkflowError("a handoff is accepted (approved), declined (rejected) or sent back (changes_requested)")
         if request["kind"] == "decision":
             option = response.get("option") if isinstance(response, dict) else response
             if action == "choose_option" and option not in request["options"]:
@@ -354,15 +398,41 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
         )
         _event(db, request_id, actor, "responded", "pending", state, {
             "action": action, "plan_revision": plan_revision, "plan_hash": plan_hash, "response": response,
-        })
+        }, context_id)
+        if request["kind"] == "handoff" and state == "approved":
+            _hand_over(db, request, actor, context_id)
     answered = get(request_id)
-    notify.workflow_answered(answered, actor)
+    _tell(notify.workflow_answered, answered, actor)
     return answered
+
+
+def _hand_over(db, request: dict, actor: str, context_id: str | None) -> None:
+    """An accepted handoff gives the card to the agent that accepted it. The asking agent
+    already passed the access policy when it addressed the request, so no new permission is
+    created here. A handoff to a person or to "human" changes nothing: the card names agents.
+    Recorded as an ordinary assignment on the card."""
+    try:
+        agent = store.get_agent(request["eligible_responder"])
+    except (store.NotFound, store.InvalidId):
+        return
+    if agent.reach is None:
+        return
+    card = db.execute("SELECT assignee FROM cards WHERE id = ?", (request["card_id"],)).fetchone()
+    if card is None or card["assignee"] == agent.id:
+        return
+    now = time.time()
+    db.execute("UPDATE cards SET assignee = ?, updated_at = ? WHERE id = ?", (agent.id, now, request["card_id"]))
+    db.execute(
+        "INSERT INTO card_events (card_id, author, kind, body, context_id, notice_id, created_at)"
+        " VALUES (?, ?, 'assign', ?, ?, NULL, ?)",
+        (request["card_id"], actor, f"{card['assignee'] or '-'} -> {agent.id} (handoff #{request['id']} accepted)",
+         context_id or None, now))
 
 
 def revise(request_id: int, *, actor: str, plan_revision: str, plan_hash: str,
            title: str | None = None, summary: str | None = None, options: list[str] | None = None,
-           target: dict[str, Any] | None = None, expires_at: float | None = None) -> dict:
+           target: dict[str, Any] | None = None, expires_at: float | None = None,
+           context_id: str | None = None) -> dict:
     """The requester answers "changes requested" with a changed plan: the request
     goes back to pending under the new binding, so the responder can approve what
     they asked for. Before, changes_requested was a dead end (respond() only takes
@@ -396,6 +466,8 @@ def revise(request_id: int, *, actor: str, plan_revision: str, plan_hash: str,
             raise WorkflowError("options must be a list of unique, non-empty strings")
         if request["kind"] == "decision" and not options:
             raise WorkflowError("decision requests require at least one option")
+        if request["kind"] in ("question", "handoff") and options:
+            raise WorkflowError(f"{request['kind']} requests take no options")
         if not isinstance(target, dict):
             raise WorkflowError("target must be an object")
         now = time.time()
@@ -412,9 +484,9 @@ def revise(request_id: int, *, actor: str, plan_revision: str, plan_hash: str,
         # The earlier answer stays in the history: the responder's note is what the change answers.
         _event(db, request_id, actor, "revised", "changes_requested", "pending", {
             "plan_revision": plan_revision, "plan_hash": plan_hash, "previous_plan_hash": request["plan_hash"],
-        })
+        }, context_id)
     revised = get(request_id)
-    notify.workflow_created(revised, revised=True)
+    _tell(notify.workflow_created, revised, revised=True)
     return revised
 
 

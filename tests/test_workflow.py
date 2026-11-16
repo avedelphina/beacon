@@ -608,3 +608,150 @@ def test_question_cannot_be_tier_three_without_review():
     with pytest.raises(workflow.WorkflowError):
         workflow.validate_kind_for_tier("question", 3)
     workflow.validate_kind_for_tier("question", 2)
+
+
+def _card_history(card_id, kinds=("workflow",)):
+    return [e for e in board.get_card(card_id)["events"] if e["kind"] in kinds]
+
+
+def test_every_workflow_change_is_on_the_cards_history_with_actor_and_context():
+    card = _card()
+    binding = _binding()
+    request = workflow.create(
+        card_id=card["id"], kind="review", requester="beacon", eligible_responder="human",
+        capability="push_config", tier=3, title="Review the push", summary="Exact plan",
+        options=[], target={}, context_id="ctx-1", **binding)
+    workflow.respond(request["id"], actor="human", human=True, action="changes_requested",
+                     response={"note": "add a canary"}, context_id="ctx-2", **binding)
+    revised = workflow.plan_binding({"revised": True})
+    workflow.revise(request["id"], actor="beacon", summary="Now with a canary", context_id="ctx-3", **revised)
+    workflow.respond(request["id"], actor="human", human=True, action="approved", response={},
+                     context_id="ctx-4", **revised)
+    workflow.authorize(request_id=request["id"], capability="push_config", tier=3, actor="beacon",
+                       human=False, target={}, **revised)
+    workflow.mark_executed(request["id"], "beacon")
+
+    events = _card_history(card["id"])
+    assert [(e["author"], e["context_id"]) for e in events] == [
+        ("beacon", "ctx-1"), ("human", "ctx-2"), ("beacon", "ctx-3"), ("human", "ctx-4"), ("beacon", None), ("beacon", None)]
+    label = f"workflow #{request['id']} (review) Review the push"
+    assert [e["body"] for e in events] == [
+        f"{label}: asked human",
+        f"{label}: changes_requested: add a canary",
+        f"{label}: plan revised, pending again",
+        f"{label}: approved",
+        f"{label}: approved -> claimed",
+        f"{label}: claimed -> executed",
+    ]
+    assert all(e["created_at"] for e in events)
+    # The detailed ledger is still the request's own history.
+    assert [e["kind"] for e in workflow.get(request["id"])["events"]][:3] == ["created", "responded", "revised"]
+
+
+def test_expiry_and_a_stale_plan_reach_the_cards_history():
+    card = _card()
+    binding = _binding()
+    request = workflow.create(
+        card_id=card["id"], kind="review", requester="beacon", eligible_responder="human",
+        capability="push_config", tier=3, title="Short", summary="Short-lived",
+        options=[], target={}, expires_at=time.time() + 0.5, **binding)
+    time.sleep(0.6)
+    workflow.get(request["id"])
+    stale = workflow.create(
+        card_id=card["id"], kind="review", requester="beacon", eligible_responder="human",
+        capability="push_config", tier=3, title="Stale", summary="Changed",
+        options=[], target={}, **binding)
+    with pytest.raises(workflow.StalePlan):
+        workflow.respond(stale["id"], actor="human", human=True, action="approved", response={},
+                         **workflow.plan_binding({"other": 1}))
+
+    bodies = [e["body"] for e in _card_history(card["id"])]
+    assert bodies[1].endswith(": expired without an answer")
+    assert bodies[-1].endswith("pending -> stale (plan binding mismatch)")
+
+
+def test_a_failed_notice_costs_neither_the_request_nor_the_card_history(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("mail server down")
+    monkeypatch.setattr(workflow.notify, "workflow_created", boom)
+    monkeypatch.setattr(workflow.notify, "workflow_answered", boom)
+    card = _card()
+    binding = _binding()
+
+    request = workflow.create(card_id=card["id"], kind="decision", requester="beacon", eligible_responder="beacon",
+                              capability="ask", tier=1, title="Pick", summary="Pick one", options=["a"], target={}, **binding)
+    answered = workflow.respond(request["id"], actor="beacon", human=True, action="choose_option",
+                                response={"option": "a"}, **binding)
+
+    assert answered["state"] == "approved"
+    assert [e["body"].split(": ", 1)[1] for e in _card_history(card["id"])] == ["asked beacon", "approved: a"]
+
+
+def _taker():
+    store.upsert_agent(Agent.model_validate({"id": "taker", "type": "hermes", "host": "wf-host",
+                                             "reach": {"endpoint": "http://taker.test:9900"}}))
+
+
+def _handoff(card, responder="taker", **extra):
+    binding = _binding()
+    request = workflow.create(
+        card_id=card["id"], kind="handoff", requester="beacon", eligible_responder=responder,
+        capability="handoff", tier=1, title="Take the migration", summary="You know the host best",
+        options=[], target={}, **extra, **binding)
+    return request, binding
+
+
+@pytest.fixture
+def quiet_notices(monkeypatch):
+    """No mailbox traffic to the made-up agent."""
+    monkeypatch.setattr(workflow.notify, "workflow_created", lambda *a, **k: None)
+    monkeypatch.setattr(workflow.notify, "workflow_answered", lambda *a, **k: None)
+
+
+def test_an_accepted_handoff_gives_the_card_to_the_agent_that_accepted_it(quiet_notices):
+    _taker()
+    card = board.create_card("beacon", "Migrate host", assignee=None)
+    request, binding = _handoff(card, context_id="ctx-h")
+
+    done = workflow.respond(request["id"], actor="taker", human=False, action="approved",
+                            response={"note": "on it"}, context_id="ctx-h2", **binding)
+
+    assert done["state"] == "approved"
+    assert board.get_card(card["id"])["assignee"] == "taker"
+    assign, = _card_history(card["id"], ("assign",))
+    assert assign["author"] == "taker" and assign["context_id"] == "ctx-h2"
+    assert assign["body"] == f"- -> taker (handoff #{request['id']} accepted)"
+    assert _card_history(card["id"])[-1]["body"].endswith("approved: on it")
+
+
+def test_a_declined_handoff_or_one_to_a_person_changes_nothing(quiet_notices):
+    _taker()
+    card = board.create_card("beacon", "Migrate host")
+    declined, binding = _handoff(card)
+    workflow.respond(declined["id"], actor="taker", human=False, action="rejected", response={"note": "no capacity"}, **binding)
+    to_human, binding = _handoff(card, responder="human")
+    workflow.respond(to_human["id"], actor="human", human=True, action="approved", response={}, **binding)
+
+    assert board.get_card(card["id"])["assignee"] is None
+    assert _card_history(card["id"], ("assign",)) == []
+    assert workflow.get(declined["id"])["state"] == "rejected"
+
+
+def test_handoff_rules_are_fixed(quiet_notices):
+    _taker()
+    card = board.create_card("beacon", "Migrate host")
+    binding = _binding()
+    with pytest.raises(workflow.WorkflowError, match="no options"):
+        workflow.create(card_id=card["id"], kind="handoff", requester="beacon", eligible_responder="taker",
+                        capability="handoff", tier=1, title="T", summary="S", options=["x"], target={}, **binding)
+    with pytest.raises(workflow.WorkflowError):  # tier 3 and above need a review or an approval
+        workflow.create(card_id=card["id"], kind="handoff", requester="beacon", eligible_responder="taker",
+                        capability="handoff", tier=3, title="T", summary="S", options=[], target={}, **binding)
+    request, binding = _handoff(card)
+    for action in ("choose_option", "answered"):
+        with pytest.raises(workflow.WorkflowError):
+            workflow.respond(request["id"], actor="taker", human=False, action=action, response={"text": "x"}, **binding)
+    workflow.respond(request["id"], actor="taker", human=False, action="changes_requested", response={"note": "which host?"}, **binding)
+    with pytest.raises(workflow.WorkflowError):  # a second answer on a request that is no longer pending
+        workflow.respond(request["id"], actor="taker", human=False, action="approved", response={}, **binding)
+    assert board.get_card(card["id"])["assignee"] is None

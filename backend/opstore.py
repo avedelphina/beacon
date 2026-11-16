@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS card_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     card_id     INTEGER NOT NULL REFERENCES cards (id),
     author      TEXT NOT NULL,
-    kind        TEXT NOT NULL,     -- created | comment | state | assign | edit | reference | assign_notice | comment_notice | reminder | escalation | answer (an agent's answer to a notice)
+    kind        TEXT NOT NULL,     -- created | comment | state | assign | edit | reference | workflow | assign_notice | comment_notice | reminder | escalation | answer (an agent's answer to a notice)
     body        TEXT NOT NULL,
     context_id  TEXT,
     notice_id   INTEGER REFERENCES mailbox (id),  -- assign_notice, comment_notice: the mailbox row carrying the notice
@@ -67,7 +67,7 @@ CREATE INDEX IF NOT EXISTS card_events_by_card ON card_events (card_id);
 CREATE TABLE IF NOT EXISTS workflow_requests (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     card_id             INTEGER NOT NULL REFERENCES cards (id),
-    kind                TEXT NOT NULL,     -- decision | review | approval
+    kind                TEXT NOT NULL,     -- decision | review | approval | question | handoff
     state       TEXT NOT NULL,     -- pending | approved | claimed | rejected | changes_requested | expired | withdrawn | executed | verified | failed | execution_uncertain
     requester           TEXT NOT NULL,
     eligible_responder  TEXT NOT NULL,
