@@ -89,8 +89,8 @@ def build() -> MCPServer:
     server = MCPServer("beacon-board", instructions=INSTRUCTIONS)
 
     @server.tool()
-    def board_list(project: str | None = None, assignee: str | None = None, state: str | None = None,
-                   include_done: bool = False) -> list[dict]:
+    def board_list(ctx: Context, project: str | None = None, assignee: str | None = None,
+                   state: str | None = None, include_done: bool = False) -> list[dict]:
         """List cards, most recently changed first. Filter by project, assignee (an agent id),
         or state. Done cards are left out unless include_done is true or state is "done"."""
         author = _author(ctx)
@@ -98,7 +98,7 @@ def build() -> MCPServer:
                 if intake.agent_may_see(author, c)]
 
     @server.tool()
-    def board_card(card_id: int) -> dict:
+    def board_card(ctx: Context, card_id: int) -> dict:
         """One card with its full history: who created, moved, assigned, or commented, and when."""
         return _visible_card(ctx, card_id)
 
