@@ -137,8 +137,9 @@ def build() -> MCPServer:
         consult a peer and try before asking a person), "waiting" (the next step depends on
         something named: give waiting_on, an agent id, "workflow:<id>" for a request on this
         card, or something outside Beacon; waiting on a person means making a workflow request
-        first) or "cannot" (you lack a capability or access: waiting_on says exactly what is
-        missing, and a person hears at once). Do not use blocked for work you could still do."""
+        first) or "cannot" (you lack a capability or access: make a workflow request to a person for
+        exactly what is missing, then set waiting_on to "workflow:<id>"; you are told when it ends).
+        Do not use blocked for work you could still do."""
         _visible_card(ctx, card_id)
         return board.update_card(_author(ctx), card_id, state=state, assignee=assignee, title=title,
                                  body=body, project=project, next_action=next_action,

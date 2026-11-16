@@ -46,6 +46,9 @@ STATES = ("todo", "doing", "blocked", "review", "done")
 # step depends on a named thing, which is watched, not re-asked; cannot: the agent lacks a capability
 # or access, and a person is told now.
 BLOCKED_REASONS = ("unclear", "waiting", "cannot")
+# `cannot` needs a follow-up: an open workflow request on the card (waiting_on: workflow:<id>) for the
+# authority the agent lacks. Cards that were `cannot` before that rule have a plain-text wait and keep
+# the old handling (people hear at once).
 NOTICE_BODY = 600
 ANSWER_CHARS = 1500
 
@@ -565,8 +568,10 @@ def _blocked_fields(card: dict, new_state: str, blocked_reason: str | None,
         if blocked_reason or waiting_on:
             raise ValueError("blocked_reason and waiting_on belong to a blocked card")
         return None, None
-    if card["state"] == "blocked" and card["blocked_reason"] is None and blocked_reason is None and waiting_on is None:
-        return None, card["waiting_on"]  # blocked before reasons existed: left as it is
+    if card["state"] == "blocked" and blocked_reason is None and waiting_on is None:
+        # Nothing asked of its reason: it stays as it is. That keeps a card blocked before reasons
+        # existed, or `cannot` before a request was needed, editable until someone changes its reason.
+        return card["blocked_reason"], card["waiting_on"]
     reason = blocked_reason if blocked_reason is not None else card["blocked_reason"]
     if reason not in BLOCKED_REASONS:
         raise ValueError("a blocked card says why: blocked_reason is unclear (you do not know how to go on), "
@@ -577,14 +582,24 @@ def _blocked_fields(card: dict, new_state: str, blocked_reason: str | None,
         on = card["waiting_on"] if reason == card["blocked_reason"] else None  # a new reason needs its own wait
     if reason == "unclear":
         return reason, None
+    if reason == "cannot" and not _workflow_ref(on):
+        raise ValueError("a card that cannot go on needs a request to a person for what it lacks: make it with "
+                         "workflow_create (which system, which access or setting, exactly), then set waiting_on to "
+                         "workflow:<id>. The request has an owner, an expiry and an answer; you are told when it ends")
     if not on:
-        raise ValueError("waiting_on says what the card waits on (waiting) or what is missing (cannot)" if reason == "cannot"
-                         else "waiting_on says what the card waits on: an agent, workflow:<id>, or something outside Beacon")
+        raise ValueError("waiting_on says what the card waits on: an agent, workflow:<id>, or something outside Beacon")
     if len(on) > 200:
         raise ValueError("waiting_on must be at most 200 characters")
-    if reason == "waiting":
+    if reason in ("waiting", "cannot"):
         _check_wait(card["id"], on)
     return reason, on
+
+
+def _workflow_ref(on: str | None) -> int | None:
+    """The request id in a `workflow:<id>` wait, else None."""
+    if on and on.startswith("workflow:") and on[len("workflow:"):].isdigit():
+        return int(on[len("workflow:"):])
+    return None
 
 
 def _check_wait(card_id: int, on: str) -> None:
@@ -714,12 +729,19 @@ def remind(puller: str | None = None, now: float | None = None) -> None:
             else:
                 who = None  # a person, or something outside Beacon: people chase it
         elif reason == "cannot":
-            who = None  # no agent can move it: a person has to, and hears now
+            request_id = _workflow_ref(card["waiting_on"])
+            if request_id is None:
+                who = None  # from before a request was needed: no agent can move it, and a person hears now
+            elif request_id in open_requests:
+                continue  # the request tells its responder and expires: nothing more to say meanwhile
+            else:
+                who, note = card["assignee"], "cannot-ended"  # it ended: the agent has to act on the outcome
         agent = fleet.get(who or "")
         agent = agent if agent and agent.reach else None
         subject = agent or fleet.get(card["assignee"] or "")  # whose policy sets the wait
         wait = (policy.health_for(rules, subject) if subject else policy.HEALTH_DEFAULTS)["remind_after"]
-        if wait is None or now - card["updated_at"] < (0 if reason == "cannot" else wait):
+        immediate = reason == "cannot" and _workflow_ref(card["waiting_on"]) is None
+        if wait is None or now - card["updated_at"] < (0 if immediate else wait):
             continue
         again = reason in ("waiting", "cannot") and agent is None  # people only: repeated, not once
         this_round = card["reminded_at"] is not None and card["reminded_at"] >= card["updated_at"]
@@ -758,7 +780,7 @@ def _claim(card: dict, assignments: str, values: tuple, column: str) -> bool:
 def _why_stuck(card: dict, who: str | None, agent, sent: int, now: float | None = None) -> str:
     now = time.time() if now is None else now
     reason = card["blocked_reason"] if card["state"] == "blocked" else None
-    if reason == "cannot":
+    if reason == "cannot" and _workflow_ref(card["waiting_on"]) is None:
         return f"the agent cannot go on and says it lacks: {card['waiting_on']}"
     if reason == "waiting" and agent is None:
         return f"it has waited {_idle(now - card['updated_at'])} on {card['waiting_on']}"
@@ -791,6 +813,11 @@ def _reminder_text(cards: list[dict], now: float) -> str:
         elif card.get("_note") == "waits-on-you":
             what = (f"blocked, and it waits on you (assigned to {card['assignee'] or 'nobody'}): read the card"
                     " with board_card, then do what it needs, or say on the card what stops you")
+        elif card.get("_note") == "cannot-ended":
+            what = (f"you said you cannot go on, and the request for what you lacked ({card['waiting_on']}) has ended:"
+                    " read it with workflow_get. If it was approved, carry on and set the card to doing. If it was"
+                    " rejected, re-plan: consult a peer, or close the card with a note. If it expired, raise it again"
+                    " or say why you will not")
         elif card.get("_note") == "ended":
             what = (f"blocked, waiting on {card['waiting_on']}, which has ended: read it with workflow_get,"
                     " then carry on, or say on the card what is still missing")
