@@ -779,7 +779,15 @@ http and https only, at most 20). A link is a label: Beacon never fetches it,
 copies its state, or treats it as approval. The assignment notice and the
 reminders carry `next_action` and `done_when`, and a change to either is
 recorded in the history with its new text. `links` in an update replaces the
-whole list. The history
+whole list. For a structured pointer, a card also holds
+**references**: `provider`, `kind`, `external_id`, `url` and `label` (provider and
+kind are free words such as `gitea` / `pull_request`, so a new tracker needs no
+change), optionally a `workflow_id` (a workflow on the same card, never another
+card's), and a hand-typed `last_seen_state` with `last_seen_at`. The URL is http
+or https without credentials; a card holds at most 50, and the same provider,
+kind and external id appears once. The state is a hint with an age: Beacon
+never fetches, polls or checks it, and the page words it as what someone last saw,
+not as Beacon's state. `links` stay as they were. The history
 records every creation, move, reassignment, and comment, each with its
 author. It also records the A2A `context_id` the work happened under.
 Cards live in the operational store, not in fleet YAML.
@@ -788,14 +796,19 @@ Cards live in the operational store, not in fleet YAML.
 
 - **People:** the **Board** tab in the UI, or `/api/board`
   (`GET /api/board`, `GET|PATCH /api/board/cards/{id}`,
-  `POST /api/board/cards`, `POST /api/board/cards/{id}/comments`). A
-  logged-in person is recorded by email. The card view shows the next
+  `POST /api/board/cards`, `POST /api/board/cards/{id}/comments`,
+  `GET|POST /api/board/cards/{id}/references`,
+  `PATCH|DELETE /api/board/cards/{id}/references/{reference_id}`; a PATCH changes
+  only the fields sent, and an explicit null clears `workflow_id` or the state hint).
+  Adding, changing, or removing a reference is a card history event with its author
+  and optional `context_id`. A logged-in person is recorded by email. The card view shows the next
 action, done-when, links, and the card's decision, review, and approval
 requests (answered in the Workflows tab); on the board, a card with a request
 that waits (`pending` or `changes_requested`) carries a badge.
 - **Agents and MCP clients:** the MCP endpoint `/board/mcp` on Beacon
   itself, with the tools `board_list`, `board_card`, `card_create`,
-  `card_update`, and `card_comment`, and the workflow tools
+  `card_update`, and `card_comment`, the reference tools `card_references`,
+  `card_reference_add`, `card_reference_update` and `card_reference_remove`, and the workflow tools
   `workflow_create`, `workflow_list`, `workflow_get`, `workflow_respond`, and
   `workflow_revise` (the requester's answer to "changes requested": a changed plan, pending again),
   plus `agent_owner` (below) and `enroll_request` and `enroll_claim` for enrollment

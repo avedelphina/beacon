@@ -191,8 +191,9 @@ def test_agent_writes_to_the_board_as_itself(fleet_agents):
         tools = _mcp(c, "tools/list", token=token).json()["result"]["tools"]
 
         assert sorted(t["name"] for t in tools) == [
-            "agent_owner", "board_card", "board_list", "card_comment", "card_create", "card_update", "enroll_claim", "enroll_request",
-            "workflow_create", "workflow_get", "workflow_list", "workflow_respond", "workflow_revise",
+            "agent_owner", "board_card", "board_list", "card_comment", "card_create", "card_reference_add",
+            "card_reference_remove", "card_reference_update", "card_references", "card_update", "enroll_claim",
+            "enroll_request", "workflow_create", "workflow_get", "workflow_list", "workflow_respond", "workflow_revise",
         ]
     notice, = _notices()
     assert notice["sender"] == "alpha" and notice["recipient"] == "bravo"

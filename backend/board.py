@@ -22,9 +22,18 @@ A card also says what moves it on (`next_action`) and when it is finished
 and "nothing changed for a day" is no help without the next step. `links`
 point out to PRs and issues elsewhere. They are labels only: Beacon never
 fetches them, copies their state, or treats one as approval for anything.
+
+`references` are the structured form of the same idea: provider, kind, external
+id, URL and label, optionally tied to a workflow on the same card, with a
+`last_seen_state` that whoever added the reference typed by hand. The state is a
+hint with an age, not Beacon's knowledge: nothing fetches it, nothing checks it,
+and no decision rests on it. Provider and kind are free text, so a new tracker
+needs no schema change. `links` stay as they were, for clients that use them.
 """
 
 import json
+import re
+import sqlite3
 import threading
 import time
 from urllib.parse import urlsplit
@@ -92,6 +101,8 @@ def get_card(card_id: int) -> dict:
         if card is None:
             raise store.NotFound(f"card {card_id} not found")
         events = db.execute("SELECT * FROM card_events WHERE card_id = ? ORDER BY id", (card_id,)).fetchall()
+        references = [dict(r) for r in db.execute(
+            "SELECT * FROM card_references WHERE card_id = ? ORDER BY id", (card_id,))]
         notice_ids = [e["notice_id"] for e in events if e["notice_id"] is not None]
         notices = {}
         if notice_ids:
@@ -106,7 +117,7 @@ def get_card(card_id: int) -> dict:
         if e["notice_id"] is not None:
             event["notice"] = notices.get(e["notice_id"])
         out_events.append(event)
-    return {**_card(card), "events": out_events}
+    return {**_card(card), "references": references, "events": out_events}
 
 
 def create_card(author: str, title: str, body: str = "", project: str | None = None,
@@ -181,6 +192,154 @@ def comment(author: str, card_id: int, text: str, context_id: str | None = None)
         db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (time.time(), card_id))
     _notify_comment(card_id, author, text)
     return get_card(card_id)
+
+
+# --- references: structured pointers to work elsewhere -----------------------
+
+MAX_REFERENCES = 50
+_REFERENCE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
+_REFERENCE_FIELDS = ("provider", "kind", "external_id", "url", "label", "workflow_id",
+                     "last_seen_state", "last_seen_at")
+
+
+def add_reference(author: str, card_id: int, *, provider: str, kind: str, external_id: str, url: str,
+                  label: str, workflow_id: int | None = None, last_seen_state: str | None = None,
+                  last_seen_at: float | None = None, context_id: str | None = None) -> dict:
+    """Add a pointer to work elsewhere. The card's history records it with the author
+    and the A2A context it was made under, like every other change. A hint state
+    with no time is dated now: a hint without an age cannot be judged."""
+    get_card(card_id)  # a missing card is "not found", before anything else is checked
+    now = time.time()
+    fields = _reference_fields(provider, kind, external_id, url, label, last_seen_state, last_seen_at, now)
+    with opstore.connect() as db:
+        _check_reference_workflow(db, card_id, workflow_id)
+        held = db.execute("SELECT count(*) FROM card_references WHERE card_id = ?", (card_id,)).fetchone()[0]
+        if held >= MAX_REFERENCES:
+            raise ValueError(f"a card holds at most {MAX_REFERENCES} references")
+        try:
+            ref_id = db.execute(
+                "INSERT INTO card_references (card_id, provider, kind, external_id, url, label, workflow_id,"
+                " last_seen_state, last_seen_at, created_by, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (card_id, fields["provider"], fields["kind"], fields["external_id"], fields["url"], fields["label"],
+                 workflow_id, fields["last_seen_state"], fields["last_seen_at"], author, now, now)).lastrowid
+        except sqlite3.IntegrityError:
+            raise ValueError(f"the card already has a {fields['provider']} {fields['kind']} "
+                             f"{fields['external_id']} reference") from None
+        _event(db, card_id, author, "reference", f"added {_describe_reference(fields)}", context_id)
+        db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (now, card_id))
+        return dict(db.execute("SELECT * FROM card_references WHERE id = ?", (ref_id,)).fetchone())
+
+
+def update_reference(author: str, card_id: int, ref_id: int, *, context_id: str | None = None, **changes) -> dict:
+    """Change the fields given; a field left out stays. None clears `workflow_id` and the
+    `last_seen_*` hint. Setting a new `last_seen_state` without `last_seen_at` dates it now."""
+    unknown = set(changes) - set(_REFERENCE_FIELDS)
+    if unknown:
+        raise ValueError(f"unknown reference field(s): {', '.join(sorted(unknown))}")
+    now = time.time()
+    with opstore.connect() as db:
+        row = db.execute("SELECT * FROM card_references WHERE id = ? AND card_id = ?", (ref_id, card_id)).fetchone()
+        if row is None:
+            raise store.NotFound(f"reference {ref_id} not found on card {card_id}")
+        current = dict(row)
+        merged = {**current, **changes}
+        if "last_seen_state" in changes and "last_seen_at" not in changes:
+            merged["last_seen_at"] = None  # dated now below, if there is a state
+        merged.update(_reference_fields(merged["provider"], merged["kind"], merged["external_id"], merged["url"],
+                                        merged["label"], merged["last_seen_state"], merged["last_seen_at"], now))
+        if "workflow_id" in changes:
+            _check_reference_workflow(db, card_id, merged["workflow_id"])
+        changed = [name for name in _REFERENCE_FIELDS if merged[name] != current[name]]
+        if not changed:
+            return current
+        try:
+            db.execute(
+                "UPDATE card_references SET provider = ?, kind = ?, external_id = ?, url = ?, label = ?,"
+                " workflow_id = ?, last_seen_state = ?, last_seen_at = ?, updated_at = ? WHERE id = ?",
+                (merged["provider"], merged["kind"], merged["external_id"], merged["url"], merged["label"],
+                 merged["workflow_id"], merged["last_seen_state"], merged["last_seen_at"], now, ref_id))
+        except sqlite3.IntegrityError:
+            raise ValueError("the card already has a reference with that provider, kind and external id") from None
+        _event(db, card_id, author, "reference",
+               f"changed {_describe_reference(merged)} ({', '.join(changed)})", context_id)
+        db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (now, card_id))
+        return dict(db.execute("SELECT * FROM card_references WHERE id = ?", (ref_id,)).fetchone())
+
+
+def remove_reference(author: str, card_id: int, ref_id: int, context_id: str | None = None) -> dict:
+    """Remove one reference; the history keeps what it was. Returns the removed reference."""
+    with opstore.connect() as db:
+        row = db.execute("SELECT * FROM card_references WHERE id = ? AND card_id = ?", (ref_id, card_id)).fetchone()
+        if row is None:
+            raise store.NotFound(f"reference {ref_id} not found on card {card_id}")
+        removed = dict(row)
+        db.execute("DELETE FROM card_references WHERE id = ?", (ref_id,))
+        _event(db, card_id, author, "reference", f"removed {_describe_reference(removed)}", context_id)
+        db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (time.time(), card_id))
+    return removed
+
+
+def _describe_reference(ref: dict) -> str:
+    return f"{ref['provider']} {ref['kind']} {ref['external_id']}: {ref['label']}"[:300]
+
+
+def _check_reference_workflow(db, card_id: int, workflow_id) -> None:
+    """A reference may name a workflow, but only one that belongs to the same card: a
+    pointer across cards would show one card's decision on another."""
+    if workflow_id is None:
+        return
+    if not isinstance(workflow_id, int) or isinstance(workflow_id, bool):
+        raise ValueError("workflow_id must be an integer")
+    row = db.execute("SELECT card_id FROM workflow_requests WHERE id = ?", (workflow_id,)).fetchone()
+    if row is None:
+        raise ValueError(f"workflow {workflow_id} does not exist")
+    if row["card_id"] != card_id:
+        raise ValueError(f"workflow {workflow_id} belongs to another card")
+
+
+def _reference_fields(provider, kind, external_id, url, label, last_seen_state, last_seen_at, now: float) -> dict:
+    """The checked, normalised form of a reference's own fields (not its workflow, which
+    needs the database). Provider and kind are free text, lowercased: an unknown one is fine."""
+    state = None
+    if last_seen_state is not None:
+        if not isinstance(last_seen_state, str):
+            raise ValueError("last_seen_state must be text")
+        state = _text(last_seen_state)
+        if state is not None and len(state) > 100:
+            raise ValueError("last_seen_state must be at most 100 characters")
+    if last_seen_at is not None and (isinstance(last_seen_at, bool)
+                                     or not isinstance(last_seen_at, (int, float)) or last_seen_at < 0):
+        raise ValueError("last_seen_at must be a Unix time")
+    if state is not None and last_seen_at is None:
+        last_seen_at = now
+    external_id, label = _required(external_id, "external_id"), _required(label, "label")
+    if len(external_id) > 200 or len(label) > 200:
+        raise ValueError("external_id and label must be at most 200 characters")
+    return {"provider": _reference_name(provider, "provider"), "kind": _reference_name(kind, "kind"),
+            "external_id": external_id, "url": _reference_url(url), "label": label,
+            "last_seen_state": state, "last_seen_at": None if last_seen_at is None else float(last_seen_at)}
+
+
+def _reference_name(value, what: str) -> str:
+    name = value.strip().lower() if isinstance(value, str) else ""
+    if not _REFERENCE_NAME.match(name):
+        raise ValueError(f"{what} must be 1 to 40 characters: letters, digits, '.', '_' or '-'")
+    return name
+
+
+def _reference_url(url) -> str:
+    """http(s) only, and no credentials in it: the page renders it as a link, a
+    `javascript:` or `data:` URL would run in a viewer's session, and a `user:password@`
+    URL would keep a secret on the card."""
+    if not isinstance(url, str):
+        raise ValueError("url must be text")
+    url = url.strip()
+    parts = urlsplit(url)
+    if (parts.scheme not in ("http", "https") or not parts.netloc or len(url) > 2000
+            or parts.username or parts.password):
+        raise ValueError(f"url {url[:80]!r} must be an http(s) URL without credentials")
+    return url
 
 
 def _event(db, card_id: int, author: str, kind: str, body: str, context_id: str | None = None,

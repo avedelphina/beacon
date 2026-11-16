@@ -501,6 +501,31 @@ class CardComment(BaseModel):
     context_id: str | None = None
 
 
+class ReferenceCreate(BaseModel):
+    provider: str
+    kind: str
+    external_id: str
+    url: str
+    label: str
+    workflow_id: int | None = None  # a workflow on this same card
+    last_seen_state: str | None = None  # typed by hand: a hint, never checked by Beacon
+    last_seen_at: float | None = None
+    context_id: str | None = None
+
+
+class ReferenceUpdate(BaseModel):
+    """Only the fields sent change; an explicit null clears workflow_id and the last_seen_* hint."""
+    provider: str | None = None
+    kind: str | None = None
+    external_id: str | None = None
+    url: str | None = None
+    label: str | None = None
+    workflow_id: int | None = None
+    last_seen_state: str | None = None
+    last_seen_at: float | None = None
+    context_id: str | None = None
+
+
 class WorkflowCreateRequest(BaseModel):
     kind: str
     eligible_responder: str
@@ -677,6 +702,26 @@ def board_update(card_id: int, body: CardUpdate, request: Request) -> dict:
 @app.post("/api/board/cards/{card_id}/comments")
 def board_comment(card_id: int, body: CardComment, request: Request) -> dict:
     return board.comment(_board_author(request), card_id, body.text, body.context_id)
+
+
+@app.get("/api/board/cards/{card_id}/references")
+def card_references(card_id: int) -> list[dict]:
+    return board.get_card(card_id)["references"]
+
+
+@app.post("/api/board/cards/{card_id}/references")
+def card_reference_add(card_id: int, body: ReferenceCreate, request: Request) -> dict:
+    return board.add_reference(_board_author(request), card_id, **body.model_dump())
+
+
+@app.patch("/api/board/cards/{card_id}/references/{ref_id}")
+def card_reference_update(card_id: int, ref_id: int, body: ReferenceUpdate, request: Request) -> dict:
+    return board.update_reference(_board_author(request), card_id, ref_id, **body.model_dump(exclude_unset=True))
+
+
+@app.delete("/api/board/cards/{card_id}/references/{ref_id}")
+def card_reference_remove(card_id: int, ref_id: int, request: Request, context_id: str | None = None) -> dict:
+    return board.remove_reference(_board_author(request), card_id, ref_id, context_id)
 
 
 @app.get("/api/board/cards/{card_id}/workflows")
