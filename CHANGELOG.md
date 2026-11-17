@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.39.1] — 2026-11-17
+
 ### Changed
 
 - **Workflows: the card, and what waits first.** Each request shows the card it is about, with its title
