@@ -1321,11 +1321,26 @@ async function updateWorkflowBadge() {
   }
 }
 
+let workflowCards = {};
+
+// What waits for an answer comes first, the soonest to expire at the very top; then what waits for its
+// requester, then what is approved and not yet done; the rest by recency, as the server sends them.
+const WORKFLOW_RANK = { pending: 0, changes_requested: 1, approved: 2, claimed: 2 };
+function sortWorkflows(items) {
+  return [...items].sort((a, b) => {
+    const ra = WORKFLOW_RANK[a.state] ?? 3, rb = WORKFLOW_RANK[b.state] ?? 3;
+    if (ra !== rb) return ra - rb;
+    return ra === 0 ? a.expires_at - b.expires_at : 0;
+  });
+}
+
 function renderWorkflowItems(items) {
   const list = document.getElementById("workflow-list");
   document.getElementById("workflows-empty").hidden = items.length > 0;
   setWorkflowBadge(items);
+  items = sortWorkflows(items);
   list.innerHTML = items.map((w) => {
+    const card = workflowCards[w.card_id];
     const pending = w.state === "pending";
     const isQuestion = w.kind === "question";
     const isDecision = w.kind === "decision";
@@ -1368,7 +1383,9 @@ function renderWorkflowItems(items) {
         </div>
         <span class="chip">${esc(w.state)}</span>
       </header>
-      <p class="wf-from">From <strong>${esc(w.requester)}</strong> to <strong>${esc(responder)}</strong> · card #${esc(w.card_id)} · expires ${esc(workflowWhen(w.expires_at))}</p>
+      <p class="wf-from">From <strong>${esc(w.requester)}</strong> to <strong>${esc(responder)}</strong> · expires ${esc(workflowWhen(w.expires_at))}</p>
+      <p class="wf-card">On card <a href="#" data-open-card="${esc(w.card_id)}">#${esc(w.card_id)}${card ? ` ${esc(card.title)}` : ""}</a>${
+        card ? ` <span class="chip">${esc(card.state)}</span>` : ""}</p>
       <div class="wf-plan">${renderMarkdown(w.summary)}</div>
       ${consulted}
       ${w.answered_by ? `<p class="hint">Answered by <strong>${esc(w.answered_by)}</strong>, an AI client, for ${esc(w.on_behalf_of)}.</p>` : ""}
@@ -1383,12 +1400,20 @@ function renderWorkflowItems(items) {
     </article>`;
   }).join("");
   list.querySelectorAll("[data-workflow-action]").forEach((button) => button.addEventListener("click", () => respondWorkflow(button)));
+  list.querySelectorAll("[data-open-card]").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    openCard(a.dataset.openCard);  // the card opens over this page: nothing to navigate back from
+  }));
 }
 
 async function renderWorkflows() {
   const list = document.getElementById("workflow-list");
   list.innerHTML = '<p class="hint">Loading…</p>';
   try {
+    // The cards the requests are about, so each shows its title and opens in place. A request still
+    // lists without them if the board cannot be read.
+    workflowCards = {};
+    (await json("/api/board?include_done=true").catch(() => [])).forEach((c) => { workflowCards[c.id] = c; });
     renderWorkflowItems(await api.listWorkflows());
   } catch (err) {
     list.innerHTML = `<p class="finding critical"><span class="sev"></span><span class="summary">${esc(err.message)}</span></p>`;
