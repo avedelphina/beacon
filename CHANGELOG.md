@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Workflows: the card, and what waits first.** Each request shows the card it is about, with its title
+  and state, and opens it over the page, so you can read the card without leaving the Workflows tab.
+  Requests that wait for an answer come first, the soonest to expire at the very top, then those waiting
+  for their requester, then approved ones not yet done, then the rest by recency.
+
 ## [0.39.0] — 2026-11-16
 
 ### Added
