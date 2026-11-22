@@ -20,6 +20,7 @@ import os
 import re
 import sqlite3
 import time
+from collections.abc import Callable
 
 from . import board, opstore, store
 
@@ -138,9 +139,15 @@ def delivery_key(delivery: str | None, body: bytes) -> str:
     return "sha256:" + hashlib.sha256(body).hexdigest()
 
 
-def receive(source: str, event: str | None, body: bytes, delivery: str | None = None) -> dict:
+def receive(source: str, event: str | None, body: bytes, delivery: str | None = None,
+            recorder: Callable[[str, str | None, bytes], dict] = record) -> dict:
     """Record a delivery once. A second delivery with the same key within the retention
-    period raises Duplicate, so a replayed or retried request makes no second card."""
+    period raises Duplicate, so a replayed or retried request makes no second card.
+
+    ``recorder`` is a deliberately small boundary for source-specific adapters. It runs
+    only after the delivery claim, and failed recording releases that claim so a corrected
+    retry is not permanently suppressed.
+    """
     key, now = delivery_key(delivery, body), time.time()
     with opstore.connect() as db:
         db.execute("DELETE FROM intake_deliveries WHERE received_at < ?", (now - RETENTION_SECONDS,))
@@ -152,7 +159,7 @@ def receive(source: str, event: str | None, body: bytes, delivery: str | None = 
                              (source, key)).fetchone()
             raise Duplicate(row["card_id"] if row else None) from None
     try:
-        card = record(source, event, body)
+        card = recorder(source, event, body)
     except Exception:
         with opstore.connect() as db:  # nothing was recorded: a corrected retry must not be called a replay
             db.execute("DELETE FROM intake_deliveries WHERE source = ? AND delivery_id = ?", (source, key))
