@@ -901,13 +901,16 @@ async def gitea_intake_event(request: Request):
         gitea_intake.verify(body, request.headers.get("x-gitea-signature"))
         card = await run_in_threadpool(
             intake.receive, "gitea", request.headers.get("x-gitea-event"), body,
-            request.headers.get("x-gitea-delivery"), gitea_intake.record)
+            request.headers.get("x-gitea-delivery"), gitea_intake.record,
+            delivery_key_fn=intake.body_delivery_key, recover_incomplete=True)
     except intake.IntakeRefused as exc:
         return JSONResponse({"detail": str(exc)}, status_code=401)
     except intake.IntakeError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=400)
     except ValueError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=400)
+    except intake.InProgress as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=409)
     except intake.Duplicate as exc:
         return JSONResponse({"card_id": exc.card_id, "duplicate": True}, status_code=200)
     return JSONResponse({"card_id": card["id"]}, status_code=202)
@@ -932,6 +935,8 @@ async def intake_event(source: str, request: Request):
         return JSONResponse({"detail": str(exc)}, status_code=401)
     except intake.IntakeError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=400)
+    except intake.InProgress as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=409)
     except intake.Duplicate as exc:  # a retry or a replay: acknowledged, and nothing more is made
         return JSONResponse({"card_id": exc.card_id, "duplicate": True}, status_code=200)
     return JSONResponse({"card_id": card["id"]}, status_code=202)

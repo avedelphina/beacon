@@ -11,10 +11,11 @@ import hmac
 import json
 import os
 import re
-import threading
+import time
+from datetime import datetime
 from urllib.parse import urlsplit
 
-from . import board, intake, opstore
+from . import board, intake
 
 SECRET_ENV = "BEACON_INTAKE_SECRET_GITEA"
 REPOSITORY_IDS_ENV = "BEACON_GITEA_REPOSITORY_IDS"
@@ -24,7 +25,7 @@ EVENT = "pull_request"
 _AUTHOR = "intake:gitea"
 _REPOSITORY_ID = re.compile(r"^[1-9][0-9]{0,19}$")
 _REPOSITORY_NAME = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-_RECORD_LOCK = threading.Lock()
+MAX_PR_NUMBER = 2_147_483_647
 
 
 def secret() -> str | None:
@@ -33,14 +34,32 @@ def secret() -> str | None:
 
 
 def repository_ids() -> frozenset[int]:
-    """Return the explicit numeric repository allowlist, or an empty set."""
-    values = os.environ.get(REPOSITORY_IDS_ENV, "").split(",")
-    ids = set()
-    for value in values:
-        value = value.strip()
-        if value and _REPOSITORY_ID.fullmatch(value):
-            ids.add(int(value))
-    return frozenset(ids)
+    """Return a valid explicit numeric repository allowlist, or disable on any error."""
+    raw = os.environ.get(REPOSITORY_IDS_ENV, "")
+    if not raw.strip():
+        return frozenset()
+    values = [value.strip() for value in raw.split(",")]
+    if any(not _REPOSITORY_ID.fullmatch(value) for value in values):
+        return frozenset()
+    if len(values) != len(set(values)):
+        return frozenset()
+    return frozenset(int(value) for value in values)
+
+
+def _base_origin() -> tuple[str, int | None]:
+    """Parse the configured HTTPS forge origin before accepting signed data."""
+    configured = (os.environ.get(BASE_URL_ENV) or DEFAULT_BASE_URL).strip()
+    parts = urlsplit(configured)
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise intake.IntakeError("Gitea base URL has an invalid port") from exc
+    if (parts.scheme != "https" or not parts.hostname or parts.username or parts.password
+            or parts.query or parts.fragment or parts.path not in ("", "/") or parts.geturl() != configured):
+        raise intake.IntakeError("Gitea base URL must be a canonical HTTPS origin")
+    if port == 443:
+        port = None
+    return parts.hostname.casefold(), port
 
 
 def enabled() -> bool:
@@ -71,7 +90,20 @@ def _text(value, limit: int) -> str:
     return value[:limit]
 
 
-def _payload(body: bytes) -> tuple[dict, dict, dict, int, str, str, str]:
+def _event_time(payload: dict, pull_request: dict) -> float | None:
+    """Return the forge update time when present, for out-of-order delivery checks."""
+    values = (pull_request.get("updated_at"), payload.get("updated_at"), payload.get("timestamp"))
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            continue
+    return None
+
+
+def _payload(body: bytes) -> tuple[dict, dict, dict, int, str, str, str, float | None]:
     try:
         payload = json.loads(body)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -89,22 +121,36 @@ def _payload(body: bytes) -> tuple[dict, dict, dict, int, str, str, str]:
     if repository_id not in repository_ids():
         raise intake.IntakeError("Gitea repository is not allowlisted")
 
-    number = payload.get("number", pull_request.get("number"))
-    if isinstance(number, bool) or not isinstance(number, int) or number <= 0:
-        raise intake.IntakeError("Gitea pull request number is missing or invalid")
+    top_number = payload.get("number")
+    nested_number = pull_request.get("number")
+    for value in (top_number, nested_number):
+        if (isinstance(value, bool) or not isinstance(value, int) or value <= 0
+                or value > MAX_PR_NUMBER):
+            raise intake.IntakeError("Gitea pull request number is missing or invalid")
+    if top_number != nested_number:
+        raise intake.IntakeError("Gitea pull request numbers do not match")
+    number = top_number
     full_name = _text(repository.get("full_name"), 200)
     if not full_name or not _REPOSITORY_NAME.fullmatch(full_name):
         raise intake.IntakeError("Gitea repository name is missing or invalid")
-    expected_host = urlsplit(os.environ.get(BASE_URL_ENV) or DEFAULT_BASE_URL).netloc
-    url = pull_request.get("html_url") or pull_request.get("url")
+    expected_host, expected_port = _base_origin()
+    url = pull_request.get("html_url")
     if not isinstance(url, str):
-        raise intake.IntakeError("Gitea pull request URL is missing")
-    parts = urlsplit(url.strip())
-    if (parts.scheme != "https" or parts.netloc != expected_host or parts.username or parts.password
+        raise intake.IntakeError("Gitea pull request html_url is missing")
+    url = url.strip()
+    parts = urlsplit(url)
+    try:
+        url_port = parts.port
+    except ValueError as exc:
+        raise intake.IntakeError("Gitea pull request URL has an invalid port") from exc
+    if url_port == 443:
+        url_port = None
+    if (parts.scheme != "https" or parts.hostname is None or parts.hostname.casefold() != expected_host
+            or url_port != expected_port or parts.username or parts.password
             or parts.query or parts.fragment or parts.path != f"/{full_name}/pulls/{number}"):
         raise intake.IntakeError("Gitea pull request URL does not match the configured forge and repository")
     action = _text(payload.get("action"), 64) or "event"
-    return payload, repository, pull_request, repository_id, full_name, url.strip(), action
+    return payload, repository, pull_request, repository_id, full_name, url, action, _event_time(payload, pull_request)
 
 
 def _state(pull_request: dict) -> str:
@@ -142,8 +188,8 @@ def record(source: str, event: str | None, body: bytes) -> dict:
     """Create or refresh the one triage card for a Gitea pull request."""
     if event != EVENT:
         raise intake.IntakeError(f"unsupported Gitea event: {event or 'missing'}")
-    payload, repository, pull_request, repository_id, full_name, url, action = _payload(body)
-    number = payload.get("number", pull_request.get("number"))
+    payload, repository, pull_request, repository_id, full_name, url, action, event_time = _payload(body)
+    number = payload["number"]
     external_id = f"{repository_id}#{number}"
     state = _state(pull_request)
     title = _text(pull_request.get("title"), 180) or "pull request"
@@ -154,26 +200,11 @@ def record(source: str, event: str | None, body: bytes) -> dict:
         f"```json\n{_safe_event_data(repository, pull_request, repository_id, full_name, number, action)}\n```")
     label = f"{full_name}#{number}: {title}"[:200]
 
-    with _RECORD_LOCK:
-        with opstore.connect() as db:
-            existing = db.execute(
-                "SELECT id, card_id FROM card_references "
-                "WHERE provider = 'gitea' AND kind = 'pull_request' AND external_id = ?",
-                (external_id,),
-            ).fetchone()
-        if existing:
-            board.update_reference(
-                _AUTHOR, existing["card_id"], existing["id"],
-                label=label, url=url, last_seen_state=f"{state} ({action})",
-            )
-            return board.get_card(existing["card_id"])
-
-        card = board.create_card(
-            _AUTHOR, card_title, card_body, state="todo",
-            next_action="Triage: decide whether this pull request is eligible for the approved merge workflow.",
-        )
-        board.add_reference(
-            _AUTHOR, card["id"], provider="gitea", kind="pull_request", external_id=external_id,
-            url=url, label=label, last_seen_state=f"{state} ({action})",
-        )
-        return board.get_card(card["id"])
+    card, _, _ = board.create_card_with_reference(
+        _AUTHOR, card_title, card_body,
+        next_action="Triage: decide whether this pull request is eligible for the approved merge workflow.",
+        provider="gitea", kind="pull_request", external_id=external_id,
+        url=url, label=label, last_seen_state=f"{state} ({action})",
+        last_seen_at=time.time(), external_event_at=event_time,
+    )
+    return card

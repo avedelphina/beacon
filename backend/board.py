@@ -342,6 +342,117 @@ _REFERENCE_FIELDS = ("provider", "kind", "external_id", "url", "label", "workflo
                      "last_seen_state", "last_seen_at")
 
 
+def create_card_with_reference(author: str, title: str, body: str, *,
+                               next_action: str, provider: str, kind: str, external_id: str,
+                               url: str, label: str, last_seen_state: str | None = None,
+                               last_seen_at: float | None = None,
+                               external_event_at: float | None = None) -> tuple[dict, int, bool]:
+    """Atomically create or refresh one source-owned card and reference.
+
+    ``card_reference_claims`` is the database-enforced mapping from an external
+    object to its Beacon card. ``BEGIN IMMEDIATE`` makes the lookup/create/update
+    sequence safe across worker processes, while the card and reference are
+    committed together so a failed reference insert cannot leave an orphan card.
+    """
+    title = _required(title, "title")
+    fields = _reference_fields(provider, kind, external_id, url, label, last_seen_state, last_seen_at, time.time())
+    now = time.time()
+    with opstore.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        claim = db.execute(
+            "SELECT c.card_id, c.reference_id, c.last_event_at, "
+            "r.url, r.label, r.last_seen_state, r.last_seen_at "
+            "FROM card_reference_claims c JOIN card_references r ON r.id = c.reference_id "
+            "WHERE c.provider = ? AND c.kind = ? AND c.external_id = ?",
+            (fields["provider"], fields["kind"], fields["external_id"]),
+        ).fetchone()
+        created = False
+        if claim is None:
+            existing_rows = db.execute(
+                "SELECT id, card_id, url, label, last_seen_state, last_seen_at FROM card_references "
+                "WHERE provider = ? AND kind = ? AND external_id = ? ORDER BY id",
+                (fields["provider"], fields["kind"], fields["external_id"]),
+            ).fetchall()
+            if len(existing_rows) > 1:
+                raise ValueError("multiple existing references claim this external object; resolve them before intake")
+            existing = existing_rows[0] if existing_rows else None
+            if existing is None:
+                card_id = int(db.execute(
+                    "INSERT INTO cards (title, body, state, next_action, links, created_by, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (title, body or "", "todo", _text(next_action), "[]", author, now, now),
+                ).lastrowid)
+                _event(db, card_id, author, "created", title)
+                reference_id = int(db.execute(
+                    "INSERT INTO card_references (card_id, provider, kind, external_id, url, label, "
+                    "last_seen_state, last_seen_at, created_by, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (card_id, fields["provider"], fields["kind"], fields["external_id"], fields["url"],
+                     fields["label"], fields["last_seen_state"], fields["last_seen_at"], author, now, now),
+                ).lastrowid)
+                _event(db, card_id, author, "reference", f"added {_describe_reference(fields)}")
+                db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (now, card_id))
+                created = True
+            else:
+                card_id, reference_id = int(existing["card_id"]), int(existing["id"])
+            db.execute(
+                "INSERT INTO card_reference_claims "
+                "(provider, kind, external_id, card_id, reference_id, created_at, last_event_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (fields["provider"], fields["kind"], fields["external_id"], card_id, reference_id, now,
+                 external_event_at),
+            )
+            if not created:
+                old = {"url": existing["url"], "label": existing["label"],
+                       "last_seen_state": existing["last_seen_state"], "last_seen_at": existing["last_seen_at"]}
+                refreshed = {name: fields[name] for name in old}
+                if refreshed != old:
+                    db.execute(
+                        "UPDATE card_references SET url = ?, label = ?, last_seen_state = ?, last_seen_at = ?, "
+                        "updated_at = ? WHERE id = ? AND card_id = ?",
+                        (fields["url"], fields["label"], fields["last_seen_state"], fields["last_seen_at"],
+                         now, reference_id, card_id),
+                    )
+                    changed = [name for name in ("url", "label", "last_seen_state") if old[name] != refreshed[name]]
+                    if changed:
+                        _event(db, card_id, author, "reference",
+                               f"refreshed {_describe_reference(fields)} ({', '.join(changed)})")
+                        db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (now, card_id))
+        else:
+            card_id, reference_id = int(claim["card_id"]), int(claim["reference_id"])
+            previous_event_at = claim["last_event_at"]
+            timestamp_missing = external_event_at is None
+            stale = (previous_event_at is not None and not timestamp_missing
+                     and external_event_at <= previous_event_at)
+            if not stale:
+                old = {"url": claim["url"], "label": claim["label"],
+                       "last_seen_state": claim["last_seen_state"], "last_seen_at": claim["last_seen_at"]}
+                refreshed = {name: fields[name] for name in old}
+                if previous_event_at is not None and timestamp_missing:
+                    # Without a forge timestamp, refresh descriptive metadata but keep
+                    # the last timestamp-ordered state. Receipt order cannot safely
+                    # distinguish a new state from a delayed older event.
+                    refreshed["last_seen_state"] = old["last_seen_state"]
+                changed = [name for name in old if old[name] != refreshed[name]]
+                if changed:
+                    db.execute(
+                        "UPDATE card_references SET url = ?, label = ?, last_seen_state = ?, last_seen_at = ?, "
+                        "updated_at = ? WHERE id = ? AND card_id = ?",
+                        (refreshed["url"], refreshed["label"], refreshed["last_seen_state"], refreshed["last_seen_at"],
+                         now, reference_id, card_id),
+                    )
+                    _event(db, card_id, author, "reference",
+                           f"refreshed {_describe_reference({**fields, **refreshed})} ({', '.join(changed)})")
+                    db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (now, card_id))
+                if external_event_at is not None:
+                    db.execute(
+                        "UPDATE card_reference_claims SET last_event_at = ? "
+                        "WHERE provider = ? AND kind = ? AND external_id = ?",
+                        (external_event_at, fields["provider"], fields["kind"], fields["external_id"]),
+                    )
+    return get_card(card_id), reference_id, created
+
+
 def add_reference(author: str, card_id: int, *, provider: str, kind: str, external_id: str, url: str,
                   label: str, workflow_id: int | None = None, last_seen_state: str | None = None,
                   last_seen_at: float | None = None, context_id: str | None = None) -> dict:
@@ -349,6 +460,7 @@ def add_reference(author: str, card_id: int, *, provider: str, kind: str, extern
     and the A2A context it was made under, like every other change. A hint state
     with no time is dated now: a hint without an age cannot be judged."""
     get_card(card_id)  # a missing card is "not found", before anything else is checked
+
     now = time.time()
     fields = _reference_fields(provider, kind, external_id, url, label, last_seen_state, last_seen_at, now)
     with opstore.connect() as db:
@@ -390,6 +502,25 @@ def update_reference(author: str, card_id: int, ref_id: int, *, context_id: str 
                                         merged["label"], merged["last_seen_state"], merged["last_seen_at"], now))
         if "workflow_id" in changes:
             _check_reference_workflow(db, card_id, merged["workflow_id"])
+        identity_changed = any(merged[name] != current[name] for name in ("provider", "kind", "external_id"))
+        claim = db.execute(
+            "SELECT provider, kind, external_id FROM card_reference_claims "
+            "WHERE card_id = ? AND reference_id = ?",
+            (card_id, ref_id),
+        ).fetchone()
+        if identity_changed and claim:
+            db.execute(
+                "DELETE FROM card_reference_claims WHERE provider = ? AND kind = ? AND external_id = ?",
+                (claim["provider"], claim["kind"], claim["external_id"]),
+            )
+        if identity_changed and merged["provider"] == "gitea" and merged["kind"] == "pull_request":
+            conflict = db.execute(
+                "SELECT card_id, reference_id FROM card_reference_claims "
+                "WHERE provider = 'gitea' AND kind = 'pull_request' AND external_id = ?",
+                (merged["external_id"],),
+            ).fetchone()
+            if conflict and conflict["reference_id"] != ref_id:
+                raise ValueError("a Gitea pull request is already claimed by another card")
         changed = [name for name in _REFERENCE_FIELDS if merged[name] != current[name]]
         if not changed:
             return current
@@ -399,6 +530,12 @@ def update_reference(author: str, card_id: int, ref_id: int, *, context_id: str 
                 " workflow_id = ?, last_seen_state = ?, last_seen_at = ?, updated_at = ? WHERE id = ?",
                 (merged["provider"], merged["kind"], merged["external_id"], merged["url"], merged["label"],
                  merged["workflow_id"], merged["last_seen_state"], merged["last_seen_at"], now, ref_id))
+            if identity_changed and merged["provider"] == "gitea" and merged["kind"] == "pull_request":
+                db.execute(
+                    "INSERT INTO card_reference_claims "
+                    "(provider, kind, external_id, card_id, reference_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (merged["provider"], merged["kind"], merged["external_id"], card_id, ref_id, now),
+                )
         except sqlite3.IntegrityError:
             raise ValueError("the card already has a reference with that provider, kind and external id") from None
         _event(db, card_id, author, "reference",
@@ -414,6 +551,7 @@ def remove_reference(author: str, card_id: int, ref_id: int, context_id: str | N
         if row is None:
             raise store.NotFound(f"reference {ref_id} not found on card {card_id}")
         removed = dict(row)
+        db.execute("DELETE FROM card_reference_claims WHERE card_id = ? AND reference_id = ?", (card_id, ref_id))
         db.execute("DELETE FROM card_references WHERE id = ?", (ref_id,))
         _event(db, card_id, author, "reference", f"removed {_describe_reference(removed)}", context_id)
         db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (time.time(), card_id))

@@ -18,7 +18,7 @@ import hmac
 import json
 import os
 import re
-import sqlite3
+import secrets
 import time
 from collections.abc import Callable
 
@@ -30,6 +30,7 @@ SECRET_ENV = "BEACON_INTAKE_SECRET"
 # only that one; the shared BEACON_INTAKE_SECRET serves the sources that have none.
 SOURCE_SECRET_PREFIX = "BEACON_INTAKE_SECRET_"
 RETENTION_SECONDS = 30 * 24 * 3600  # how long a delivery id is remembered, and a replay refused
+CLAIM_LEASE_SECONDS = 5 * 60
 SOURCE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 MAX_BYTES = 64 * 1024
 SHOWN = 8000  # what of the body the card carries; the rest is cut, and the card says so
@@ -53,6 +54,13 @@ class Duplicate(Exception):
     def __init__(self, card_id: int | None):
         super().__init__(f"delivery already received (card {card_id})")
         self.card_id = card_id
+
+
+class InProgress(Exception):
+    """A worker currently owns this delivery claim; retry after the lease expires."""
+
+    def __init__(self):
+        super().__init__("delivery is already being processed; retry later")
 
 
 def secret_for(source: str) -> str | None:
@@ -131,16 +139,28 @@ def agent_may_see(author: str, card: dict) -> bool:
 
 
 def delivery_key(delivery: str | None, body: bytes) -> str:
-    """What makes two requests the same delivery: the forge's own delivery id when it
-    sends one, else the body's hash (a replay of a captured request is byte for byte the
-    same, and its signature stays valid, so the signature alone cannot tell it from the first)."""
+    """What makes two generic requests the same delivery: the forge's own delivery id
+    when it sends one, else the body's hash. Generic callers intentionally keep their
+    existing delivery-id contract; source-specific adapters can opt into a stricter key."""
     if delivery and len(delivery) <= 200 and delivery.isprintable():
         return "id:" + delivery.strip()
     return "sha256:" + hashlib.sha256(body).hexdigest()
 
 
+def body_delivery_key(_delivery: str | None, body: bytes) -> str:
+    """Deduplicate a signed request by its body, independent of an unsigned header.
+
+    This is appropriate for a source whose signature covers the body but not its
+    delivery header: a captured valid request cannot become a new delivery merely by
+    changing that header.
+    """
+    return "sha256:" + hashlib.sha256(body).hexdigest()
+
+
 def receive(source: str, event: str | None, body: bytes, delivery: str | None = None,
-            recorder: Callable[[str, str | None, bytes], dict] = record) -> dict:
+            recorder: Callable[[str, str | None, bytes], dict] = record,
+            delivery_key_fn: Callable[[str | None, bytes], str] = delivery_key,
+            recover_incomplete: bool = False) -> dict:
     """Record a delivery once. A second delivery with the same key within the retention
     period raises Duplicate, so a replayed or retried request makes no second card.
 
@@ -148,23 +168,43 @@ def receive(source: str, event: str | None, body: bytes, delivery: str | None = 
     only after the delivery claim, and failed recording releases that claim so a corrected
     retry is not permanently suppressed.
     """
-    key, now = delivery_key(delivery, body), time.time()
+    key, now, token = delivery_key_fn(delivery, body), time.time(), secrets.token_hex(16)
     with opstore.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
         db.execute("DELETE FROM intake_deliveries WHERE received_at < ?", (now - RETENTION_SECONDS,))
-        try:
-            db.execute("INSERT INTO intake_deliveries (source, delivery_id, received_at) VALUES (?, ?, ?)",
-                       (source, key, now))
-        except sqlite3.IntegrityError:
-            row = db.execute("SELECT card_id FROM intake_deliveries WHERE source = ? AND delivery_id = ?",
-                             (source, key)).fetchone()
-            raise Duplicate(row["card_id"] if row else None) from None
+        row = db.execute(
+            "SELECT card_id, received_at FROM intake_deliveries WHERE source = ? AND delivery_id = ?",
+            (source, key),
+        ).fetchone()
+        if row is not None:
+            if row["card_id"] is not None:
+                raise Duplicate(row["card_id"])
+            if now - row["received_at"] < CLAIM_LEASE_SECONDS or not recover_incomplete:
+                raise InProgress()
+            db.execute(
+                "UPDATE intake_deliveries SET received_at = ?, claim_token = ?, card_id = NULL "
+                "WHERE source = ? AND delivery_id = ?",
+                (now, token, source, key),
+            )
+        else:
+            db.execute(
+                "INSERT INTO intake_deliveries (source, delivery_id, received_at, claim_token) "
+                "VALUES (?, ?, ?, ?)",
+                (source, key, now, token),
+            )
     try:
         card = recorder(source, event, body)
     except Exception:
         with opstore.connect() as db:  # nothing was recorded: a corrected retry must not be called a replay
-            db.execute("DELETE FROM intake_deliveries WHERE source = ? AND delivery_id = ?", (source, key))
+            db.execute("DELETE FROM intake_deliveries WHERE source = ? AND delivery_id = ? AND claim_token = ?",
+                       (source, key, token))
         raise
     with opstore.connect() as db:
-        db.execute("UPDATE intake_deliveries SET card_id = ? WHERE source = ? AND delivery_id = ?",
-                   (card["id"], source, key))
+        updated = db.execute(
+            "UPDATE intake_deliveries SET card_id = ?, claim_token = NULL "
+            "WHERE source = ? AND delivery_id = ? AND claim_token = ?",
+            (card["id"], source, key, token),
+        ).rowcount
+        if updated != 1:
+            raise InProgress()
     return card

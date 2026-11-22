@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import json
+import time
 
 import pytest
 
@@ -64,6 +65,31 @@ def test_a_delivery_is_forgotten_after_the_retention_period(client, shared):
         db.execute("UPDATE intake_deliveries SET received_at = ?", (1.0,))
     assert _post(client, "forge", shared, body).status_code == 202
     assert len(_cards()) == 2
+
+
+def test_incomplete_delivery_claim_is_retryable_then_recovered(client, shared):
+    body = b'{"n": "crashed"}'
+    with opstore.connect() as db:
+        db.execute(
+            "INSERT INTO intake_deliveries (source, delivery_id, received_at, claim_token) "
+            "VALUES (?, ?, ?, ?)",
+            ("forge", "id:crash-1", 1.0, "abandoned"),
+        )
+    assert _post(client, "forge", shared, body, **{"X-Gitea-Delivery": "crash-1"}).status_code == 202
+    assert len(_cards()) == 1
+    with opstore.connect() as db:
+        assert db.execute("SELECT count(*) FROM intake_deliveries WHERE claim_token IS NOT NULL").fetchone()[0] == 0
+
+
+def test_a_live_incomplete_claim_returns_retryable_conflict(client, shared):
+    body = b'{"n": "running"}'
+    first = _post(client, "forge", shared, body, **{"X-Gitea-Delivery": "live-1"})
+    assert first.status_code == 202
+    with opstore.connect() as db:
+        db.execute("UPDATE intake_deliveries SET card_id = NULL, received_at = ?", (time.time(),))
+        db.execute("UPDATE intake_deliveries SET claim_token = ?", ("active",))
+    response = _post(client, "forge", shared, body, **{"X-Gitea-Delivery": "live-1"})
+    assert response.status_code == 409
 
 
 def test_a_delivery_that_made_no_card_does_not_block_a_retry(client, shared):
