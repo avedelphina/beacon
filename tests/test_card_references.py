@@ -228,3 +228,14 @@ def test_a_member_reaches_references_only_on_cards_they_may_see(fleet):
         assert members.check(method, f"/api/board/cards/{mine['id']}{path}", "member@example.com") is None
         denied = members.check(method, f"/api/board/cards/{others['id']}{path}", "member@example.com")
         assert denied is not None and denied[0] == 404
+
+
+def test_the_board_list_carries_each_cards_references(client):
+    card, other = _card()["id"], _card("Other")["id"]
+    board.add_reference("beacon", card, **GITEA)
+    board.add_reference("beacon", card, **MANTIS)
+    listed = {c["id"]: c for c in client.get("/api/board").json()}
+    assert [(r["provider"], r["external_id"], r["url"]) for r in listed[card]["references"]] == [
+        ("gitea", "org/repo#15", GITEA["url"]), ("mantis", "337", MANTIS["url"])]
+    assert listed[other]["references"] == []
+    assert all("references" in c for c in board.list_cards())                 # the direct call carries them too

@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.21.0
+version: 1.22.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -246,6 +246,12 @@ only then.
   if there are several parts. Do not use tables or links: they are not drawn. Keep
   it under about 15 lines;
 - `expires_at` (optional): a Unix time. The default is 24 hours.
+- **A way to look at what you ask about.** The person who answers sees your request and its card, and
+  cannot see your repository, your PR or your ticket unless the card points at them. Before you ask,
+  make sure the card has a reference to the thing: `card_reference_add` with its `provider` (`gitea`,
+  `github`, `mantis`), `kind` (`pull_request`, `issue`, `ticket`), `external_id`, the full `url`, and a
+  `label`. The page shows these on the request. Do not rely on a URL or a PR number inside the summary:
+  that text is not linked, and a person is told not to follow links in it.
 - `consulted` (when you ask a person): before you ask `human` or a person's email, ask at least one
   peer you may call about the problem and your plan, and pass what you learned:
   `[{"agent": "<peer>", "said": "<what they answered>", "context_id": "<thread>"}]`. Peers may

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **A workflow request shows where to look.** Under each request the page lists what its card points at
+  outside Beacon (its references, then its links, each opening in a new tab), and an "About this card"
+  section with the card's state, next action, done-when and description, so the person answering
+  does not have to open the board. A card that points at nothing says so, and asks for the PR or ticket
+  to be added. The board list now carries each card's references. The agent skill (1.22.0) and the
+  `workflow_create` description tell agents to add the PR or ticket to the card before asking.
+
 ### Added
 
 - **Observe-only Gitea pull-request intake.** Beacon can accept native Gitea webhook
