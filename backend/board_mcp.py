@@ -311,7 +311,9 @@ def build() -> MCPServer:
         the problem and your plan, and pass what you learned as consulted: [{"agent": "<peer>",
         "said": "<what they answered>", "context_id": "<thread, optional>"}]. If a peer cannot help
         (a plain yes/no, nobody to ask), say why in consult_skipped. A request to a person with neither
-        is flagged for them as "no peer consulted"; it is not refused. summary is Markdown:
+        is flagged for them as "no peer consulted"; it is not refused. The person sees the card the request is
+        on, but only what it points at: before you ask about a PR, issue or ticket, add it to the card with
+        card_reference_add (the full url), because links in the summary are not shown as links. summary is Markdown:
         its first line says what you need, then the short plan. kind: decision (the
         responder picks one of options), question (the responder writes a free-text answer;
         no options), handoff (ask an agent to take the card over: no options; when it approves,

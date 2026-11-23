@@ -1341,6 +1341,22 @@ function renderWorkflowItems(items) {
   items = sortWorkflows(items);
   list.innerHTML = items.map((w) => {
     const card = workflowCards[w.card_id];
+    // Where to look, from the card: what an agent pointed it at, outside Beacon. The state on a reference is
+    // what whoever added it typed, so it is worded as a claim. The request's own text is never linked.
+    const sources = card ? [
+      ...(card.references || []).map((r) => `<li><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer"><span class="chip">${esc(r.provider)}</span>
+        ${esc(r.kind.replace(/_/g, " "))} ${esc(r.label)} <code>${esc(r.external_id)}</code></a>${
+        r.last_seen_state ? ` <span class="hint">last seen “${esc(r.last_seen_state)}”, typed ${esc(workflowWhen(r.last_seen_at))}; not checked by Beacon</span>` : ""}</li>`),
+      ...(card.links || []).map((l) => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label || l.url)}</a></li>`),
+    ] : [];
+    const aboutCard = card ? `<details class="wf-card-more"><summary>About this card</summary>
+        <dl class="card-plan">
+          <dt>State</dt><dd>${esc(card.state)} · ${esc(card.assignee ?? "unassigned")}${card.project ? ` · ${esc(card.project)}` : ""} · made by ${esc(card.created_by)}</dd>
+          ${card.next_action ? `<dt>Next action</dt><dd>${esc(card.next_action)}</dd>` : ""}
+          ${card.done_when ? `<dt>Done when</dt><dd>${esc(card.done_when)}</dd>` : ""}
+        </dl>
+        ${card.body ? `<p class="card-body">${esc(card.body)}</p>` : '<p class="hint">The card has no description.</p>'}
+      </details>` : "";
     const pending = w.state === "pending";
     const isQuestion = w.kind === "question";
     const isDecision = w.kind === "decision";
@@ -1386,6 +1402,9 @@ function renderWorkflowItems(items) {
       <p class="wf-from">From <strong>${esc(w.requester)}</strong> to <strong>${esc(responder)}</strong> · expires ${esc(workflowWhen(w.expires_at))}</p>
       <p class="wf-card">On card <a href="#" data-open-card="${esc(w.card_id)}">#${esc(w.card_id)}${card ? ` ${esc(card.title)}` : ""}</a>${
         card ? ` <span class="chip">${esc(card.state)}</span>` : ""}</p>
+      ${card ? (sources.length ? `<ul class="wf-sources">${sources.join("")}</ul>`
+        : '<p class="hint">The card links to nothing outside Beacon. Ask the requester to add the PR or ticket to it.</p>') : ""}
+      ${aboutCard}
       <div class="wf-plan">${renderMarkdown(w.summary)}</div>
       ${consulted}
       ${w.answered_by ? `<p class="hint">Answered by <strong>${esc(w.answered_by)}</strong>, an AI client, for ${esc(w.on_behalf_of)}.</p>` : ""}

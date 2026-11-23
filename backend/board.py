@@ -69,7 +69,13 @@ def list_cards(project: str | None = None, assignee: str | None = None, state: s
         open_deps = {r["card_id"]: r["n"] for r in db.execute(
             "SELECT d.card_id, count(*) AS n FROM card_dependencies d JOIN cards c ON c.id = d.depends_on_id"
             " WHERE c.state != 'done' GROUP BY d.card_id")}
-    return [_card(row) | {"delivery": delivery.get(row["id"]), "blocked_by_count": open_deps.get(row["id"], 0)}
+        # What each card points at outside Beacon, so a page that shows a card (a workflow request is
+        # about one) can show where to look without opening it.
+        refs: dict[int, list[dict]] = {}
+        for r in db.execute("SELECT * FROM card_references ORDER BY id"):
+            refs.setdefault(r["card_id"], []).append(dict(r))
+    return [_card(row) | {"delivery": delivery.get(row["id"]), "blocked_by_count": open_deps.get(row["id"], 0),
+                          "references": refs.get(row["id"], [])}
             for row in rows]
 
 
