@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.39.2] — 2026-11-23
+
 ### Changed
 
 - **A workflow request shows where to look.** Under each request the page lists what its card points at
