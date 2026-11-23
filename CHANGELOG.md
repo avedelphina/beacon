@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Observe-only Gitea pull-request intake.** Beacon can accept native Gitea webhook
+  signatures for an explicit repository-ID allowlist, create or refresh operator-only
+  triage cards, and retain a structured PR reference. The first integration slice has
+  no Gitea API client, agent assignment, workflow approval, or merge capability.
+
 ## [0.39.1] — 2026-11-17
 
 ### Changed

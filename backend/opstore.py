@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS intake_deliveries (
     delivery_id  TEXT NOT NULL,
     received_at  REAL NOT NULL,
     card_id      INTEGER REFERENCES cards (id),
+    claim_token  TEXT,
     PRIMARY KEY (source, delivery_id)
 );
 
@@ -167,6 +168,23 @@ CREATE TABLE IF NOT EXISTS card_references (
     UNIQUE (card_id, provider, kind, external_id)
 );
 CREATE INDEX IF NOT EXISTS card_references_by_card ON card_references (card_id, id);
+
+-- A source-specific adapter can claim one external object while creating its card and
+-- reference in the same transaction. This is the cross-process uniqueness boundary;
+-- the ordinary card-reference uniqueness remains deliberately card-local for callers
+-- that use references as free-form pointers.
+CREATE TABLE IF NOT EXISTS card_reference_claims (
+    provider       TEXT NOT NULL,
+    kind           TEXT NOT NULL,
+    external_id    TEXT NOT NULL,
+    card_id        INTEGER NOT NULL REFERENCES cards (id),
+    reference_id   INTEGER NOT NULL REFERENCES card_references (id),
+    created_at     REAL NOT NULL,
+    last_event_at  REAL,
+    PRIMARY KEY (provider, kind, external_id),
+    UNIQUE (card_id, reference_id)
+);
+CREATE INDEX IF NOT EXISTS card_reference_claims_by_card ON card_reference_claims (card_id);
 
 CREATE TABLE IF NOT EXISTS chat_exposure (
     agent       TEXT PRIMARY KEY,
@@ -317,3 +335,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(card_events)")}
     if "notice_id" not in columns:
         conn.execute("ALTER TABLE card_events ADD COLUMN notice_id INTEGER REFERENCES mailbox (id)")
+    delivery_columns = {row[1] for row in conn.execute("PRAGMA table_info(intake_deliveries)")}
+    if delivery_columns and "claim_token" not in delivery_columns:
+        conn.execute("ALTER TABLE intake_deliveries ADD COLUMN claim_token TEXT")
+    claim_columns = {row[1] for row in conn.execute("PRAGMA table_info(card_reference_claims)")}
+    if claim_columns and "last_event_at" not in claim_columns:
+        conn.execute("ALTER TABLE card_reference_claims ADD COLUMN last_event_at REAL")

@@ -835,6 +835,15 @@ for a person to triage. The card is fenced and labelled as someone else's text. 
 on the event, and no agent sees it unless the operators allow that (the Board tab's intake
 visibility setting). A body larger than 64 KiB is refused.
 
+**Native Gitea pull-request intake.** `POST /intake/gitea` is the bounded Gitea-specific
+route. It requires `X-Gitea-Signature` containing the raw lowercase HMAC-SHA256 digest,
+`X-Gitea-Event: pull_request`, `BEACON_INTAKE_SECRET_GITEA`, and the numeric repository ID
+in `BEACON_GITEA_REPOSITORY_IDS`. The URL must match `BEACON_GITEA_BASE_URL` (default
+`https://git.ocean`) and the event's repository/PR number. A valid event creates or refreshes
+one unassigned operator-only triage card with a `gitea/pull_request` reference. It does not
+call Gitea, assign an agent, create an approval, or merge anything. The route is disabled
+with `404` until both the secret and a non-empty repository allowlist are configured.
+
 - **Secrets, one per source.** Set `BEACON_INTAKE_SECRET_<SOURCE>` (upper case, `-` as `_`)
   for each source, so a valid signature for one source cannot stand for another. A source with
   its own secret accepts only that one. `BEACON_INTAKE_SECRET` is a shared secret for sources

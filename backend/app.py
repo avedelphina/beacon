@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import audit, auth, availability, board, bus, clients, cron_store, fleet, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow
+from . import audit, auth, availability, board, bus, clients, cron_store, fleet, gitea_intake, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, AgentClient, CronJob, Host
@@ -880,6 +880,42 @@ def set_intake_visibility(body: IntakeVisibilityRequest, request: Request) -> di
     return intake.set_visibility(_board_author(request), members=body.members, agents=body.agents)
 
 
+@app.post("/intake/gitea")
+async def gitea_intake_event(request: Request):
+    """Observe-only Gitea pull-request webhook intake.
+
+    This route is deliberately separate from generic intake: it accepts only
+    Gitea's native signature and only repository IDs explicitly allowlisted in
+    BEACON_GITEA_REPOSITORY_IDS. A valid event creates or refreshes a triage
+    card; it never calls Gitea or an agent.
+    """
+    if not gitea_intake.enabled():
+        raise HTTPException(404)
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > intake.MAX_BYTES:
+            return JSONResponse({"detail": "event is too large"}, status_code=413)
+        body.extend(chunk)
+    body = bytes(body)
+    try:
+        gitea_intake.verify(body, request.headers.get("x-gitea-signature"))
+        card = await run_in_threadpool(
+            intake.receive, "gitea", request.headers.get("x-gitea-event"), body,
+            request.headers.get("x-gitea-delivery"), gitea_intake.record,
+            delivery_key_fn=intake.body_delivery_key, recover_incomplete=True)
+    except intake.IntakeRefused as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=401)
+    except intake.IntakeError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    except intake.InProgress as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+    except intake.Duplicate as exc:
+        return JSONResponse({"card_id": exc.card_id, "duplicate": True}, status_code=200)
+    return JSONResponse({"card_id": card["id"]}, status_code=202)
+
+
 @app.post("/intake/{source}")
 async def intake_event(source: str, request: Request):
     """An outside event, signed with BEACON_INTAKE_SECRET, becomes a triage card (backend/intake.py).
@@ -899,6 +935,8 @@ async def intake_event(source: str, request: Request):
         return JSONResponse({"detail": str(exc)}, status_code=401)
     except intake.IntakeError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=400)
+    except intake.InProgress as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=409)
     except intake.Duplicate as exc:  # a retry or a replay: acknowledged, and nothing more is made
         return JSONResponse({"card_id": exc.card_id, "duplicate": True}, status_code=200)
     return JSONResponse({"card_id": card["id"]}, status_code=202)
