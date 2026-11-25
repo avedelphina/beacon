@@ -30,7 +30,7 @@ def _ask(card, requester="asker", responder="human", kind="decision", **extra):
     options = ["a", "b"] if kind == "decision" else []
     binding = workflow.plan_binding({"card": card, "kind": kind})
     return workflow.create(card_id=card, kind=kind, requester=requester, eligible_responder=responder,
-                           capability="ask", tier=1, title="Which?", summary="Pick", options=options, target={},
+                           capability="ask", clearance=1, title="Which?", summary="Pick", options=options, target={},
                            **extra, **binding)
 
 
@@ -94,7 +94,7 @@ def test_the_person_is_told_in_the_email_too(crew):
 
 def test_rest_and_mcp_take_it(crew, client, monkeypatch):
     posted = client.post(f"/api/board/cards/{crew}/workflows", json={
-        "kind": "decision", "eligible_responder": "human", "capability": "ask", "tier": 1, "title": "Which?",
+        "kind": "decision", "eligible_responder": "human", "capability": "ask", "clearance": 1, "title": "Which?",
         "summary": "Pick", "options": ["a"], "plan_revision": "r", "plan_hash": "h",
         "consulted": [{"agent": "peer", "said": "go"}], "consult_skipped": None})
     assert posted.status_code == 200 and posted.json()["consulted"][0]["agent"] == "peer"
@@ -102,7 +102,7 @@ def test_rest_and_mcp_take_it(crew, client, monkeypatch):
     monkeypatch.setattr(board_mcp, "author_for", lambda token: "asker")
     ctx = SimpleNamespace(headers={"authorization": "Bearer t"})
     create = board_mcp.build()._tool_manager.get_tool("workflow_create").fn
-    ask = dict(ctx=ctx, card_id=crew, kind="decision", eligible_responder="human", capability="ask", tier=1,
+    ask = dict(ctx=ctx, card_id=crew, kind="decision", eligible_responder="human", capability="ask", clearance=1,
                title="Which?", summary="Pick", options=["a"])
     assert create(**ask)["consult_flag"] == "missing"
     assert create(**ask, consulted=[{"agent": "peer", "said": "go"}])["consult_flag"] is None
@@ -115,11 +115,11 @@ def test_requests_from_before_this_field_get_it(fleet, monkeypatch, tmp_path):
     with sqlite3.connect(tmp_path / "old" / "beacon.db") as db:
         db.execute("CREATE TABLE workflow_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, card_id INTEGER NOT NULL,"
                    " kind TEXT NOT NULL, state TEXT NOT NULL, requester TEXT NOT NULL, eligible_responder TEXT NOT NULL,"
-                   " capability TEXT NOT NULL, tier INTEGER NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL,"
+                   " capability TEXT NOT NULL, clearance INTEGER NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL,"
                    " options_json TEXT NOT NULL DEFAULT '[]', response_json TEXT, target_json TEXT NOT NULL DEFAULT '{}',"
                    " plan_revision TEXT NOT NULL, plan_hash TEXT NOT NULL, expires_at REAL NOT NULL,"
                    " created_at REAL NOT NULL, updated_at REAL NOT NULL, responded_at REAL)")
-        db.execute("INSERT INTO workflow_requests (card_id, kind, state, requester, eligible_responder, capability, tier,"
+        db.execute("INSERT INTO workflow_requests (card_id, kind, state, requester, eligible_responder, capability, clearance,"
                    " title, summary, plan_revision, plan_hash, expires_at, created_at, updated_at)"
                    " VALUES (1, 'decision', 'pending', 'a', 'human', 'ask', 1, 't', 's', 'r', 'h', 9e9, 1, 1)")
     old = workflow.get(1)

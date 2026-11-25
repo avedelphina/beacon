@@ -72,8 +72,8 @@
         <button class="btn" id="add-client" type="button">+ Add my client</button>
       </div>
       <p class="hint">Your own Claude Code, Codex or other MCP client, with an identity and a token of its own, so what it does is
-      recorded under its name. It reads the requests you can read and answers them for you up to the tier you choose
-      (an independent agent review, never tier 4 or 5), and you are told what it answered. It is an agent, not you:
+      recorded under its name. It reads the requests you can read and answers them for you up to the clearance you choose
+      (an independent agent review, never CL4 or 5), and you are told what it answered. It is an agent, not you:
       it is never called or given cards. A token is shown once, when you make it; revoke one here the moment it leaks.</p>
       <div class="table-wrap">
         <table>
@@ -492,16 +492,16 @@
   <form class="modal" id="client-form">
     <h2>Add my client</h2>
     <p class="hint">Makes an identity bound to you (<span id="client-person">you</span>) and its first token.
-    You can have one per kind. It acts for you only, and never above the tier you choose here, at most T3.</p>
+    You can have one per kind. It acts for you only, and never above the clearance you choose here, at most CL3.</p>
     <div class="field-row">
       <label>Which client <select name="kind">
         <option value="claude">Claude Code (claude-…)</option>
         <option value="codex">Codex (codex-…)</option>
         <option value="client">Another MCP client (client-…)</option>
       </select></label>
-      <label>May answer up to <select name="max_tier">
-        <option value="3" selected>T3: independent review</option><option value="2">T2</option>
-        <option value="1">T1</option><option value="0">T0</option>
+      <label>May answer up to <select name="max_clearance">
+        <option value="3" selected>CL3: independent review</option><option value="2">CL2</option>
+        <option value="1">CL1</option><option value="0">CL0</option>
       </select></label>
     </div>
     <label>Label <span class="hint">(which machine or install; for you to tell tokens apart)</span><input name="label" placeholder="laptop"></label>

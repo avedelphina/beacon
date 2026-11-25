@@ -91,9 +91,9 @@ def _is_responder(actor: str, eligible_responder: str) -> bool:
 
 
 def _delegate(actor: str) -> tuple[str, int] | None:
-    """(the operator's email, the highest tier it may answer) when `actor` is a client agent acting for an
+    """(the operator's email, the highest clearance it may answer) when `actor` is a client agent acting for an
     operator who still is one, and is switched on. A client reads what its operator reads and answers what
-    its operator may hand it, never tier 4 or 5 (schemas.AgentClient). Looked up on every call, so turning a
+    its operator may hand it, never CL4 or 5 (schemas.AgentClient). Looked up on every call, so turning a
     client off, or removing the operator, takes effect at once."""
     try:
         agent = store.get_agent(actor)
@@ -105,7 +105,7 @@ def _delegate(actor: str) -> tuple[str, int] | None:
     from . import auth  # not at import: auth reads its settings when it loads
     if auth.role_for_email(client.acts_for) != "operator":
         return None
-    return client.acts_for, min(client.max_tier, 3)
+    return client.acts_for, min(client.max_clearance, 3)
 
 
 def _delegate_note(request: dict, actor: str, delegate: tuple[str, int]) -> dict:
@@ -117,10 +117,10 @@ def _delegate_note(request: dict, actor: str, delegate: tuple[str, int]) -> dict
         why = f"it is {request['state']}"
     elif request["require_human"]:
         why = "it was sent to a person: only a person in the web page can answer it"
-    elif request["tier"] >= 4:
-        why = "tier 4 and above need your operator in the web page: tell them, do not wait for it"
-    elif request["tier"] > ceiling:
-        why = f"it is above this client's ceiling (T{ceiling})"
+    elif request["clearance"] >= 4:
+        why = "CL4 and above need your operator in the web page: tell them, do not wait for it"
+    elif request["clearance"] > ceiling:
+        why = f"it is above this client's ceiling (CL{ceiling})"
     elif request["requester"].casefold() in (actor.casefold(), email):
         why = f"it was made by {request['requester']}: an independent reviewer must answer it"
     elif request["eligible_responder"].casefold() not in ("human", email):
@@ -277,14 +277,14 @@ def _validate_kind(kind: str) -> str:
     return kind
 
 
-def validate_kind_for_tier(kind: str, tier: int) -> None:
-    """Keep the request type aligned with the oversight required by its tier."""
+def validate_kind_for_clearance(kind: str, clearance: int) -> None:
+    """Keep the request type aligned with the oversight required by its clearance."""
     _validate_kind(kind)
-    if not isinstance(tier, int) or tier < 0 or tier > 5:
-        raise WorkflowError("tier must be an integer from 0 to 5")
-    required = "approval" if tier >= 4 else "review" if tier == 3 else None
+    if not isinstance(clearance, int) or clearance < 0 or clearance > 5:
+        raise WorkflowError("clearance must be an integer from 0 to 5")
+    required = "approval" if clearance >= 4 else "review" if clearance == 3 else None
     if required and kind != required:
-        raise WorkflowError(f"tier T{tier} actions require a {required} request")
+        raise WorkflowError(f"CL{clearance} actions require a {required} request")
 
 
 def _eligible(request: dict, actor: str, human: bool) -> bool:
@@ -294,23 +294,23 @@ def _eligible(request: dict, actor: str, human: bool) -> bool:
     if request["require_human"]:
         # Sent to a person: only a person in the browser answers. The named person if it names one;
         # otherwise (an agent, or any operator) any operator, since the agent it named may not.
-        if not human or (request["tier"] >= 3 and actor.casefold() == request["requester"].casefold()):
+        if not human or (request["clearance"] >= 3 and actor.casefold() == request["requester"].casefold()):
             return False
         return actor.casefold() == eligible_responder.casefold() if "@" in eligible_responder else True
     # `human` is an eligibility sentinel, never an agent identity. A browser
     # session is required even if an untrusted caller uses the same string.
     if eligible_responder == "human":
-        return human and not (request["tier"] >= 3 and actor == request["requester"])
+        return human and not (request["clearance"] >= 3 and actor == request["requester"])
     if _is_responder(actor, eligible_responder):
-        return not (request["tier"] >= 3 and actor.casefold() == request["requester"].casefold())
+        return not (request["clearance"] >= 3 and actor.casefold() == request["requester"].casefold())
     return False
 
 
-def _validate_requester_responder(requester: str, eligible_responder: str, tier: int) -> None:
+def _validate_requester_responder(requester: str, eligible_responder: str, clearance: int) -> None:
     # A review/approval is an independent control. Beacon may create a request,
-    # but the requester cannot satisfy its own T3+ gate.
-    if tier >= 3 and requester == eligible_responder:
-        raise WorkflowError("T3+ workflow requester and responder must be different actors")
+    # but the requester cannot satisfy its own CL3+ gate.
+    if clearance >= 3 and requester == eligible_responder:
+        raise WorkflowError("CL3+ workflow requester and responder must be different actors")
 
 
 def known_people() -> set[str]:
@@ -361,7 +361,7 @@ def validate_participants(requester: str, eligible_responder: str) -> None:
 
 
 def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
-           capability: str, tier: int, title: str, summary: str,
+           capability: str, clearance: int, title: str, summary: str,
            options: list[str] | None, target: dict[str, Any] | None,
            plan_revision: str, plan_hash: str, expires_at: float | None = None,
            now: float | None = None, context_id: str | None = None,
@@ -375,10 +375,10 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
         eligible_responder = eligible_responder.casefold()
     if not isinstance(capability, str) or not capability.strip():
         raise WorkflowError("capability must not be empty")
-    if not isinstance(tier, int) or tier < 0 or tier > 5:
-        raise WorkflowError("tier must be an integer from 0 to 5")
-    validate_kind_for_tier(kind, tier)
-    _validate_requester_responder(requester, eligible_responder, tier)
+    if not isinstance(clearance, int) or clearance < 0 or clearance > 5:
+        raise WorkflowError("clearance must be an integer from 0 to 5")
+    validate_kind_for_clearance(kind, clearance)
+    _validate_requester_responder(requester, eligible_responder, clearance)
     validate_participants(requester, eligible_responder)
     if not isinstance(title, str) or not title.strip():
         raise WorkflowError("title must not be empty")
@@ -412,16 +412,16 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
         if db.execute("SELECT 1 FROM cards WHERE id = ?", (card_id,)).fetchone() is None:
             raise WorkflowNotFound(f"card {card_id} not found")
         request_id = db.execute(
-            "INSERT INTO workflow_requests (card_id, kind, state, requester, eligible_responder, capability, tier, "
+            "INSERT INTO workflow_requests (card_id, kind, state, requester, eligible_responder, capability, clearance, "
             "title, summary, options_json, target_json, plan_revision, plan_hash, expires_at, created_at, updated_at,"
             " consulted_json, consult_skipped, consult_flag) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (card_id, kind, "pending", requester, eligible_responder, capability.strip(), tier, title.strip(), summary.strip(),
+            (card_id, kind, "pending", requester, eligible_responder, capability.strip(), clearance, title.strip(), summary.strip(),
              json_text(options), json_text(target), plan_revision.strip(), plan_hash.strip(), expires_at, now, now,
              json_text(consulted), consult_skipped, flag),
         ).lastrowid
         _event(db, request_id, requester, "created", None, "pending", {
-            "kind": kind, "capability": capability.strip(), "tier": tier,
+            "kind": kind, "capability": capability.strip(), "clearance": clearance,
             "consulted": [c["agent"] for c in consulted], "consult_skipped": consult_skipped, "consult_flag": flag,
         }, context_id)
     created = get(request_id)
@@ -500,16 +500,16 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
         if request["require_human"] and not human:
             raise HumanApprovalRequired(f"workflow request {request_id} was sent to a person: only a person in the "
                                         f"web page may answer it ({request['escalated_reason']})")
-        if delegate is not None and request["tier"] >= 4 and _visible(request, actor, False):
+        if delegate is not None and request["clearance"] >= 4 and _visible(request, actor, False):
             # Not for a client to answer, and not for it to leave unmentioned: the operator is told now.
             _tell(notify.client_needs_person, request, actor, delegate[0])
-            raise HumanApprovalRequired(f"workflow request {request_id} is tier {request['tier']}: only a person in the "
+            raise HumanApprovalRequired(f"workflow request {request_id} is clearance {request['clearance']}: only a person in the "
                                         f"web page may answer it. {delegate[0]} has been told")
         if not _eligible(request, actor, human):
             why = f": {_delegate_note(request, actor, delegate)['why_not']}" if delegate is not None else ""
             raise UnauthorizedResponder(f"{actor} is not eligible to respond to workflow request {request_id}{why}")
-        if request["tier"] >= 4 and not human:
-            raise HumanApprovalRequired("T4/T5 workflow responses require a human browser session")
+        if request["clearance"] >= 4 and not human:
+            raise HumanApprovalRequired("CL4/CL5 workflow responses require a human browser session")
         if plan_revision != request["plan_revision"] or plan_hash != request["plan_hash"]:
             now = time.time()
             db.execute("UPDATE workflow_requests SET state = 'stale', updated_at = ? WHERE id = ?", (now, request_id))
@@ -593,11 +593,11 @@ def _hand_over(db, request: dict, actor: str, context_id: str | None) -> None:
 
 
 def escalate(request_id: int, *, actor: str, human: bool, reason: str, context_id: str | None = None) -> dict:
-    """Send a pending request to a person. A tier belongs to the capability (a T3 action stays T3 when
-    Beacon runs it), so a request cannot become a T4 one; this is the one-way step instead. Whoever may
+    """Send a pending request to a person. A clearance belongs to the capability (a CL3 action stays CL3 when
+    Beacon runs it), so a request cannot become a CL4 one; this is the one-way step instead. Whoever may
     answer it, an agent reviewing it included, can say "I am not sure, a person should look at this".
-    The request keeps its plan binding and tier, and from then on only a person in the browser may
-    answer it. Nothing clears the flag but that person's answer. T4 and T5 requests already need one."""
+    The request keeps its plan binding and clearance, and from then on only a person in the browser may
+    answer it. Nothing clears the flag but that person's answer. CL4 and CL5 requests already need one."""
     actor = _validate_actor(actor)
     if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 300:
         raise WorkflowError("say why a person should look at it, in at most 300 characters")
@@ -610,8 +610,8 @@ def escalate(request_id: int, *, actor: str, human: bool, reason: str, context_i
         request = _decode(row)
         if request["state"] != "pending":
             raise WorkflowError(f"workflow request {request_id} is {request['state']}")
-        if request["tier"] >= 4:
-            raise WorkflowError("T4 and T5 requests already need a person in the web page")
+        if request["clearance"] >= 4:
+            raise WorkflowError("CL4 and CL5 requests already need a person in the web page")
         if request["require_human"]:
             return get(request_id)  # already sent to a person: nothing to add, nothing to record
         if not _eligible(request, actor, human):
@@ -686,16 +686,16 @@ def revise(request_id: int, *, actor: str, plan_revision: str, plan_hash: str,
     return revised
 
 
-def authorize(*, request_id: int | None, capability: str, tier: int, actor: str,
+def authorize(*, request_id: int | None, capability: str, clearance: int, actor: str,
                human: bool, target: dict[str, Any], plan_revision: str,
                plan_hash: str) -> dict | None:
     """Atomically claim an approved, exact-bound request for one execution."""
-    if tier < 3:
+    if clearance < 3:
         return None
     actor = _validate_actor(actor)
     if request_id is None:
         raise WorkflowError(
-            f"tier T{tier} execution requires an approved workflow request; "
+            f"CL{clearance} execution requires an approved workflow request; "
             f"create one with plan_revision={plan_revision!r} and plan_hash={plan_hash!r}"
         )
     with opstore.connect() as db:
@@ -714,8 +714,8 @@ def authorize(*, request_id: int | None, capability: str, tier: int, actor: str,
             if request["state"] == "expired":
                 db.commit()
             raise WorkflowError(f"workflow request {request_id} is {request['state']}, not approved")
-        if request["capability"] != capability or request["tier"] != tier:
-            raise WorkflowError("workflow request capability or tier does not match the action")
+        if request["capability"] != capability or request["clearance"] != clearance:
+            raise WorkflowError("workflow request capability or clearance does not match the action")
         if request["target"] != target:
             now = time.time()
             changed = db.execute("UPDATE workflow_requests SET state = 'stale', updated_at = ? WHERE id = ? AND state = 'approved'", (now, request_id))
@@ -728,8 +728,8 @@ def authorize(*, request_id: int | None, capability: str, tier: int, actor: str,
             if changed.rowcount == 1:
                 _event(db, request_id, actor, "state_changed", "approved", "stale", {"reason": "plan changed"})
             raise StalePlan("approved workflow request is stale for the current plan")
-        if tier >= 4 and not human:
-            raise HumanApprovalRequired("T4/T5 actions require a human browser session; MCP callers cannot execute them")
+        if clearance >= 4 and not human:
+            raise HumanApprovalRequired("CL4/CL5 actions require a human browser session; MCP callers cannot execute them")
         now = time.time()
         claimed = db.execute(
             "UPDATE workflow_requests SET state = 'claimed', updated_at = ? WHERE id = ? AND state = 'approved'",
@@ -738,7 +738,7 @@ def authorize(*, request_id: int | None, capability: str, tier: int, actor: str,
         if claimed.rowcount != 1:
             raise WorkflowError(f"workflow request {request_id} was already claimed")
         _event(db, request_id, actor, "state_changed", "approved", "claimed", {
-            "capability": capability, "tier": tier, "plan_revision": plan_revision, "plan_hash": plan_hash,
+            "capability": capability, "clearance": clearance, "plan_revision": plan_revision, "plan_hash": plan_hash,
         })
         request["state"] = "claimed"
     return request
@@ -746,7 +746,7 @@ def authorize(*, request_id: int | None, capability: str, tier: int, actor: str,
 
 def claim_approved(request_id: int, *, actor: str, capability: str) -> dict:
     """Claim a person-approved request for its own requester, with no browser
-    session at claim time (authorize() wants one for T4). Safe only for a
+    session at claim time (authorize() wants one for CL4). Safe only for a
     capability whose result goes to the requester and does nothing until a
     person said yes: respond() already made that yes a human browser session,
     and the target is what that person saw, so it is read from the request."""
@@ -759,7 +759,7 @@ def claim_approved(request_id: int, *, actor: str, capability: str) -> dict:
         request = _decode(row)
         if request["requester"] != actor:
             raise UnauthorizedWorkflowAccess(f"{actor} cannot claim workflow request {request_id}")
-        if request["capability"] != capability or request["tier"] != 4 or request["eligible_responder"] != "human":
+        if request["capability"] != capability or request["clearance"] != 4 or request["eligible_responder"] != "human":
             raise WorkflowError(f"workflow request {request_id} is not a person-approved {capability} request")
         if request["state"] != "approved":
             if request["state"] == "expired":

@@ -99,7 +99,7 @@ def test_mcp_workflow_tools_forward_requests(mcp_server, monkeypatch):
             "action": "approved", "response": None, "plan_revision": "desired:x", "plan_hash": "hash",
         }}),
         ("post", "/api/board/cards/3/workflows", {"json": {
-            "kind": "review", "eligible_responder": "human", "capability": "push_config", "tier": 3,
+            "kind": "review", "eligible_responder": "human", "capability": "push_config", "clearance": 3,
             "title": "Review", "summary": "Exact plan", "plan_revision": "desired:x", "plan_hash": "hash",
         }}),
     ]

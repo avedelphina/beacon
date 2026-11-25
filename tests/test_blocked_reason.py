@@ -36,7 +36,7 @@ def crew(fleet, monkeypatch):
 def _request(card_id):
     binding = workflow.plan_binding({"card": card_id})
     return workflow.create(card_id=card_id, kind="decision", requester="beacon", eligible_responder="beacon",
-                           capability="ask", tier=1, title="Pick", summary="Pick one", options=["a"], target={}, **binding), binding
+                           capability="ask", clearance=1, title="Pick", summary="Pick one", options=["a"], target={}, **binding), binding
 
 
 def _quiet(card_id, at=0.0):

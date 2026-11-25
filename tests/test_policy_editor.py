@@ -62,7 +62,7 @@ def test_save_needs_confirmation_then_writes_with_history(client, fleet3):
     request = {"text": FAMILIES, "base_hash": _hash(client)}
 
     asked = client.put("/api/policy", json={**request, "confirm": False}).json()
-    assert asked["would_run"] is True and asked["tier"] == "T4"
+    assert asked["would_run"] is True and asked["clearance"] == "CL4"
     assert "4 removed" in asked["detail"] and asked["restarts"] == ["a-1", "a-2", "b-1"]
     assert policy.read_text() == ALLOW_ALL  # still not saved
 

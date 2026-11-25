@@ -260,7 +260,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if is_mcp_authorization(request.headers.get("authorization")):
             # Keep the service credential distinct from a browser-session
-            # operator so T4/T5 endpoints can require a real human session.
+            # operator so CL4/CL5 endpoints can require a real human session.
             request.state.auth_via_mcp = True
             return await call_next(request)
         agent = agent_for_authorization(request.headers.get("authorization"))

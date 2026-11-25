@@ -3,7 +3,7 @@
 A thin client of Beacon's own HTTP API — same contract the web GUI uses,
 just a different caller. Read tools (status, logs, list, reconcile-check,
 config-diff) are unrestricted: an agent asking "what's broken" is exactly
-what Beacon is for. T4/T5 actions that require human approval are deliberately
+what Beacon is for. CL4/CL5 actions that require human approval are deliberately
 not exposed through MCP; use the authenticated browser UI until Beacon has a
 real out-of-band approval mechanism.
 """
@@ -207,7 +207,7 @@ async def get_workflow(request_id: int) -> object:
 @mcp.tool(annotations=DESTRUCTIVE)
 async def respond_workflow(request_id: int, action: str, plan_revision: str,
                           plan_hash: str, response: object = None) -> object:
-    """Respond to an eligible workflow request. Human-only T4/T5 responses
+    """Respond to an eligible workflow request. Human-only CL4/CL5 responses
     remain restricted to the authenticated browser UI.
     """
     return await _post(f"/api/workflows/{request_id}/respond", json={
@@ -231,15 +231,15 @@ async def revise_workflow(request_id: int, plan_revision: str, plan_hash: str,
 
 @mcp.tool()
 async def create_workflow(card_id: int, kind: str, eligible_responder: str,
-                          capability: str, tier: int, title: str, summary: str,
+                          capability: str, clearance: int, title: str, summary: str,
                           plan_revision: str, plan_hash: str, options: list[str] | None = None,
                           target: dict | None = None, expires_at: float | None = None) -> object:
     """Create a pending decision, review, or approval request on a board card.
     The request is attributed to Beacon's MCP service identity; participants and
-    tier rules are enforced by the Beacon API.
+    clearance rules are enforced by the Beacon API.
     """
     body = {"kind": kind, "eligible_responder": eligible_responder, "capability": capability,
-            "tier": tier, "title": title, "summary": summary, "plan_revision": plan_revision,
+            "clearance": clearance, "title": title, "summary": summary, "plan_revision": plan_revision,
             "plan_hash": plan_hash}
     if options is not None:
         body["options"] = options
@@ -265,12 +265,12 @@ async def get_template(name: str) -> object:
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def list_tiers() -> object:
-    """The tier registry: every gated capability, its autonomy tier (T0-T5),
+async def list_clearances() -> object:
+    """The clearance registry: every gated capability, its autonomy clearance (CL0-CL5),
     and the rationale for that assignment. Beacon enforces the confirm=true
-    step for T2+ capabilities today; T3+ (review) and T4/T5 (human approval)
+    step for CL2+ capabilities today; CL3+ (review) and CL4/CL5 (human approval)
     are named here but not yet mechanically enforced beyond that."""
-    return await _get("/api/tiers")
+    return await _get("/api/clearances")
 
 
 # ---------------------------------------------------------------------------

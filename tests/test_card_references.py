@@ -30,7 +30,7 @@ def _workflow(card_id):
     binding = workflow.plan_binding({"card": card_id})
     return workflow.create(
         card_id=card_id, kind="decision", requester="beacon", eligible_responder="beacon",
-        capability="ask", tier=1, title="Pick", summary="Pick one", options=["a"], target={}, **binding)
+        capability="ask", clearance=1, title="Pick", summary="Pick one", options=["a"], target={}, **binding)
 
 
 def test_a_gitea_pr_a_github_issue_and_a_mantis_ticket(fleet):

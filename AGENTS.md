@@ -41,7 +41,7 @@ follows Keep a Changelog; update it when changing behavior.
 
 ```
 backend/
-  app.py          FastAPI routes; confirm-gate and tier enforcement
+  app.py          FastAPI routes; confirm-gate and clearance enforcement
   auth.py         Zitadel OIDC login (authorization code + PKCE) + auth/CSRF middleware
   members.py      what a member (anyone named as an agent's owner) may reach: one default-deny
                   route list, ownership checks, and the trimmed views they get
@@ -51,11 +51,11 @@ backend/
   scheduler.py    CLI cron dispatcher — no background scheduler in the app
   schemas.py      pydantic models: Host, Agent, CronJob, SSHConfig
   templates.py    config template load/validate/deep-merge under `desired`
-  tiers.py        capability -> T0–T5 autonomy tier registry
+  clearances.py        capability -> CL0–CL5 autonomy clearance registry
   bus.py          agent bus: one A2A v1.0 SendMessage to an agent's reach.endpoint
   policy.py       the access policy (YAML text in the store): tag rules
                   (Tailscale-style) behind may_call; preview/save for the Policy
-                  tab (T4, history in fleet_history)
+                  tab (CL4, history in fleet_history)
   notify.py       workflow and health notices: mailbox to agents, email (opt-in SMTP) and push to people
   push.py         Web Push to people's browsers/PWA (RFC 8291 + VAPID, key derived from
                   BEACON_A2A_SECRET); sends only to known push-service hosts
@@ -160,11 +160,11 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 
 ## Conventions
 
-- **Mutations are gated by autonomy tiers** (`backend/tiers.py`): every
-  capability at T2+ requires `confirm=true`; without it the endpoint returns a
-  `{"would_run": true, ...}` description instead of acting. T4/T5 additionally
+- **Mutations are gated by autonomy clearances** (`backend/clearances.py`): every
+  capability at CL2+ requires `confirm=true`; without it the endpoint returns a
+  `{"would_run": true, ...}` description instead of acting. CL4/CL5 additionally
   require a human browser session — MCP's bearer token cannot execute them.
-  Register any new mutating capability in `CAPABILITY_TIERS` with a rationale.
+  Register any new mutating capability in `CAPABILITY_CLEARANCES` with a rationale.
 - **Live state is never stored in the fleet records.** `status()` and
   `config_diff()` poll the host fresh; fleet records hold only intent
   (`desired`). Runtime facts (pulls, chat reports, mailbox) have their own

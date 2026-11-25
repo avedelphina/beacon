@@ -13,7 +13,7 @@ which agents exist.
 What a member may do, and why those:
 - see their agents (a trimmed record: no endpoint, config or host details) and
   whether each answers over A2A;
-- restart the gateway of their agent: reversible, the usual fix, T2 with the
+- restart the gateway of their agent: reversible, the usual fix, CL2 with the
   same confirm gate as for an operator;
 - read an agent's logs only where an operator turned `member_logs` on for it,
   since logs of a shared household agent hold other people's chats;
@@ -33,7 +33,7 @@ from . import store, workflow
 # (method, path, what the path names: an agent, a card, a workflow request, or nothing)
 _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject in (
     ("GET", r"/api/version", None),
-    ("GET", r"/api/tiers", None),
+    ("GET", r"/api/clearances", None),
     ("GET", r"/api/agents", None),
     ("GET", r"/api/availability", None),
     ("GET", r"/api/agents/(?P<id>[^/]+)", "agent"),

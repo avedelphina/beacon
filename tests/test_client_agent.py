@@ -74,7 +74,7 @@ def test_a_client_without_board_access_gets_no_board(world):
     card = board.create_card("beacon", "Card")["id"]
     with pytest.raises(workflow.UnauthorizedWorkflowAccess):
         workflow.create(card_id=card, kind="question", requester="claude-quiet", eligible_responder="human",
-                        capability="ask", tier=1, title="t", summary="s", options=[], target={}, **binding)
+                        capability="ask", clearance=1, title="t", summary="s", options=[], target={}, **binding)
 
 
 def test_the_client_token_command_prints_what_to_paste_and_only_for_a_board_client(world, monkeypatch, capsys):
@@ -112,11 +112,11 @@ def test_a_client_writes_to_the_board_under_its_own_name(world):
 def test_a_client_asks_a_person_and_the_request_is_its_own(world, client):
     card = board.create_card("beacon", "Card")["id"]
     posted = client.post(f"/api/board/cards/{card}/workflows", headers={"Authorization": _bearer("claude-op")}, json={
-        "kind": "question", "eligible_responder": "human", "capability": "ask", "tier": 1, "title": "Which?",
+        "kind": "question", "eligible_responder": "human", "capability": "ask", "clearance": 1, "title": "Which?",
         "summary": "Tell me", "plan_revision": "r", "plan_hash": "h"})
     assert posted.status_code == 200 and posted.json()["requester"] == "claude-op"
     denied = client.post(f"/api/board/cards/{card}/workflows", headers={"Authorization": _bearer("claude-quiet")}, json={
-        "kind": "question", "eligible_responder": "human", "capability": "ask", "tier": 1, "title": "Which?",
+        "kind": "question", "eligible_responder": "human", "capability": "ask", "clearance": 1, "title": "Which?",
         "summary": "Tell me", "plan_revision": "r", "plan_hash": "h"})
     # No identity for it: in open mode an unrecognised bearer is just Beacon's own, as for any route there.
     assert denied.status_code == 200 and denied.json()["requester"] != "claude-quiet"
@@ -163,7 +163,7 @@ def test_a_workflow_request_cannot_be_addressed_to_a_client(world):
     for requester in ("alpha", "beacon"):
         with pytest.raises(workflow.WorkflowError, match="is an operator's client"):
             workflow.create(card_id=card, kind="question", requester=requester, eligible_responder="claude-op",
-                            capability="ask", tier=1, title="t", summary="s", options=[], target={}, **binding)
+                            capability="ask", clearance=1, title="t", summary="s", options=[], target={}, **binding)
 
 
 def test_a_client_is_not_pursued_by_reminders_or_the_mailbox_and_shows_as_a_client(world):
@@ -177,4 +177,4 @@ def test_a_client_is_not_pursued_by_reminders_or_the_mailbox_and_shows_as_a_clie
 
 def test_status_and_deploy_of_a_client_stop_at_the_missing_ssh(world, client):
     assert client.get("/api/agents/claude-op/status").status_code in (200, 409)
-    assert client.get("/api/agents/claude-op").json()["client"] == {"board": True, "acts_for": None, "max_tier": 3, "enabled": True}
+    assert client.get("/api/agents/claude-op").json()["client"] == {"board": True, "acts_for": None, "max_clearance": 3, "enabled": True}

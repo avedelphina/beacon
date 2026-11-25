@@ -27,7 +27,7 @@ def test_an_action_is_recorded_only_once_it_passes_the_gate(client, agent, fake_
     assert _rows() == []
     client.post("/api/agents/a1/deploy?confirm=true")
     row, = _rows()
-    assert (row["capability"], row["tier"], row["target"], row["via"]) == ("deploy", "T3", "a1", "open")
+    assert (row["capability"], row["clearance"], row["target"], row["via"]) == ("deploy", "CL3", "a1", "open")
     assert row["actor"] == "beacon" and "deploy 'a1'" in row["detail"]
 
 

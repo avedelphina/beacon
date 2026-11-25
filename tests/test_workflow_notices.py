@@ -66,7 +66,7 @@ def _ask(requester="asker", responder="human", summary="Expose the dashboard on 
     card = board.create_card("beacon", "Card")
     binding = workflow.plan_binding({"capability": "ask"})
     return workflow.create(card_id=card["id"], kind="approval", requester=requester, eligible_responder=responder,
-                           capability="ask", tier=2, title=extra.pop("title", "Expose it"), summary=summary,
+                           capability="ask", clearance=2, title=extra.pop("title", "Expose it"), summary=summary,
                            options=[], target=extra.pop("target", {}), **binding, **extra), binding
 
 

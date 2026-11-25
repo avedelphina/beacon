@@ -111,7 +111,7 @@ def test_template_routes_validate_gate_and_protect_templates_in_use(client, flee
     content = {"config": {"model": {"default": "m"}}}
 
     asked = client.put("/api/templates/stack", json={"content": content}).json()
-    assert asked["would_run"] is True and asked["tier"] == "T2" and templates.list_templates() == []
+    assert asked["would_run"] is True and asked["clearance"] == "CL2" and templates.list_templates() == []
     assert client.put("/api/templates/stack", json={"content": {"nonsense": 1}, "confirm": True}).status_code == 400
 
     assert client.put("/api/templates/stack", json={"content": content, "confirm": True}).json()["ok"] is True

@@ -96,7 +96,7 @@ def client_id(kind: str, email: str) -> str:
     return ident
 
 
-def create(kind: str, email: str, max_tier: int = 3) -> Agent:
+def create(kind: str, email: str, max_clearance: int = 3) -> Agent:
     """The client agent for `email`: bound to that operator, board access on, on the clients host."""
     ident = client_id(kind, email)
     try:
@@ -111,4 +111,4 @@ def create(kind: str, email: str, max_tier: int = 3) -> Agent:
         store.upsert_host(Host.model_validate({"id": CLIENT_HOST, "address": "none.invalid"}))
     return store.upsert_agent(Agent.model_validate({
         "id": ident, "type": "client", "host": CLIENT_HOST, "owner": email.casefold(),
-        "client": AgentClient(board=True, acts_for=email, max_tier=max_tier).model_dump()}))
+        "client": AgentClient(board=True, acts_for=email, max_clearance=max_clearance).model_dump()}))

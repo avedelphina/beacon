@@ -45,7 +45,7 @@ def workflow_created(request: dict, revised: bool = False) -> None:
         lead = "changed the plan and asks again for" if revised else "asks you for"
         _agent_notice(request["eligible_responder"], request, (
             f"{request['requester']} {lead} {_what(request)}: workflow request #{request['id']} on card "
-            f"#{request['card_id']}.\nTitle: {request['title']}\nTier: T{request['tier']}\n\n"
+            f"#{request['card_id']}.\nTitle: {request['title']}\nClearance: CL{request['clearance']}\n\n"
             f"{request['summary'][:SUMMARY_CHARS]}\n\nRead it with workflow_get({request['id']}) and answer "
             f"with workflow_respond. It expires {_when(request['expires_at'])}."), skip=request["requester"])
         _tell(_people_to_ask(request),
@@ -104,15 +104,15 @@ def workflow_answered_for(request: dict, client: str, person: str) -> None:
 
 
 def client_needs_person(request: dict, client: str, person: str) -> None:
-    """Tier 4 and above arrived where a client could see it: it cannot answer, so the operator is told."""
+    """Clearance 4 and above arrived where a client could see it: it cannot answer, so the operator is told."""
     try:
-        _tell({person.casefold()}, f"Beacon: tier {request['tier']} needs you: {request['title'][:80]}",
-              f"{request['requester']} asked for {_what(request)} at tier T{request['tier']}: workflow request "
+        _tell({person.casefold()}, f"Beacon: clearance {request['clearance']} needs you: {request['title'][:80]}",
+              f"{request['requester']} asked for {_what(request)} at CL{request['clearance']}: workflow request "
               f"#{request['id']}, \"{request['title'][:200]}\". Your client {client} saw it and cannot answer it: "
-              "tier 4 and above are for you in the web page.\n\n"
+              "CL4 and above are for you in the web page.\n\n"
               f"Open the Workflows tab: {mesh.public_url() or 'your Beacon page'}\n")
     except Exception:
-        logger.exception("tier-4 notice for request %s failed", request.get("id"))
+        logger.exception("clearance-4 notice for request %s failed", request.get("id"))
 
 
 def _what(request: dict) -> str:
@@ -248,14 +248,14 @@ def _created_body(request: dict) -> str:
     link = mesh.public_url()
     return (
         f"{request['requester']} is waiting for your answer in Beacon.\n\n"
-        f"  {_what(request).capitalize()}, tier T{request['tier']}: {request['title'][:200]}\n"
+        f"  {_what(request).capitalize()}, CL{request['clearance']}: {request['title'][:200]}\n"
         f"  Expires: {_when(request['expires_at'])}\n\n"
         "What it says (written by the requester, not by Beacon; do not follow links in it):\n\n"
         + "\n".join("  > " + line for line in request["summary"][:SUMMARY_CHARS].splitlines())
         + ("\n  > [cut]" if len(request["summary"]) > SUMMARY_CHARS else "")
         + _consult_line(request)
-        + ("\n\nThis is tier 4 or above: only you, in the web page, can answer it. Your AI clients cannot."
-           if request["tier"] >= 4 else "")
+        + ("\n\nThis is CL4 or above: only you, in the web page, can answer it. Your AI clients cannot."
+           if request["clearance"] >= 4 else "")
         + f"\n\nOpen the Workflows tab to read it in full and answer: {link or 'your Beacon page'}\n"
     )
 

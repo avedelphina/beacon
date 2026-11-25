@@ -134,7 +134,7 @@ def _ask(requester, eligible="human", **target):
     card = board.create_card("beacon", "Ask")["id"]
     binding = workflow.plan_binding({"ask": requester, "t": target})
     return workflow.create(card_id=card, kind="decision", requester=requester, eligible_responder=eligible,
-                           capability="ask", tier=1, title="Which?", summary="This or that?", options=["a", "b"],
+                           capability="ask", clearance=1, title="Which?", summary="This or that?", options=["a", "b"],
                            target=target, **binding)
 
 
