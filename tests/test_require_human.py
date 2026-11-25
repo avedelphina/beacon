@@ -1,4 +1,4 @@
-"""A reviewer that is not sure sends a request to a person: one way, the plan and tier unchanged,
+"""A reviewer that is not sure sends a request to a person: one way, the plan and clearance unchanged,
 and from then on only a person in the browser may answer it."""
 
 import sqlite3
@@ -36,10 +36,10 @@ def crew(fleet, monkeypatch, told):
     return board.create_card("beacon", "Push the config")["id"]
 
 
-def _ask(card, responder="reviewer", tier=3, kind="review", requester="asker"):
-    binding = workflow.plan_binding({"card": card, "tier": tier})
+def _ask(card, responder="reviewer", clearance=3, kind="review", requester="asker"):
+    binding = workflow.plan_binding({"card": card, "clearance": clearance})
     request = workflow.create(card_id=card, kind=kind, requester=requester, eligible_responder=responder,
-                              capability="push_config", tier=tier, title="Review the push", summary="Exact plan",
+                              capability="push_config", clearance=clearance, title="Review the push", summary="Exact plan",
                               options=[], target={}, **binding)
     return request, binding
 
@@ -53,7 +53,7 @@ def test_a_reviewer_sends_a_request_to_a_person_and_nothing_else_changes(crew):
     done = workflow.escalate(request["id"], actor="reviewer", human=False, reason="I cannot judge the host change",
                              context_id="ctx-1")
 
-    assert done["state"] == "pending" and done["require_human"] is True and done["tier"] == 3
+    assert done["state"] == "pending" and done["require_human"] is True and done["clearance"] == 3
     assert (done["plan_revision"], done["plan_hash"]) == (binding["plan_revision"], binding["plan_hash"])
     assert (done["escalated_by"], done["escalated_reason"]) == ("reviewer", "I cannot judge the host change")
     assert _history(crew)[-1].endswith(": needs a person: I cannot judge the host change")
@@ -109,7 +109,7 @@ def test_only_someone_who_could_answer_may_send_it_and_only_while_it_waits(crew)
 
 
 def test_t4_already_needs_a_person_and_a_repeat_records_nothing_more(crew):
-    t4, _ = _ask(crew, responder="human", tier=4, kind="approval")
+    t4, _ = _ask(crew, responder="human", clearance=4, kind="approval")
     with pytest.raises(workflow.WorkflowError, match="already need a person"):
         workflow.escalate(t4["id"], actor=OP, human=True, reason="x")
 
@@ -165,11 +165,11 @@ def test_requests_from_before_this_get_the_flag_off(fleet, monkeypatch, tmp_path
     with sqlite3.connect(tmp_path / "old" / "beacon.db") as db:
         db.execute("CREATE TABLE workflow_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, card_id INTEGER NOT NULL,"
                    " kind TEXT NOT NULL, state TEXT NOT NULL, requester TEXT NOT NULL, eligible_responder TEXT NOT NULL,"
-                   " capability TEXT NOT NULL, tier INTEGER NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL,"
+                   " capability TEXT NOT NULL, clearance INTEGER NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL,"
                    " options_json TEXT NOT NULL DEFAULT '[]', response_json TEXT, target_json TEXT NOT NULL DEFAULT '{}',"
                    " plan_revision TEXT NOT NULL, plan_hash TEXT NOT NULL, expires_at REAL NOT NULL,"
                    " created_at REAL NOT NULL, updated_at REAL NOT NULL, responded_at REAL)")
-        db.execute("INSERT INTO workflow_requests (card_id, kind, state, requester, eligible_responder, capability, tier,"
+        db.execute("INSERT INTO workflow_requests (card_id, kind, state, requester, eligible_responder, capability, clearance,"
                    " title, summary, plan_revision, plan_hash, expires_at, created_at, updated_at)"
                    " VALUES (1, 'review', 'pending', 'a', 'human', 'ask', 3, 't', 's', 'r', 'h', 9e9, 1, 1)")
     old = workflow.get(1)

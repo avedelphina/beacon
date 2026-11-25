@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- **Tiers are now clearances, CL0 to CL5.** The levels were always the DeepOcean operating model's
+  clearances (Observe, Propose, Execute reversible, Execute with review, Execute with human approval,
+  Human-only); Beacon now uses its name for them, everywhere: the page, the skill, the docs, the API.
+  What changes for a client:
+  - `GET /api/tiers` is `GET /api/clearances`. Its entries, and every `would_run` answer, say
+    `clearance` and `clearance_label`, with names `CL0` to `CL5` instead of `T0` to `T5`.
+  - Workflow requests have `clearance` where they had `tier` (REST and the board tools). **The old
+    `tier` is still accepted on input for this release**, so agents that hold the old tool description
+    keep working until they restart; answers use `clearance` only. `workflow_create` takes `clearance`
+    (or, for now, `tier`).
+  - A client agent's `max_tier` is `max_clearance`; records saved with the old name are still read.
+  - Audit rows (`GET /api/audit`) have `clearance`, and the names stored in them are rewritten to `CL`.
+  - The fleet MCP server's `list_tiers` is `list_clearances`; its `create_workflow` takes `clearance`.
+  - `backend/tiers.py` is `backend/clearances.py` (`Clearance`, `CAPABILITY_CLEARANCES`, `clearance_for`).
+  - Existing databases are migrated on first start: the columns are renamed and no rows are lost. A
+    workflow request for an enrollment that was pending at the upgrade needs to be asked again, because
+    its plan binding names the field.
+
 ## [0.39.2] — 2026-11-23
 
 ### Changed

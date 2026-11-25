@@ -46,7 +46,7 @@ def test_an_operator_makes_their_own_client_and_gets_its_token_once(ops):
 
     made = _make(ops.tom, kind="claude", label="laptop")
     assert made["agent"]["id"] == "claude-tom" and made["token"].startswith("bcl_")
-    assert (made["agent"]["acts_for"], made["agent"]["max_tier"], made["agent"]["enabled"]) == (TOM, 3, True)
+    assert (made["agent"]["acts_for"], made["agent"]["max_clearance"], made["agent"]["enabled"]) == (TOM, 3, True)
     assert "claude mcp add" in made["settings"] and made["token"] in made["settings"]
     agent = store.get_agent("claude-tom")
     assert agent.type == "client" and agent.host == "clients" and agent.reach is None and agent.owner == TOM
@@ -67,9 +67,9 @@ def test_a_second_client_of_the_same_kind_and_a_bad_request_are_refused(ops):
     assert ops.tom.post("/api/clients", json={"confirm": True}).status_code == 400
     assert _make(ops.tom, kind="codex")["agent"]["id"] == "codex-tom"
     assert ops.ann.post("/api/clients", json={"kind": "nonsense", "confirm": True}).status_code == 400
-    assert ops.ann.post("/api/clients", json={"max_tier": 4, "confirm": True}).status_code == 400
-    assert ops.ann.post("/api/clients", json={"max_tier": -1, "confirm": True}).status_code == 400
-    assert _make(ops.ann, max_tier=2)["agent"]["max_tier"] == 2
+    assert ops.ann.post("/api/clients", json={"max_clearance": 4, "confirm": True}).status_code == 400
+    assert ops.ann.post("/api/clients", json={"max_clearance": -1, "confirm": True}).status_code == 400
+    assert _make(ops.ann, max_clearance=2)["agent"]["max_clearance"] == 2
 
 
 def test_only_a_person_in_a_browser_makes_one(ops, mcp_client, client):
@@ -107,12 +107,12 @@ def test_any_operator_can_revoke_and_turn_a_client_off_but_only_its_operator_tur
     assert clients.resolve(fresh) == "claude-tom"                                           # the same token, on again
 
 
-def test_max_tier_is_lowered_by_anyone_and_raised_only_by_its_operator_never_past_three(ops):
-    _make(ops.tom, max_tier=2)
-    assert ops.ann.patch("/api/clients/claude-tom", json={"max_tier": 1, "confirm": True}).json()["max_tier"] == 1
-    assert ops.ann.patch("/api/clients/claude-tom", json={"max_tier": 3, "confirm": True}).status_code == 403
-    assert ops.tom.patch("/api/clients/claude-tom", json={"max_tier": 3, "confirm": True}).json()["max_tier"] == 3
-    assert ops.tom.patch("/api/clients/claude-tom", json={"max_tier": 4, "confirm": True}).status_code == 400
+def test_max_clearance_is_lowered_by_anyone_and_raised_only_by_its_operator_never_past_three(ops):
+    _make(ops.tom, max_clearance=2)
+    assert ops.ann.patch("/api/clients/claude-tom", json={"max_clearance": 1, "confirm": True}).json()["max_clearance"] == 1
+    assert ops.ann.patch("/api/clients/claude-tom", json={"max_clearance": 3, "confirm": True}).status_code == 403
+    assert ops.tom.patch("/api/clients/claude-tom", json={"max_clearance": 3, "confirm": True}).json()["max_clearance"] == 3
+    assert ops.tom.patch("/api/clients/claude-tom", json={"max_clearance": 4, "confirm": True}).status_code == 400
     assert ops.tom.patch("/api/clients/claude-tom", json={"confirm": True}).status_code == 400
 
 
@@ -123,7 +123,7 @@ def test_the_agent_record_route_cannot_rebind_a_client(ops):
     hijack = {**record, "client": {**record["client"], "acts_for": ANN}}
     assert ops.ann.put("/api/agents/claude-tom", json=hijack).status_code == 400
     assert store.get_agent("claude-tom").client.acts_for == TOM
-    new = {**record, "id": "claude-ann", "owner": ANN, "client": {"board": True, "acts_for": ANN, "max_tier": 3}}
+    new = {**record, "id": "claude-ann", "owner": ANN, "client": {"board": True, "acts_for": ANN, "max_clearance": 3}}
     assert ops.ann.put("/api/agents/claude-ann", json=new).status_code == 400                               # not made by hand
 
 
@@ -142,6 +142,6 @@ def test_the_acts_for_field_must_be_an_email_and_the_ceiling_is_three():
         with pytest.raises(ValueError):
             Agent.model_validate({"id": "x", "type": "client", "host": "clients", "client": {"acts_for": bad}})
     with pytest.raises(ValueError, match="0 to 3"):
-        Agent.model_validate({"id": "x", "type": "client", "host": "clients", "client": {"max_tier": 4}})
+        Agent.model_validate({"id": "x", "type": "client", "host": "clients", "client": {"max_clearance": 4}})
     assert Agent.model_validate({"id": "x", "type": "client", "host": "clients",
                                  "client": {"acts_for": " Tom@Example.COM "}}).client.acts_for == "tom@example.com"

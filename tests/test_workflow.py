@@ -53,7 +53,7 @@ def test_create_list_get_and_respond_records_history():
     binding = _binding()
     request = workflow.create(
         card_id=card["id"], kind="review", requester="agent-a", eligible_responder="reviewer@example.com",
-        capability="push_config", tier=3, title="Review config", summary="Review the exact config plan",
+        capability="push_config", clearance=3, title="Review config", summary="Review the exact config plan",
         options=[], target={"agent_id": "a1"}, **binding,
     )
     assert request["state"] == "pending"
@@ -70,7 +70,7 @@ def test_create_list_get_and_respond_records_history():
 def test_unauthorized_responder_is_rejected():
     request = workflow.create(
         card_id=_card()["id"], kind="approval", requester="beacon", eligible_responder="human",
-        capability="set_policy", tier=4, title="Approve policy", summary="Approve policy change",
+        capability="set_policy", clearance=4, title="Approve policy", summary="Approve policy change",
         options=[], target={"scope": "fleet"}, **_binding(),
     )
     try:
@@ -85,7 +85,7 @@ def test_decision_option_validation_and_choice():
     binding = _binding()
     request = workflow.create(
         card_id=_card()["id"], kind="decision", requester="beacon", eligible_responder="beacon",
-        capability="push_config", tier=2, title="Choose rollout", summary="Choose one option",
+        capability="push_config", clearance=2, title="Choose rollout", summary="Choose one option",
         options=["canary", "all"], target={"agent_id": "a1"}, **binding,
     )
     try:
@@ -102,7 +102,7 @@ def test_human_sentinel_requires_browser_session_for_agent_named_human():
     binding = _binding()
     request = workflow.create(
         card_id=_card()["id"], kind="review", requester="agent-a", eligible_responder="human",
-        capability="push_config", tier=3, title="Review", summary="Exact plan",
+        capability="push_config", clearance=3, title="Review", summary="Exact plan",
         options=[], target={}, **binding,
     )
     with pytest.raises(workflow.UnauthorizedResponder):
@@ -114,7 +114,7 @@ def test_expiry_and_stale_plan_are_visible():
     binding = _binding()
     request = workflow.create(
         card_id=_card()["id"], kind="review", requester="beacon", eligible_responder="human",
-        capability="push_config", tier=3, title="Expired review", summary="Short-lived review",
+        capability="push_config", clearance=3, title="Expired review", summary="Short-lived review",
         options=[], target={"agent_id": "a1"}, expires_at=time.time() + 0.5, **binding,
     )
     time.sleep(0.6)  # a margin that the lookups in create() cannot eat
@@ -122,7 +122,7 @@ def test_expiry_and_stale_plan_are_visible():
 
     fresh = workflow.create(
         card_id=_card()["id"], kind="review", requester="beacon", eligible_responder="human",
-        capability="push_config", tier=3, title="Stale review", summary="Changed plan",
+        capability="push_config", clearance=3, title="Stale review", summary="Changed plan",
         options=[], target={"agent_id": "a1"}, **binding,
     )
     changed = workflow.plan_binding({"capability": "push_config", "target": {"agent_id": "a1"}, "desired": {"config": {"agent": {"max_turns": 99}}}})
@@ -147,7 +147,7 @@ def test_t3_push_config_requires_approved_exact_workflow(client, human_client, f
     binding = diff.json()["workflow"]
     card = client.post("/api/board/cards", json={"title": "Config review"}).json()
     body = {
-        "kind": "review", "eligible_responder": "human", "capability": "push_config", "tier": 3,
+        "kind": "review", "eligible_responder": "human", "capability": "push_config", "clearance": 3,
         "title": "Review push", "summary": "Review config", "target": binding["target"],
         "plan_revision": binding["plan_revision"], "plan_hash": binding["plan_hash"],
     }
@@ -163,10 +163,10 @@ def test_t3_push_config_requires_approved_exact_workflow(client, human_client, f
 
 
 def test_t4_and_t5_workflow_responses_are_human_only(mcp_client, fake_ssh):
-    for tier, kind, capability in ((4, "approval", "set_policy"), (5, "approval", "decommission")):
+    for clearance, kind, capability in ((4, "approval", "set_policy"), (5, "approval", "decommission")):
         request = workflow.create(
             card_id=_card()["id"], kind=kind, requester="beacon", eligible_responder="human",
-            capability=capability, tier=tier, title="Approval", summary="Human approval required",
+            capability=capability, clearance=clearance, title="Approval", summary="Human approval required",
             options=[], target={}, **_binding(),
         )
         response = mcp_client.post(f"/api/workflows/{request['id']}/respond", json={
@@ -181,7 +181,7 @@ def test_t3_requester_cannot_self_approve():
     with pytest.raises(workflow.WorkflowError, match="different actors"):
         workflow.create(
             card_id=_card()["id"], kind="review", requester="beacon", eligible_responder="beacon",
-            capability="push_config", tier=3, title="Review", summary="Independent review required",
+            capability="push_config", clearance=3, title="Review", summary="Independent review required",
             options=[], target={}, **_binding(),
         )
 
@@ -200,12 +200,12 @@ def test_workflow_plan_binding_includes_host_destination(client, fake_ssh):
 def test_api_human_workflow_visibility_is_scoped(human_client):
     hidden = workflow.create(
         card_id=_card()["id"], kind="review", requester="agent-a", eligible_responder="agent-b",
-        capability="push_config", tier=3, title="Private review", summary="Agent-only",
+        capability="push_config", clearance=3, title="Private review", summary="Agent-only",
         options=[], target={}, **_binding(),
     )
     visible = workflow.create(
         card_id=_card()["id"], kind="review", requester="agent-a", eligible_responder="human",
-        capability="push_config", tier=3, title="Human review", summary="Browser review",
+        capability="push_config", clearance=3, title="Human review", summary="Browser review",
         options=[], target={}, **_binding(),
     )
     listed = human_client.get("/api/workflows")
@@ -218,7 +218,7 @@ def test_open_mode_without_session_cannot_self_approve_t3(client, fake_ssh):
     binding = _binding()
     request = workflow.create(
         card_id=_card()["id"], kind="review", requester="beacon", eligible_responder="human",
-        capability="push_config", tier=3, title="Review", summary="Requires a real operator", options=[], target={},
+        capability="push_config", clearance=3, title="Review", summary="Requires a real operator", options=[], target={},
         plan_revision=binding["plan_revision"], plan_hash=binding["plan_hash"],
     )
     response = client.post(f"/api/workflows/{request['id']}/respond", json={
@@ -231,7 +231,7 @@ def test_t3_requester_cannot_self_approve_human_slot():
     binding = _binding()
     request = workflow.create(
         card_id=_card()["id"], kind="review", requester="requester@example.com", eligible_responder="human",
-        capability="push_config", tier=3, title="Review", summary="Independent review required",
+        capability="push_config", clearance=3, title="Review", summary="Independent review required",
         options=[], target={}, **binding,
     )
     import pytest
@@ -243,13 +243,13 @@ def test_third_actor_cannot_execute_approved_request():
     binding = _binding()
     request = workflow.create(
         card_id=_card()["id"], kind="review", requester="requester@example.com", eligible_responder="reviewer@example.com",
-        capability="push_config", tier=3, title="Review", summary="Exact plan",
+        capability="push_config", clearance=3, title="Review", summary="Exact plan",
         options=[], target={}, **binding,
     )
     workflow.respond(request["id"], actor="reviewer@example.com", human=False, action="approved", response={}, **binding)
     import pytest
     with pytest.raises(workflow.UnauthorizedWorkflowAccess):
-        workflow.authorize(request_id=request["id"], capability="push_config", tier=3, actor="third-party", human=False,
+        workflow.authorize(request_id=request["id"], capability="push_config", clearance=3, actor="third-party", human=False,
                            target={}, **binding)
 
 
@@ -258,14 +258,14 @@ def test_concurrent_authorize_only_claims_once():
     binding = _binding()
     request = workflow.create(
         card_id=_card()["id"], kind="review", requester="requester@example.com", eligible_responder="reviewer@example.com",
-        capability="push_config", tier=3, title="Review", summary="Exact plan",
+        capability="push_config", clearance=3, title="Review", summary="Exact plan",
         options=[], target={}, **binding,
     )
     workflow.respond(request["id"], actor="reviewer@example.com", human=False, action="approved", response={}, **binding)
 
     def claim():
         try:
-            workflow.authorize(request_id=request["id"], capability="push_config", tier=3, actor="requester@example.com", human=False,
+            workflow.authorize(request_id=request["id"], capability="push_config", clearance=3, actor="requester@example.com", human=False,
                                target={}, **binding)
             return "claimed"
         except workflow.WorkflowError:
@@ -279,14 +279,14 @@ def test_concurrent_authorize_only_claims_once():
     binding = _binding()
     request = workflow.create(
         card_id=_card()["id"], kind="review", requester="requester@example.com", eligible_responder="reviewer@example.com",
-        capability="push_config", tier=3, title="Review", summary="Exact plan",
+        capability="push_config", clearance=3, title="Review", summary="Exact plan",
         options=[], target={}, **binding,
     )
     workflow.respond(request["id"], actor="reviewer@example.com", human=False, action="approved", response={}, **binding)
-    workflow.authorize(request_id=request["id"], capability="push_config", tier=3, actor="requester@example.com", human=False,
+    workflow.authorize(request_id=request["id"], capability="push_config", clearance=3, actor="requester@example.com", human=False,
                        target={}, **binding)
     with pytest.raises(workflow.WorkflowError, match="claimed"):
-        workflow.authorize(request_id=request["id"], capability="push_config", tier=3, actor="requester@example.com", human=False,
+        workflow.authorize(request_id=request["id"], capability="push_config", clearance=3, actor="requester@example.com", human=False,
                            target={}, **binding)
     workflow.mark_executed(request["id"], "requester@example.com")
     assert workflow.get(request["id"])["state"] == "executed"
@@ -304,7 +304,7 @@ def test_concurrent_push_posts_run_driver_once(client, human_client, fake_ssh):
     binding = client.get("/api/agents/a1/config-diff").json()["workflow"]
     card = client.post("/api/board/cards", json={"title": "Review"}).json()
     request = client.post(f"/api/board/cards/{card['id']}/workflows", json={
-        "kind": "review", "eligible_responder": "human", "capability": "push_config", "tier": 3,
+        "kind": "review", "eligible_responder": "human", "capability": "push_config", "clearance": 3,
         "title": "Review", "summary": "Review exact plan", "target": binding["target"],
         "plan_revision": binding["plan_revision"], "plan_hash": binding["plan_hash"],
     }).json()
@@ -358,7 +358,7 @@ def test_push_plan_binds_ssh_key_profile_and_type(client, human_client, fake_ssh
     old = client.get("/api/agents/a1/config-diff").json()["workflow"]
     card = client.post("/api/board/cards", json={"title": "Review"}).json()
     request = client.post(f"/api/board/cards/{card['id']}/workflows", json={
-        "kind": "review", "eligible_responder": "human", "capability": "push_config", "tier": 3,
+        "kind": "review", "eligible_responder": "human", "capability": "push_config", "clearance": 3,
         "title": "Review", "summary": "Review exact plan", "target": old["target"],
         "plan_revision": old["plan_revision"], "plan_hash": old["plan_hash"],
     }).json()
@@ -384,7 +384,7 @@ def test_caller_cannot_substitute_an_old_plan_binding(client, human_client, fake
     old = client.get("/api/agents/a1/config-diff").json()["workflow"]
     card = client.post("/api/board/cards", json={"title": "Review"}).json()
     request = client.post(f"/api/board/cards/{card['id']}/workflows", json={
-        "kind": "review", "eligible_responder": "human", "capability": "push_config", "tier": 3,
+        "kind": "review", "eligible_responder": "human", "capability": "push_config", "clearance": 3,
         "title": "Review", "summary": "Review exact plan", "target": old["target"],
         "plan_revision": old["plan_revision"], "plan_hash": old["plan_hash"],
     }).json()
@@ -401,7 +401,7 @@ def test_expired_response_persists_expiry_event():
     binding = _binding()
     request = workflow.create(
         card_id=_card()["id"], kind="review", requester="beacon", eligible_responder="reviewer@example.com",
-        capability="push_config", tier=3, title="Expiring review", summary="Short-lived review",
+        capability="push_config", clearance=3, title="Expiring review", summary="Short-lived review",
         options=[], target={"agent_id": "a1"}, expires_at=time.time() + 0.5, **binding,
     )
     time.sleep(0.6)  # a margin that the lookups in create() cannot eat
@@ -423,7 +423,7 @@ def test_failed_and_uncertain_execution_consume_approval(client, human_client, f
     binding = client.get("/api/agents/a1/config-diff").json()["workflow"]
     card = client.post("/api/board/cards", json={"title": "Review"}).json()
     request = client.post(f"/api/board/cards/{card['id']}/workflows", json={
-        "kind": "review", "eligible_responder": "human", "capability": "push_config", "tier": 3,
+        "kind": "review", "eligible_responder": "human", "capability": "push_config", "clearance": 3,
         "title": "Review", "summary": "Review exact plan", "target": binding["target"],
         "plan_revision": binding["plan_revision"], "plan_hash": binding["plan_hash"],
     }).json()
@@ -434,7 +434,7 @@ def test_failed_and_uncertain_execution_consume_approval(client, human_client, f
 
     second = workflow.create(
         card_id=card["id"], kind="review", requester="beacon", eligible_responder="human",
-        capability="push_config", tier=3, title="Review 2", summary="Review exact plan",
+        capability="push_config", clearance=3, title="Review 2", summary="Review exact plan",
         options=[], target=binding["target"], plan_revision=binding["plan_revision"], plan_hash=binding["plan_hash"],
     )
     human_client.post(f"/api/workflows/{second['id']}/respond", json={"action": "approved", "response": {}, **binding})
@@ -453,7 +453,7 @@ def test_driver_stream_exception_consumes_approval(client, human_client, fake_ss
     binding = client.get("/api/agents/a1/config-diff").json()["workflow"]
     card = client.post("/api/board/cards", json={"title": "Review"}).json()
     request = client.post(f"/api/board/cards/{card['id']}/workflows", json={
-        "kind": "review", "eligible_responder": "human", "capability": "push_config", "tier": 3,
+        "kind": "review", "eligible_responder": "human", "capability": "push_config", "clearance": 3,
         "title": "Review", "summary": "Review exact plan", "target": binding["target"],
         "plan_revision": binding["plan_revision"], "plan_hash": binding["plan_hash"],
     }).json()
@@ -470,7 +470,7 @@ def test_driver_stream_exception_consumes_approval(client, human_client, fake_ss
 def _ask(requester, responder, **extra):
     return workflow.create(
         card_id=_card()["id"], kind="approval", requester=requester, eligible_responder=responder,
-        capability="ask", tier=extra.pop("tier", 2), title="Expose the dashboard", summary="On the tailnet only",
+        capability="ask", clearance=extra.pop("clearance", 2), title="Expose the dashboard", summary="On the tailnet only",
         options=[], target={}, **_binding(), **extra,
     )
 
@@ -530,7 +530,7 @@ def _t3_request(**kw):
     binding = _binding()
     request = workflow.create(
         card_id=_card()["id"], kind="review", requester="agent-a", eligible_responder="reviewer@example.com",
-        capability="push_config", tier=3, title="Review config", summary="v1", options=[],
+        capability="push_config", clearance=3, title="Review config", summary="v1", options=[],
         target={"agent_id": "a1"}, **binding, **kw)
     return request, binding
 
@@ -570,12 +570,12 @@ def test_question_takes_a_text_answer_not_options():
     binding = _binding()
     request = workflow.create(
         card_id=_card()["id"], kind="question", requester="beacon", eligible_responder="beacon",
-        capability="ask", tier=1, title="Which region?", summary="Tell me the region", options=[], target={}, **binding,
+        capability="ask", clearance=1, title="Which region?", summary="Tell me the region", options=[], target={}, **binding,
     )
     with pytest.raises(workflow.WorkflowError):
         workflow.create(
             card_id=_card()["id"], kind="question", requester="beacon", eligible_responder="beacon",
-            capability="ask", tier=1, title="Bad", summary="Options are not for questions", options=["a"], target={}, **binding,
+            capability="ask", clearance=1, title="Bad", summary="Options are not for questions", options=["a"], target={}, **binding,
         )
     with pytest.raises(workflow.WorkflowError):
         workflow.respond(request["id"], actor="beacon", human=True, action="approved", response={}, **binding)
@@ -592,22 +592,22 @@ def test_question_can_be_declined_and_answer_is_only_for_questions():
     binding = _binding()
     request = workflow.create(
         card_id=_card()["id"], kind="question", requester="beacon", eligible_responder="beacon",
-        capability="ask", tier=1, title="Anything?", summary="Optional", options=[], target={}, **binding,
+        capability="ask", clearance=1, title="Anything?", summary="Optional", options=[], target={}, **binding,
     )
     declined = workflow.respond(request["id"], actor="beacon", human=True, action="rejected", response={}, **binding)
     assert declined["state"] == "rejected"
     decision = workflow.create(
         card_id=_card()["id"], kind="decision", requester="beacon", eligible_responder="beacon",
-        capability="ask", tier=1, title="Pick", summary="Pick one", options=["a"], target={}, **binding,
+        capability="ask", clearance=1, title="Pick", summary="Pick one", options=["a"], target={}, **binding,
     )
     with pytest.raises(workflow.WorkflowError, match="only question requests"):
         workflow.respond(decision["id"], actor="beacon", human=True, action="answered", response={"text": "x"}, **binding)
 
 
-def test_question_cannot_be_tier_three_without_review():
+def test_question_cannot_be_clearance_three_without_review():
     with pytest.raises(workflow.WorkflowError):
-        workflow.validate_kind_for_tier("question", 3)
-    workflow.validate_kind_for_tier("question", 2)
+        workflow.validate_kind_for_clearance("question", 3)
+    workflow.validate_kind_for_clearance("question", 2)
 
 
 def _card_history(card_id, kinds=("workflow",)):
@@ -619,7 +619,7 @@ def test_every_workflow_change_is_on_the_cards_history_with_actor_and_context():
     binding = _binding()
     request = workflow.create(
         card_id=card["id"], kind="review", requester="beacon", eligible_responder="human",
-        capability="push_config", tier=3, title="Review the push", summary="Exact plan",
+        capability="push_config", clearance=3, title="Review the push", summary="Exact plan",
         options=[], target={}, context_id="ctx-1", **binding)
     workflow.respond(request["id"], actor="human", human=True, action="changes_requested",
                      response={"note": "add a canary"}, context_id="ctx-2", **binding)
@@ -627,7 +627,7 @@ def test_every_workflow_change_is_on_the_cards_history_with_actor_and_context():
     workflow.revise(request["id"], actor="beacon", summary="Now with a canary", context_id="ctx-3", **revised)
     workflow.respond(request["id"], actor="human", human=True, action="approved", response={},
                      context_id="ctx-4", **revised)
-    workflow.authorize(request_id=request["id"], capability="push_config", tier=3, actor="beacon",
+    workflow.authorize(request_id=request["id"], capability="push_config", clearance=3, actor="beacon",
                        human=False, target={}, **revised)
     workflow.mark_executed(request["id"], "beacon")
 
@@ -653,13 +653,13 @@ def test_expiry_and_a_stale_plan_reach_the_cards_history():
     binding = _binding()
     request = workflow.create(
         card_id=card["id"], kind="review", requester="beacon", eligible_responder="human",
-        capability="push_config", tier=3, title="Short", summary="Short-lived",
+        capability="push_config", clearance=3, title="Short", summary="Short-lived",
         options=[], target={}, expires_at=time.time() + 0.5, **binding)
     time.sleep(0.6)
     workflow.get(request["id"])
     stale = workflow.create(
         card_id=card["id"], kind="review", requester="beacon", eligible_responder="human",
-        capability="push_config", tier=3, title="Stale", summary="Changed",
+        capability="push_config", clearance=3, title="Stale", summary="Changed",
         options=[], target={}, **binding)
     with pytest.raises(workflow.StalePlan):
         workflow.respond(stale["id"], actor="human", human=True, action="approved", response={},
@@ -679,7 +679,7 @@ def test_a_failed_notice_costs_neither_the_request_nor_the_card_history(monkeypa
     binding = _binding()
 
     request = workflow.create(card_id=card["id"], kind="decision", requester="beacon", eligible_responder="beacon",
-                              capability="ask", tier=1, title="Pick", summary="Pick one", options=["a"], target={}, **binding)
+                              capability="ask", clearance=1, title="Pick", summary="Pick one", options=["a"], target={}, **binding)
     answered = workflow.respond(request["id"], actor="beacon", human=True, action="choose_option",
                                 response={"option": "a"}, **binding)
 
@@ -696,7 +696,7 @@ def _handoff(card, responder="taker", **extra):
     binding = _binding()
     request = workflow.create(
         card_id=card["id"], kind="handoff", requester="beacon", eligible_responder=responder,
-        capability="handoff", tier=1, title="Take the migration", summary="You know the host best",
+        capability="handoff", clearance=1, title="Take the migration", summary="You know the host best",
         options=[], target={}, **extra, **binding)
     return request, binding
 
@@ -743,10 +743,10 @@ def test_handoff_rules_are_fixed(quiet_notices):
     binding = _binding()
     with pytest.raises(workflow.WorkflowError, match="no options"):
         workflow.create(card_id=card["id"], kind="handoff", requester="beacon", eligible_responder="taker",
-                        capability="handoff", tier=1, title="T", summary="S", options=["x"], target={}, **binding)
-    with pytest.raises(workflow.WorkflowError):  # tier 3 and above need a review or an approval
+                        capability="handoff", clearance=1, title="T", summary="S", options=["x"], target={}, **binding)
+    with pytest.raises(workflow.WorkflowError):  # CL3 and above need a review or an approval
         workflow.create(card_id=card["id"], kind="handoff", requester="beacon", eligible_responder="taker",
-                        capability="handoff", tier=3, title="T", summary="S", options=[], target={}, **binding)
+                        capability="handoff", clearance=3, title="T", summary="S", options=[], target={}, **binding)
     request, binding = _handoff(card)
     for action in ("choose_option", "answered"):
         with pytest.raises(workflow.WorkflowError):

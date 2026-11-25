@@ -100,7 +100,7 @@ def test_housekeeping_does_both_and_one_failing_does_not_stop_the_other(monkeypa
 def _review(card_id, **extra):
     binding = workflow.plan_binding({"card": card_id})
     request = workflow.create(card_id=card_id, kind="review", requester="beacon", eligible_responder="human",
-                              capability="push_config", tier=3, title="Review it", summary="Exact plan",
+                              capability="push_config", clearance=3, title="Review it", summary="Exact plan",
                               options=[], target={}, **extra, **binding)
     return request, binding
 

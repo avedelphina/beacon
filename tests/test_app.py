@@ -82,16 +82,16 @@ def test_get_missing_agent_returns_404(client):
 
 
 # ---------------------------------------------------------------------------
-# Tier registry endpoint
+# Clearance registry endpoint
 # ---------------------------------------------------------------------------
 
 
-def test_tiers_endpoint(client):
-    r = client.get("/api/tiers")
+def test_clearances_endpoint(client):
+    r = client.get("/api/clearances")
     assert r.status_code == 200
     body = r.json()
-    assert body["status"]["tier"] == "T0"
-    assert body["decommission"]["tier"] == "T4"
+    assert body["status"]["clearance"] == "CL0"
+    assert body["decommission"]["clearance"] == "CL4"
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ def test_restart_without_confirm_does_not_touch_ssh(client, host_and_agent, fake
     assert r.status_code == 200
     body = r.json()
     assert body["would_run"] is True
-    assert body["tier"] == "T2"
+    assert body["clearance"] == "CL2"
     assert fake_ssh.calls == []  # the whole point: nothing ran
 
 
@@ -124,7 +124,7 @@ def test_version_endpoint(client):
 
 def test_restart_agent_gate_and_run(client, host_and_agent, fake_ssh):
     r = client.post("/api/agents/a1/restart-agent")
-    assert r.json()["would_run"] is True and r.json()["tier"] == "T3"
+    assert r.json()["would_run"] is True and r.json()["clearance"] == "CL3"
     assert fake_ssh.calls == []
     fake_ssh.result = SSHResult(ok=True, stdout="", stderr="", returncode=0)
     assert client.post("/api/agents/a1/restart-agent?confirm=true").json()["ok"] is True
@@ -164,13 +164,13 @@ def test_decommission_without_confirm_does_not_touch_ssh(client, host_and_agent,
     assert r.status_code == 200
     body = r.json()
     assert body["would_run"] is True
-    assert body["tier"] == "T4"
+    assert body["clearance"] == "CL4"
     assert fake_ssh.calls == []
 
 
 def test_decommission_purge_without_confirm_shows_t5(client, host_and_agent, fake_ssh):
     r = client.post("/api/agents/a1/decommission", json={"purge": True})
-    assert r.json()["tier"] == "T5"
+    assert r.json()["clearance"] == "CL5"
     assert fake_ssh.calls == []
 
 
@@ -265,7 +265,7 @@ def test_reconcile_check_never_gated(client, host_and_agent, fake_ssh):
 
 
 def test_mcp_bearer_can_still_run_t2_restart(mcp_client, fake_ssh):
-    # Ensure the restriction is not accidentally applied to ordinary T2 work.
+    # Ensure the restriction is not accidentally applied to ordinary CL2 work.
     mcp_client.put("/api/hosts/edge-01", json={
         "id": "edge-01", "address": "10.0.0.1",
         "ssh": {"user": "deploy", "key": "~/.ssh/id_ed25519", "port": 22}, "tags": [],
@@ -280,13 +280,13 @@ def test_mcp_bearer_can_still_run_t2_restart(mcp_client, fake_ssh):
 
 
 @pytest.mark.parametrize(
-    ("path", "payload", "tier"),
+    ("path", "payload", "clearance"),
     [
-        ("/api/agents/a1/update?confirm=true", None, "T4"),
-        ("/api/agents/a1/decommission", {"purge": True, "confirm": True}, "T5"),
+        ("/api/agents/a1/update?confirm=true", None, "CL4"),
+        ("/api/agents/a1/decommission", {"purge": True, "confirm": True}, "CL5"),
     ],
 )
-def test_mcp_bearer_cannot_execute_human_only_actions(mcp_client, fake_ssh, path, payload, tier):
+def test_mcp_bearer_cannot_execute_human_only_actions(mcp_client, fake_ssh, path, payload, clearance):
     mcp_client.put("/api/hosts/edge-01", json={
         "id": "edge-01", "address": "10.0.0.1",
         "ssh": {"user": "deploy", "key": "~/.ssh/id_ed25519", "port": 22}, "tags": [],
@@ -296,7 +296,7 @@ def test_mcp_bearer_cannot_execute_human_only_actions(mcp_client, fake_ssh, path
     r = mcp_client.post(path, json=payload)
 
     assert r.status_code == 403
-    assert tier in r.json()["detail"]
+    assert clearance in r.json()["detail"]
     assert fake_ssh.calls == []
 
 

@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -18,7 +18,7 @@ from . import audit, auth, availability, board, bus, clients, cron_store, fleet,
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, AgentClient, CronJob, Host
-from .tiers import TIER_LABELS, CAPABILITY_TIERS, requires_confirm, tier_for
+from .clearances import CLEARANCE_LABELS, CAPABILITY_CLEARANCES, requires_confirm, clearance_for
 
 
 class FixRequest(BaseModel):
@@ -100,7 +100,7 @@ app = FastAPI(title="Beacon", version=VERSION, lifespan=lifespan, dependencies=[
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, target: str | None = None,
-                  **tier_params) -> dict | None:
+                  **clearance_params) -> dict | None:
     """Returns a "would run" dict if `capability` needs confirmation and
     didn't get it; None if the caller should proceed. This is the same
     plan-before-apply convention mcp/server.py has always applied to its own
@@ -108,32 +108,32 @@ def _confirm_gate(capability: str, confirm: bool, description: str, target: str 
     call gets the same protection an MCP client always had rather than
     executing immediately.
     """
-    tier, rationale = tier_for(capability, **tier_params)
-    if not requires_confirm(tier):
+    clearance, rationale = clearance_for(capability, **clearance_params)
+    if not requires_confirm(clearance):
         return None
     if confirm:
-        # Past the gate: the action may run. This is the one place every T2+
+        # Past the gate: the action may run. This is the one place every CL2+
         # action goes through, so it is where who/what/when is written down.
-        audit.record(store.ACTOR.get(), audit.VIA.get(), capability, tier.name, target, description)
+        audit.record(store.ACTOR.get(), audit.VIA.get(), capability, clearance.name, target, description)
         return None
     return {
         "would_run": True,
-        "tier": tier.name,
-        "tier_label": TIER_LABELS[tier],
-        "detail": f"Would {description} (tier {tier.name} — {rationale}). Call again with confirm=true to actually run it.",
+        "clearance": clearance.name,
+        "clearance_label": CLEARANCE_LABELS[clearance],
+        "detail": f"Would {description} (clearance {clearance.name} — {rationale}). Call again with confirm=true to actually run it.",
     }
 
 
-def _require_human_session(request: Request, capability: str, **tier_params) -> None:
-    """T4/T5 actions must not be authorized by MCP's service token.
+def _require_human_session(request: Request, capability: str, **clearance_params) -> None:
+    """CL4/CL5 actions must not be authorized by MCP's service token.
 
     The token is held by an LLM-facing MCP server, so `confirm=true` from that
     caller is not a human approval. Browser sessions remain the operator path
     until a real, out-of-band approval mechanism exists.
     """
-    tier, _ = tier_for(capability, **tier_params)
-    if tier >= 4 and getattr(request.state, "auth_via_mcp", False):
-        raise HTTPException(403, f"{tier.name} action requires a human browser session; MCP callers cannot execute it")
+    clearance, _ = clearance_for(capability, **clearance_params)
+    if clearance >= 4 and getattr(request.state, "auth_via_mcp", False):
+        raise HTTPException(403, f"{clearance.name} action requires a human browser session; MCP callers cannot execute it")
 
 app.include_router(auth.router)
 app.add_middleware(auth.CSRFMiddleware)
@@ -173,13 +173,13 @@ def get_version() -> dict:
     return {"version": VERSION}
 
 
-@app.get("/api/tiers")
-def list_tiers() -> dict:
-    """The tier registry: every gated capability, its tier, and the
-    rationale for that assignment. See backend/tiers.py."""
+@app.get("/api/clearances")
+def list_clearances() -> dict:
+    """The clearance registry: every gated capability, its clearance, and the
+    rationale for that assignment. See backend/clearances.py."""
     return {
-        cap: {"tier": tier.name, "tier_label": TIER_LABELS[tier], "rationale": rationale}
-        for cap, (tier, rationale) in CAPABILITY_TIERS.items()
+        cap: {"clearance": clearance.name, "clearance_label": CLEARANCE_LABELS[clearance], "rationale": rationale}
+        for cap, (clearance, rationale) in CAPABILITY_CLEARANCES.items()
     }
 
 
@@ -427,7 +427,7 @@ def preview_policy(body: PolicyText) -> dict:
 @app.put("/api/policy")
 def put_policy(body: PolicySave, request: Request):
     """Replace the access policy with the edited text. A human browser session
-    only (T4), asks for confirmation first, refuses invalid text and a policy
+    only (CL4), asks for confirmation first, refuses invalid text and a policy
     that changed since the editor loaded it, and keeps the old version in
     the fleet history."""
     _require_human_session(request, "set_policy")
@@ -542,7 +542,7 @@ class WorkflowCreateRequest(BaseModel):
     kind: str
     eligible_responder: str
     capability: str
-    tier: int
+    clearance: int = Field(validation_alias=AliasChoices("clearance", "tier"))  # `tier`: the name before the rename
     title: str
     summary: str
     options: list[str] = []
@@ -639,23 +639,23 @@ def _workflow_plan_for_push(agent_id: str, agent, host, driver) -> tuple[dict, d
     return target, binding
 
 
-def _validate_workflow_kind(kind: str, tier: int) -> None:
-    workflow.validate_kind_for_tier(kind, tier)
+def _validate_workflow_kind(kind: str, clearance: int) -> None:
+    workflow.validate_kind_for_clearance(kind, clearance)
 
 
 def _create_workflow(card_id: int, body: WorkflowCreateRequest, request: Request) -> dict:
-    _validate_workflow_kind(body.kind, body.tier)
+    _validate_workflow_kind(body.kind, body.clearance)
     try:
-        expected_tier, _ = tier_for(body.capability)
+        expected_clearance, _ = clearance_for(body.capability)
     except KeyError:
-        expected_tier = None
-    if expected_tier is not None and int(expected_tier) != body.tier:
-        raise workflow.WorkflowError(f"capability {body.capability!r} is tier {expected_tier.name}, not T{body.tier}")
+        expected_clearance = None
+    if expected_clearance is not None and int(expected_clearance) != body.clearance:
+        raise workflow.WorkflowError(f"capability {body.capability!r} is clearance {expected_clearance.name}, not CL{body.clearance}")
     actor = _workflow_actor(request)
     return workflow.create(
         card_id=card_id, kind=body.kind, requester=actor,
         eligible_responder=body.eligible_responder, capability=body.capability,
-        tier=body.tier, title=body.title, summary=body.summary, options=body.options,
+        clearance=body.clearance, title=body.title, summary=body.summary, options=body.options,
         target=body.target, plan_revision=body.plan_revision, plan_hash=body.plan_hash,
         expires_at=body.expires_at, context_id=body.context_id,
         consulted=body.consulted, consult_skipped=body.consult_skipped,
@@ -1176,7 +1176,7 @@ def put_agent(id_: str, agent: Agent, request: Request) -> Agent:
 
 class ClientCreate(BaseModel):
     kind: str = "claude"  # claude | codex | client: the first part of its id
-    max_tier: int = 3  # what it may answer for you, up to T3
+    max_clearance: int = Field(3, validation_alias=AliasChoices("max_clearance", "max_tier"))  # what it may answer for you, up to CL3
     label: str = ""
     confirm: bool = False
 
@@ -1189,7 +1189,7 @@ class ClientTokenRequest(BaseModel):
 
 class ClientUpdate(BaseModel):
     enabled: bool | None = None
-    max_tier: int | None = None
+    max_clearance: int | None = Field(None, validation_alias=AliasChoices("max_clearance", "max_tier"))
     confirm: bool = False
 
 
@@ -1226,15 +1226,15 @@ def clients_list() -> list[dict]:
 @app.post("/api/clients")
 def client_create(body: ClientCreate, request: Request) -> dict:
     """Make the signed-in operator's client agent and mint its first token, shown once. A person in a
-    browser session (T4), and only for themselves."""
+    browser session (CL4), and only for themselves."""
     _require_human_session(request, "create_client")
     person = _client_person(request)
     ident = clients.client_id(body.kind, person)  # ValueError -> 400
-    AgentClient(max_tier=body.max_tier)  # validated: 0 to 3
-    summary = f"create the client agent {ident!r} acting for {person} (answers up to T{body.max_tier}) and mint its token"
+    AgentClient(max_clearance=body.max_clearance)  # validated: 0 to 3
+    summary = f"create the client agent {ident!r} acting for {person} (answers up to CL{body.max_clearance}) and mint its token"
     if (gate := _confirm_gate("create_client", body.confirm, summary, target=ident)) is not None:
         return gate
-    agent = clients.create(body.kind, person, body.max_tier)
+    agent = clients.create(body.kind, person, body.max_clearance)
     token_id, token = clients.mint(agent.id, person, body.label)
     logger.warning("client agent %s created by %s", agent.id, person)
     return {"agent": _client_view(agent), "token": token, "token_id": token_id,
@@ -1272,14 +1272,14 @@ def client_revoke(id_: str, token_id: int, request: Request, confirm: bool = Fal
 
 @app.patch("/api/clients/{id_}")
 def client_update(id_: str, body: ClientUpdate, request: Request) -> dict:
-    """Turn a client off or lower its `max_tier` (any operator), or turn it back on or raise `max_tier`
+    """Turn a client off or lower its `max_clearance` (any operator), or turn it back on or raise `max_clearance`
     (a person in a browser session, and only the operator it acts for)."""
     agent = _client_agent(id_)
     current = agent.client
-    if body.enabled is None and body.max_tier is None:
-        raise HTTPException(400, "give enabled or max_tier")
-    new = AgentClient(**{**current.model_dump(), **{k: v for k, v in (("enabled", body.enabled), ("max_tier", body.max_tier)) if v is not None}})
-    widening = (new.enabled and not current.enabled) or new.max_tier > current.max_tier
+    if body.enabled is None and body.max_clearance is None:
+        raise HTTPException(400, "give enabled or max_clearance")
+    new = AgentClient(**{**current.model_dump(), **{k: v for k, v in (("enabled", body.enabled), ("max_clearance", body.max_clearance)) if v is not None}})
+    widening = (new.enabled and not current.enabled) or new.max_clearance > current.max_clearance
     if widening:
         _require_human_session(request, "update_client")
         if current.acts_for != _client_person(request):
@@ -1287,7 +1287,7 @@ def client_update(id_: str, body: ClientUpdate, request: Request) -> dict:
         capability = "update_client"
     else:
         capability = "disable_client"
-    summary = f"change {id_!r}: " + ", ".join(f"{k} {getattr(current, k)} -> {getattr(new, k)}" for k in ("enabled", "max_tier")
+    summary = f"change {id_!r}: " + ", ".join(f"{k} {getattr(current, k)} -> {getattr(new, k)}" for k in ("enabled", "max_clearance")
                                                 if getattr(current, k) != getattr(new, k))
     if (gate := _confirm_gate(capability, body.confirm, summary, target=id_)) is not None:
         return gate
@@ -1472,7 +1472,7 @@ def apply_fix(id_: str, body: FixRequest) -> dict:
 def get_config_diff(id_: str) -> dict:
     agent, host, driver = for_agent(id_, resolved=True)
     target, binding = _workflow_plan_for_push(id_, agent, host, driver)
-    return driver.config_diff(agent, host) | {"workflow": {"capability": "push_config", "tier": "T3", "target": target, **binding}}
+    return driver.config_diff(agent, host) | {"workflow": {"capability": "push_config", "clearance": "CL3", "target": target, **binding}}
 
 
 @app.post("/api/agents/{id_}/config-diff")
@@ -1491,12 +1491,12 @@ def push_config(id_: str, request: Request, confirm: bool = False,
                 workflow.mark_stale(workflow_request_id, _workflow_actor(request), "submitted plan binding differs from live plan")
             raise workflow.StalePlan("submitted plan binding does not match the current resolved push plan")
     workflow.authorize(
-        request_id=workflow_request_id, capability="push_config", tier=int(tier_for("push_config")[0]),
+        request_id=workflow_request_id, capability="push_config", clearance=int(clearance_for("push_config")[0]),
         actor=_workflow_actor(request), human=_workflow_human(request), target=target,
         plan_revision=binding["plan_revision"], plan_hash=binding["plan_hash"],
     )
     if workflow_request_id is None:
-        raise workflow.WorkflowError("approved workflow request id is required for tier T3 push_config")
+        raise workflow.WorkflowError("approved workflow request id is required for CL3 push_config")
     return _workflow_stream(driver.push_config(agent, host), workflow_request_id, _workflow_actor(request))
 
 

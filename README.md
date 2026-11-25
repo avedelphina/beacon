@@ -339,14 +339,14 @@ with `sudo`; the wizard asks for the container name). The command fetches the
 agent's install script, which holds its pull token, so the token never passes
 through the browser, the clipboard or a terminal history, and it works on hosts
 Beacon cannot SSH into. The host must trust Beacon's certificate for `curl`.
-Only a person in the web UI can create a code (T4); the MCP token cannot. A
+Only a person in the web UI can create a code (CL4); the MCP token cannot. A
 code is stored only as a hash, and an expired, used, or unknown code all
 answer the same 404. Beacon's own access log shows the code in the request
 path, which is harmless once it is used or expired.
 
 **Asked for through the board.** The second way: an agent (for itself) or an
 MCP client (for any agent) calls `enroll_request` on `/board/mcp`, which makes
-a T4 approval on a board card. A person approves it in the web UI, and the
+a CL4 approval on a board card. A person approves it in the web UI, and the
 requester calls `enroll_claim` once to get the same command. Nothing needs a
 browser session at claim time, because the person's approval was the session.
 The tools need a credential, so this serves a client with the MCP bearer, or an
@@ -580,7 +580,7 @@ be set in an agent's edit form or in its YAML. Tag changes change who may call
 whom, so check the Policy tab first.
 
 **Changing tags, `reach.callers`, or `reach.board` is a human-only action
-(tier T4).** The MCP token cannot do it, so it cannot regroup agents to get
+(CL4).** The MCP token cannot do it, so it cannot regroup agents to get
 around the policy editor.
 
 **The Policy tab** edits the file in the browser. **Check** validates the
@@ -588,7 +588,7 @@ text and shows, before anything is saved, what it would do: errors, likely
 mistakes, the new who-may-call-whom table with added paths marked `+` and
 removed ones `−`, and the agents that would restart. **Save** asks for
 confirmation, then writes the text exactly as typed, so comments and layout
-survive. It is a **human-only** action (tier T4): a logged-in browser
+survive. It is a **human-only** action (CL4): a logged-in browser
 session can save, but the MCP token cannot, so no automated caller can widen
 its own reach. MCP clients may read the policy and preview a change
 (`get_policy`, `preview_policy`).
@@ -781,10 +781,10 @@ Keep the old instance until every agent has moved.
 Claude Code, Codex, or any MCP client can take part in Beacon under its own identity, so what it
 does is recorded under its name and the access policy applies to it. It is an agent in the fleet
 with a `client` block instead of a `reach` block. It is bound to one operator (`acts_for`), has a
-ceiling (`max_tier`, 0 to 3, never higher) and an off switch (`enabled`).
+ceiling (`max_clearance`, 0 to 3, never higher) and an off switch (`enabled`).
 
 **Making one.** An operator opens the **Agents** tab, **AI clients**, **Add my client**, and chooses
-the kind (`claude-<you>`, `codex-<you>`) and the highest tier it may answer. Beacon makes the agent
+the kind (`claude-<you>`, `codex-<you>`) and the highest clearance it may answer. Beacon makes the agent
 (on an inventory-only host named `clients`, with no SSH, so nothing runs there) and shows its first
 token once, with the command to paste (`claude mcp add ...` for Claude Code, a URL and a header for
 other clients). You can only make your own, and only from a browser session: the MCP service token
@@ -799,21 +799,21 @@ holds; that one does not work for a client. A token reaches the board and the wo
 client, and nothing else.
 
 **Who may change it.** Any operator can revoke a token or turn a client off, so whoever notices a leak
-can stop it. Turning it back on, raising `max_tier`, and making tokens are for the operator it acts for.
+can stop it. Turning it back on, raising `max_clearance`, and making tokens are for the operator it acts for.
 Its binding is not editable through the agent record: `PUT /api/agents/{id}` refuses a change to the
 `client` block, and `/api/clients` is the one place that checks who is asking. Each change is a recorded
-action (`create_client`, `mint_client_token`, `update_client` at T4; `disable_client` at T2).
+action (`create_client`, `mint_client_token`, `update_client` at CL4; `disable_client` at CL2).
 
 **What it does for you.** Ask your client to check your workflows and it lists the requests you can
 see, addressed to you or to `human`, each with a `delegate` note: whether it may answer, and why not when
-it may not. It answers, for you, the requests addressed to you or to any operator, up to the tier you gave
-it (never above T3). That is an independent agent review, which is what T0 to T3 ask for; it is not you
+it may not. It answers, for you, the requests addressed to you or to any operator, up to the clearance you gave
+it (never above CL3). That is an independent agent review, which is what CL0 to CL3 ask for; it is not you
 approving, and the page and the card's history say so ("answered by claude-you, an AI client, for you").
 You are told by push and email what it answered, as it happens. When it is unsure it calls
 `workflow_require_human`, after which only a person in the web page can answer.
 
 **What it never does.**
-- It never answers tier 4 or 5. When one arrives where it can see it, you are told at once, and it is
+- It never answers CL4 or 5. When one arrives where it can see it, you are told at once, and it is
   told to tell you in the session.
 - It never answers a request that it or you made: an independent reviewer must. Another operator's
   client may.
@@ -902,12 +902,12 @@ the related cards they may see: a member's own cards and the ones their agents h
 agent's everything except intake cards the operators keep from agents.
 
 **"I am not sure": sending a request to a person.** Whoever may answer a pending request can call
-`workflow_require_human` (`POST /api/workflows/{id}/require-human`) with a reason. A tier belongs
-to the capability, so the request cannot become a T4 one; instead it keeps its plan binding and tier
+`workflow_require_human` (`POST /api/workflows/{id}/require-human`) with a reason. A clearance belongs
+to the capability, so the request cannot become a CL4 one; instead it keeps its plan binding and clearance
 and from then on only a person in the web page may answer it (the named person if it names one,
 otherwise any operator, even when it was addressed to an agent). The operators and the requester are
 told, the page and the card's history show the reason, and nothing clears the flag but that person's
-answer. T4 and T5 requests already need a person.
+answer. CL4 and CL5 requests already need a person.
 
 **Asking a person says whether a peer was asked first.** A request to a person (`human`
 or an email) made by an agent carries `consulted`, the peers it asked first with what each
@@ -1052,7 +1052,7 @@ where no one could see it). There are three kinds of answer:
   case their login uses.
 - An **agent id**, if that agent's access policy lets the asker call it.
 
-Tier 4 and 5 answers still need a person in the web page, and the claim of an
+Clearance 4 and 5 answers still need a person in the web page, and the claim of an
 enrollment request still needs `human`.
 
 **Notices.** Nobody has to poll. Beacon tells the other side, best-effort (a
@@ -1064,7 +1064,7 @@ failed notice is logged and never stops the request):
 - **People** get an email, if you configure a mail server. Without
   `BEACON_SMTP_HOST` nothing is sent. For `human` that is every operator and
   the owners of the agents the request is from or about; for an email
-  responder, only that person. The email says who is asking, the tier, the
+  responder, only that person. The email says who is asking, the clearance, the
   title, the expiry, and the first 800 characters of the summary (marked as
   written by the requester), then one link to Beacon's own page. It carries
   no plan hash and no link the agent supplied. At most 10 emails go to one
@@ -1117,7 +1117,7 @@ nothing is rewritten when nothing changed.
 
 A config fragment applied to many agents at once — "every EU relay runs this
 model stack" declared in one place instead of copied into every agent file.
-Create and change them with `PUT /api/templates/{name}` (T2) or by importing
+Create and change them with `PUT /api/templates/{name}` (CL2) or by importing
 YAML; a template that an agent still uses cannot be deleted.
 
 ### `fleet/cron_jobs/<id>.yaml`
@@ -1235,35 +1235,37 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 | **Reconcile** | Diagnoses drift patterns found in the wild — an orphaned unit (profile dir deleted, unit left behind), a unit stuck `failed`, installed-but-not-started, linger disabled. Dry run by default; each finding names a `fix` to apply individually. | `GET` (dry run) / `POST` (apply one fix) `/api/agents/{id}/reconcile` |
 | **Config** | Compares `desired.config`/`desired.env_keys` against the live `config.yaml` and `.env` **key names only** (secret values never leave the host). Push validates every declared path against the known Hermes config schema first — an unknown subkey of a known section is refused (the CLI would write it silently), unknown top-level keys push with a warning — then runs `hermes config set` per declared key and restarts the gateway if it's active. Both sides see the template-merged `desired`. | `GET`/`POST /api/agents/{id}/config-diff` |
 | **Availability** | Whether the agent answers over A2A, not over SSH: Beacon GETs the agent's `/health` (no token), and also records when the agent's host last pulled its mesh config. `online` = answered; `sync-only` = Beacon cannot reach it but its host synced in the last 15 minutes; `away` = not answering, but still within its `quiet_after` (a sleeping laptop); `offline` = neither; `no-a2a` = no `reach` block. When the agent does not answer and its sync still owes it a gateway restart (the gateway reads its listen address only at start), the detail says so, so a freshly enrolled agent that listens on the wrong address is not a mystery. SSH status (the systemd unit) is separate and shown in Inspect. | `GET /api/availability` |
-| **Templates** | A config fragment (`config` + `env_keys` only) merged under many agents' `desired` at once — model stacks, fallbacks, and auxiliary-task models declared once. Apply adds a template name to a batch of agent records; save and delete are T2. | `GET /api/templates`, `GET`/`PUT`/`DELETE /api/templates/{name}`, `POST /api/templates/{name}/apply` |
+| **Templates** | A config fragment (`config` + `env_keys` only) merged under many agents' `desired` at once — model stacks, fallbacks, and auxiliary-task models declared once. Apply adds a template name to a batch of agent records; save and delete are CL2. | `GET /api/templates`, `GET`/`PUT`/`DELETE /api/templates/{name}`, `POST /api/templates/{name}/apply` |
 | **Plugins** | Lists installed plugins with version, enabled/disabled state, and source. Updating one (git pull) can trip Hermes's own security scan and auto-disable it — that's surfaced as a `disabled_by_scan` flag rather than left buried in scan-report text, since an auto-disabled plugin can mean a messaging platform silently goes offline. | `GET /api/agents/{id}/plugins`, `POST /api/agents/{id}/plugins/{name}/update` |
 | **Restart** | Plain `gateway restart` — the everyday operate action, works regardless of current state. Distinct from Reconcile's problem-triggered fixes. | `POST /api/agents/{id}/restart` |
 | **Restart agent** | Hard restart of the whole agent. With `desired.container` set, `docker restart -t 120 <container>` (falls back to `sudo -n`); otherwise `systemctl --user restart` on the gateway unit, with no graceful drain. Use when Restart gateway can't recover it (s6 half-down, wedged gateway). | `POST /api/agents/{id}/restart-agent` |
 | **Update** | `hermes update` on the shared code checkout — affects every profile on that install, not just one agent's record of it. Streamed. | `POST /api/agents/{id}/update` |
 | **Decommission** | Stops and uninstalls the gateway, optionally purges the profile's data (refused for the default profile — that directory is shared with every other profile on the install) and optionally deletes the OS account. Keeps the record as a decommissioned agent rather than deleting it. | `POST /api/agents/{id}/decommission` (streamed) |
-| **Policy** | Edits the access policy, who may call whom (see [Access policy](#access-policy)). Check first, then save. Tier T4: a human browser session only, never the MCP token. | `POST /api/policy/preview`, `PUT /api/policy` |
+| **Policy** | Edits the access policy, who may call whom (see [Access policy](#access-policy)). Check first, then save. Clearance CL4: a human browser session only, never the MCP token. | `POST /api/policy/preview`, `PUT /api/policy` |
 
-## Autonomy tiers
+## Autonomy clearances
+
+*(Called tiers, T0 to T5, before 0.40.0. They are the clearances of the DeepOcean operating model.)*
 
 Every capability that changes something (not just reads it) is registered in
-[`backend/tiers.py`](backend/tiers.py) against a T0–T5 autonomy tier — how
+[`backend/clearances.py`](backend/clearances.py) against a CL0–CL5 autonomy clearance — how
 much oversight it needs, from "always allowed" to "human only." `GET
-/api/tiers` lists the full registry with the rationale for each assignment.
+/api/clearances` lists the full registry with the rationale for each assignment.
 
-**What's enforced today:** every capability at T2 or above requires an
+**What's enforced today:** every capability at CL2 or above requires an
 explicit `confirm=true` before it runs — call without it and the endpoint
 describes what it would do instead of doing it. This was previously only a
 courtesy the MCP server extended to its own callers; it's now a property of
 the API itself, so a direct HTTP call gets the same plan-before-apply step
-an MCP client always had. `decommission` additionally escalates from T4 to
-T5 when `purge` or `remove_user` is set — those are irreversible, the
+an MCP client always had. `decommission` additionally escalates from CL4 to
+CL5 when `purge` or `remove_user` is set — those are irreversible, the
 baseline decommission (stop + uninstall) is not.
 
-**What's named but not yet enforced:** T3 ("review") and T4/T5 ("human
+**What's named but not yet enforced:** CL3 ("review") and CL4/CL5 ("human
 approval") are recorded per capability, but Beacon has no reviewer or
 approval-chain mechanism yet — there's no way today to check that a review
-or approval actually happened before `confirm=true` was sent. The tier is
-visible and queryable; the gate behind it is still just the T2 confirm step
+or approval actually happened before `confirm=true` was sent. The clearance is
+visible and queryable; the gate behind it is still just the CL2 confirm step
 for everything, until that mechanism exists. See ROADMAP.md.
 
 ## Teleport / tbot
@@ -1345,7 +1347,7 @@ running the fleet. Their provider must say the email is verified
 templates, hosts or caller lists. They can:
 
 - see whether each of their agents answers over A2A, and its status;
-- restart an agent's gateway (T2: the same `confirm` step as for an operator);
+- restart an agent's gateway (CL2: the same `confirm` step as for an operator);
 - read its logs, only for agents an operator set **Owner may read its logs** on
   (`member_logs`): logs of a shared household agent hold other people's chats;
 - work the board for their agents: cards assigned to one of them or made by
@@ -1457,7 +1459,7 @@ session: they contain nothing about the fleet.
 Runs as its own service (`docker compose up` starts it on `:8643`, endpoint
 `/mcp`, streamable-http transport).
 
-Two tiers, matching the API's own read/write split:
+Two clearances, matching the API's own read/write split:
 
 - **Read-only** (`list_hosts`, `list_agents`, `get_agent`, `get_status`,
   `get_logs`, `reconcile_check`, `config_diff`, `list_plugins`,
@@ -1499,32 +1501,32 @@ this one credential.
 | `POST` | `/api/agents/{id}/call` | Send one A2A message to a registered agent (`{"message": "...", "context_id": "..."}`) — see [Agent bus](#agent-bus) |
 | `GET` | `/api/templates` | List templates, each with the agent ids using it |
 | `GET` | `/api/templates/{name}` | One template's content + its `used_by` agents |
-| `POST` | `/api/templates/{name}/apply` | Add a template to agents (`{"agent_ids": [...], "confirm": true}`) — T2 |
+| `POST` | `/api/templates/{name}/apply` | Add a template to agents (`{"agent_ids": [...], "confirm": true}`) — CL2 |
 | `GET` | `/api/agents/{id}/status` | Live status |
 | `GET` | `/api/agents/{id}/logs?lines=N` | Log tail |
 | `GET` | `/api/version` | Running Beacon version (shown in the page header) |
-| `GET` | `/api/tiers` | Tier registry — every gated capability, its tier, and why |
-| `POST` | `/api/agents/{id}/deploy?confirm=true` | Install/bring up (streamed) — T3 |
-| `GET`/`POST` | `/api/agents/{id}/reconcile` | Diagnose / apply one fix (`{"fix": "...", "confirm": true}`) — apply is T2 |
-| `GET`/`POST` | `/api/agents/{id}/config-diff?confirm=true` | Compare / push desired config — push is T3 |
+| `GET` | `/api/clearances` | Clearance registry — every gated capability, its clearance, and why |
+| `POST` | `/api/agents/{id}/deploy?confirm=true` | Install/bring up (streamed) — CL3 |
+| `GET`/`POST` | `/api/agents/{id}/reconcile` | Diagnose / apply one fix (`{"fix": "...", "confirm": true}`) — apply is CL2 |
+| `GET`/`POST` | `/api/agents/{id}/config-diff?confirm=true` | Compare / push desired config — push is CL3 |
 | `GET` | `/api/agents/{id}/plugins` | List installed plugins (name, version, status, source) |
-| `POST` | `/api/agents/{id}/plugins/{name}/update?confirm=true` | Update one plugin (git pull) — T3 |
-| `POST` | `/api/agents/{id}/restart?confirm=true` | Restart the gateway — T2 |
-| `POST` | `/api/agents/{id}/restart-agent?confirm=true` | Hard-restart the container or systemd unit — T3 |
-| `POST` | `/api/agents/{id}/enroll` | One-time enrollment command for an existing agent (`{"docker": "...", "schedule": true, "confirm": true}`) — T4, human session only |
+| `POST` | `/api/agents/{id}/plugins/{name}/update?confirm=true` | Update one plugin (git pull) — CL3 |
+| `POST` | `/api/agents/{id}/restart?confirm=true` | Restart the gateway — CL2 |
+| `POST` | `/api/agents/{id}/restart-agent?confirm=true` | Hard-restart the container or systemd unit — CL3 |
+| `POST` | `/api/agents/{id}/enroll` | One-time enrollment command for an existing agent (`{"docker": "...", "schedule": true, "confirm": true}`) — CL4, human session only |
 | `GET` | `/api/agents/{id}/onboarding` | The enrollment checklist: command run, first sync, schedule, A2A, chat status |
 | `GET` | `/enroll/{code}` | The install script for a valid code, once. No session: the code is the credential |
-| `POST` | `/api/agents/{id}/update?confirm=true` | `hermes update` on the shared install (streamed) — T4 |
-| `POST` | `/api/agents/{id}/decommission` | Tear down (`{"purge": bool, "remove_user": bool, "confirm": true}`, streamed) — T4, T5 if purge/remove_user |
+| `POST` | `/api/agents/{id}/update?confirm=true` | `hermes update` on the shared install (streamed) — CL4 |
+| `POST` | `/api/agents/{id}/decommission` | Tear down (`{"purge": bool, "remove_user": bool, "confirm": true}`, streamed) — CL4, CL5 if purge/remove_user |
 | `GET`/`PUT`/`DELETE` | `/api/cron-jobs/{id}` | Cron job CRUD |
 | `GET` | `/api/cron-jobs` | List cron jobs |
 | `GET` | `/api/push` | The key a browser subscribes with (`null` when Beacon cannot push) |
 | `POST`/`DELETE` | `/api/push` | Turn notifications on or off for this browser: the browser's `PushSubscription` as JSON, or `{"endpoint": "..."}` to delete. A new browser gets a test notice, and the answer holds the push service's status. Logged-in people only |
 
-Every row above marked with a tier requires `confirm=true` (query param, or
+Every row above marked with a clearance requires `confirm=true` (query param, or
 a `confirm` field alongside an existing JSON body) — omit it and you get a
 200 describing the action instead of it running. See [Autonomy
-tiers](#autonomy-tiers).
+clearances](#autonomy-clearances).
 
 Cron jobs are an exception: they do not use the `confirm=true` gate because
 they are pre-authorized fleet records, persisted ahead of time and reviewed
@@ -1533,11 +1535,11 @@ like any other fleet record. They are limited to a fixed set of v1 actions
 
 ## Audit log
 
-Every action that passes the confirm gate (`confirm=true`, tier T2 and up) writes
+Every action that passes the confirm gate (`confirm=true`, CL2 and up) writes
 a row to the `host_actions` table of the operational store: when, who (the
 person's email, or `beacon` for the MCP token, an agent's token, or open mode),
 how they were authenticated (`session`, `mcp`, `agent`, `open`), the capability
-and tier, the target agent or template, what the gate said it would do, and the
+and clearance, the target agent or template, what the gate said it would do, and the
 outcome. The row is written when the action is allowed to run, as `requested`;
 the streamed operations (deploy, update, config push, decommission) then record
 `succeeded`, `failed`, `did not finish` or `interrupted`. For the others,
@@ -1554,12 +1556,12 @@ it. Rows are never changed except for their outcome. The cron scheduler
   interface is designed to support others; nothing has exercised that yet.
 - **Workflow governance is scoped to the web-first request layer.** Typed
   decision/review/approval requests and their response history are stored in
-  the operational SQLite database. T3 `push_config` requires an approved
-  review bound to the exact plan revision/hash; T4/T5 workflow responses still
+  the operational SQLite database. CL3 `push_config` requires an approved
+  review bound to the exact plan revision/hash; CL4/CL5 workflow responses still
   require a human browser session. This is not a complete audit ledger for all
   Beacon operations.
 - **A partial audit trail.** Fleet changes keep who made them (`fleet_history`),
-  and every action that passes the confirm gate (T2 and up: deploy, push,
+  and every action that passes the confirm gate (CL2 and up: deploy, push,
   restart, decommission, templates, ...) is recorded with who, how they were
   authenticated, when, what, and, for the streamed operations, how it ended
   (see [Audit log](#audit-log)). Not recorded: the cron scheduler's own runs,
@@ -1688,7 +1690,7 @@ build of all three Docker images.
 backend/
   app.py          FastAPI routes
   auth.py         Zitadel OIDC login (PKCE) + the auth-gating middleware
-  tiers.py        capability -> autonomy tier registry
+  clearances.py        capability -> autonomy clearance registry
   store.py        the fleet in the operational store (hosts, agents, templates, cron, policy) + history
   fleet.py        YAML import/export and the first-start import (`python -m backend.fleet`)
   ssh.py          the one place that shells out to `ssh`

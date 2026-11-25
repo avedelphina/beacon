@@ -62,7 +62,7 @@ def test_a_docker_agent_runs_as_root_and_a_code_expires(joined, human_client):
 
 def test_only_a_person_can_mint_a_code_and_it_asks_first(joined, human_client, monkeypatch):
     asked = human_client.post("/api/agents/alpha/enroll", json={}).json()
-    assert asked["would_run"] is True and asked["tier"] == "T4"
+    assert asked["would_run"] is True and asked["clearance"] == "CL4"
     with opstore.connect() as db:
         assert db.execute("SELECT COUNT(*) FROM enrollments").fetchone()[0] == 0
 
@@ -102,7 +102,7 @@ def _approve(client, request, action="approved"):
 
 def test_an_approved_request_hands_its_requester_the_command_once(card, human_client):
     request = onboarding.request_enrollment("beacon", card, "alpha", None, "hermes", True)
-    assert request["state"] == "pending" and request["tier"] == 4 and request["eligible_responder"] == "human"
+    assert request["state"] == "pending" and request["clearance"] == 4 and request["eligible_responder"] == "human"
     with pytest.raises(workflow.WorkflowError, match="pending, not approved"):
         onboarding.claim(request["id"], "beacon")
 
@@ -148,7 +148,7 @@ def test_an_agent_cannot_approve_or_forge_its_own_request(card, human_client):
     forged_target = {"agent": "alpha", "docker": None, "docker_user": "hermes", "schedule": True}
     binding = workflow.plan_binding({"x": 1})
     forged = workflow.create(card_id=card, kind="approval", requester="beta", eligible_responder="human",
-                             capability="enroll_agent", tier=4, title="Enroll beta", summary="routine", options=None,
+                             capability="enroll_agent", clearance=4, title="Enroll beta", summary="routine", options=None,
                              target=forged_target, **binding)
     _approve(human_client, forged)
     with pytest.raises(workflow.UnauthorizedWorkflowAccess):
@@ -158,7 +158,7 @@ def test_an_agent_cannot_approve_or_forge_its_own_request(card, human_client):
     # Its own target but other words than the ones Beacon writes: also refused.
     own = {"agent": "beta", "docker": None, "docker_user": "hermes", "schedule": True}
     reworded = workflow.create(card_id=card, kind="approval", requester="beta", eligible_responder="human",
-                               capability="enroll_agent", tier=4, title="Enroll beta", summary="routine", options=None,
+                               capability="enroll_agent", clearance=4, title="Enroll beta", summary="routine", options=None,
                                target=own, **binding)
     _approve(human_client, reworded)
     with pytest.raises(workflow.WorkflowError, match="not made by enroll_request"):

@@ -64,7 +64,7 @@ Beacon 0.10.0 already provides the right starting shape:
 - Hermes config-schema validation before a config push.
 - Strict SSH host-key handling for static-key connections and support for
   Teleport/tbot SSH config files.
-- Capability tiers and confirmation gates.
+- Capability clearances and confirmation gates.
 - OIDC/browser authentication when configured, plus MCP authentication.
 - Fixed actions rather than arbitrary shell commands.
 - Agent-to-agent communication over A2A: an agent bus for Beacon and MCP
@@ -262,8 +262,8 @@ Related foundation work, in Horizon 0:
      `ASWebAuthenticationSession`), and Beacon accepting Zitadel access tokens
      as `Bearer`, with the role read on every request as for sessions;
    - the app's login counts as a human, as a browser session does (decided
-     2026-11-07): it answers workflow requests, T4/T5 ones included, and runs
-     T4/T5 actions directly (policy, access, enrollment, decommission).
+     2026-11-07): it answers workflow requests, CL4/CL5 ones included, and runs
+     CL4/CL5 actions directly (policy, access, enrollment, decommission).
      `_workflow_human` and `_require_human_session` must accept that login
      and never the MCP token or an agent's token;
    - an APNs sender (HTTP/2 with token auth) next to `backend/push.py`;
@@ -358,21 +358,21 @@ not the operator: Beacon says so everywhere it is recorded.
   card or sent mail, and uses the board and workflow tools with its own token. Named for the
   client and the operator (`claude-<operator>`, `codex-<operator>`). Any operator may have one.
   It replaces the placeholder endpoint a client would need today.
-- **Binding** *(delivered: the fields, `/api/clients`, and the page's AI clients panel; answering is next)*. `acts_for` (an operator's email) and `max_tier` (0 to 3, never higher). Saved only
+- **Binding** *(delivered: the fields, `/api/clients`, and the page's AI clients panel; answering is next)*. `acts_for` (an operator's email) and `max_clearance` (0 to 3, never higher). Saved only
   from a browser session, with history, like the access policy; the client cannot widen or set
   its own binding, and one switch turns it off.
-- **What it may answer.** Workflow requests at T0 to T3 addressed to its operator's email, or to
-  `human` (any operator), as long as that operator still is one. T4 and T5 stay a person in the
-  browser, as they are today. A T3 request asks for an independent agent review, which this
+- **What it may answer.** Workflow requests at CL0 to CL3 addressed to its operator's email, or to
+  `human` (any operator), as long as that operator still is one. CL4 and CL5 stay a person in the
+  browser, as they are today. A CL3 request asks for an independent agent review, which this
   satisfies; it is not human approval, and the docs and the page say so.
-- **Independence.** The responder must differ from the requester, as at T3 today, and the check
+- **Independence.** The responder must differ from the requester, as at CL3 today, and the check
   covers both identities: a client cannot answer a request that it or its own operator made, or
   it could ask as one and approve as the other. It may ask its own operator a question: it
   simply cannot answer that request itself.
-- **Escalate when unsure: `require_human`.** A tier belongs to the capability (a T3 action stays
-  T3 when Beacon runs it), so a request cannot become a T4 one. Any eligible reviewer, the client
+- **Escalate when unsure: `require_human`.** A clearance belongs to the capability (a CL3 action stays
+  CL3 when Beacon runs it), so a request cannot become a CL4 one. Any eligible reviewer, the client
   included, may instead set a one-way flag with a reason: the request keeps its plan binding and
-  tier, but only a person in the browser may answer it from then on, and the operator is told.
+  clearance, but only a person in the browser may answer it from then on, and the operator is told.
   Nothing but a person's answer clears it.
 - **Audit.** A response records who answered and for whom (`answered_by`, `on_behalf_of`): on the
   request, in the card's history, and on the page ("answered by `<client>` for `<operator>`").
@@ -382,10 +382,10 @@ not the operator: Beacon says so everywhere it is recorded.
 reading and answering for the operator, the audit fields and the notice to the operator). Not built: a
 batched digest (each answer is notified as it happens), a binding expiry, and a rate limit on answers.
 
-**Acceptance:** a client with `acts_for` and `max_tier: 3` answers a T2 decision and a T3 review
+**Acceptance:** a client with `acts_for` and `max_clearance: 3` answers a CL2 decision and a CL3 review
 addressed to its operator, and one addressed to `human`; its answer is recorded with both names; it
-is refused at T4 and T5, on its own and its operator's requests, and when its binding is off; it
-raises `require_human` on a T3 review, after which its own approval is refused and a person's is
+is refused at CL4 and CL5, on its own and its operator's requests, and when its binding is off; it
+raises `require_human` on a CL3 review, after which its own approval is refused and a person's is
 accepted; it cannot change its binding.
 
 **Open:** whether to expire a binding after a set time, and rate limits on answers per hour.
@@ -614,8 +614,8 @@ state.
 
 **Current slice:** Beacon now has the first web-first typed workflow layer. Decision,
 review, and approval requests are durable SQLite records attached to board cards,
-with response history, expiry, and exact plan revision/hash binding. T3
-`push_config` requires an approved review; T4/T5 responses require a human browser
+with response history, expiry, and exact plan revision/hash binding. CL3
+`push_config` requires an approved review; CL4/CL5 responses require a human browser
 session and MCP/bearer identity cannot satisfy that gate. This slice does not yet
 provide a complete action ledger, backup evidence chain, or verification receipt.
 
@@ -624,7 +624,7 @@ provide a complete action ledger, backup evidence chain, or verification receipt
 The change workflow becomes:
 
 1. Resolve the desired state and templates.
-2. Create a plan containing exact targets, parameters, risk tier, Git revision,
+2. Create a plan containing exact targets, parameters, risk clearance, Git revision,
    content digests, driver version, and expiry.
 3. Show the blast radius and required backup evidence.
 4. Obtain approval when the policy requires it.
@@ -702,7 +702,7 @@ operations.
 
 Policy should cover:
 
-- action tier and role ceiling;
+- action clearance and role ceiling;
 - proposer/approver separation for higher-risk changes;
 - maintenance windows;
 - maximum target count and blast radius;
@@ -828,7 +828,7 @@ The design principle is simple:
 
 The repository already has a substantial Horizon 0/early Horizon 1 base: tests,
 CI, fixed driver actions, config-schema validation, templates, cron actions,
-and confirmation tiers. Since 0.10.0 it also has agent-to-agent
+and confirmation clearances. Since 0.10.0 it also has agent-to-agent
 communication over A2A.
 
 Agent communication was the first priority and is complete as of 0.22.0.

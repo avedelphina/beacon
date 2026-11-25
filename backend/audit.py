@@ -3,7 +3,7 @@
 `fleet_history` records who changed a fleet record. This records the other half
 of the story: the actions that touch a host or hand someone access (deploy,
 push, restart, decommission, ...). Every action that passes the confirm gate
-(`app._confirm_gate`, the one chokepoint for tier T2 and up) leaves a row, so a
+(`app._confirm_gate`, the one chokepoint for CL2 and up) leaves a row, so a
 misuse of the MCP token or a browser session can at least be seen afterwards.
 
 A row is written when the action is allowed to run, with outcome "requested".
@@ -30,12 +30,12 @@ CURRENT: contextvars.ContextVar[int | None] = contextvars.ContextVar("audit_curr
 OUTCOMES = ("requested", "succeeded", "failed", "did not finish", "interrupted")
 
 
-def record(actor: str, via: str, capability: str, tier: str, target: str | None, detail: str) -> int:
+def record(actor: str, via: str, capability: str, clearance: str, target: str | None, detail: str) -> int:
     with opstore.connect() as db:
         action_id = db.execute(
-            "INSERT INTO host_actions (at, actor, via, capability, tier, target, detail, outcome)"
+            "INSERT INTO host_actions (at, actor, via, capability, clearance, target, detail, outcome)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, 'requested')",
-            (time.time(), actor, via, capability, tier, target, detail),
+            (time.time(), actor, via, capability, clearance, target, detail),
         ).lastrowid
     CURRENT.set(action_id)
     return action_id

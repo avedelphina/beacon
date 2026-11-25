@@ -1394,7 +1394,7 @@ function renderWorkflowItems(items) {
     return `<article class="workflow-item">
       <header class="wf-head">
         <div>
-          <div class="wf-kind">${esc(WORKFLOW_KIND_LABEL[w.kind] || w.kind)} · T${esc(w.tier)}</div>
+          <div class="wf-kind">${esc(WORKFLOW_KIND_LABEL[w.kind] || w.kind)} · CL${esc(w.clearance)}</div>
           <h3 class="wf-title">${esc(w.title)}</h3>
         </div>
         <span class="chip">${esc(w.state)}</span>
@@ -1473,7 +1473,7 @@ document.querySelector('[data-tab="workflows"]').addEventListener("click", rende
 
 // ---- AI clients ----
 // An operator's own AI client is an agent of its own (backend/clients.py). Making a client or a token
-// is T4: it asks for confirmation, then is sent with confirm=true. The token comes back once, here.
+// is CL4: it asks for confirmation, then is sent with confirm=true. The token comes back once, here.
 async function renderClients() {
   const body = document.getElementById("clients-body");
   let list;
@@ -1495,7 +1495,7 @@ async function renderClients() {
     return `<tr>
       <td><strong>${esc(c.id)}</strong></td>
       <td>${esc(c.acts_for ?? "-")}</td>
-      <td>T${esc(c.max_tier)}</td>
+      <td>CL${esc(c.max_clearance)}</td>
       <td>${c.enabled ? '<span class="chip">on</span>' : '<span class="chip chip-warn">off</span>'}</td>
       <td>${tokens}</td>
       <td class="row-actions">
@@ -1557,7 +1557,7 @@ document.getElementById("client-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = e.target;
   try {
-    const r = await json("/api/clients", "POST", { kind: f.kind.value, max_tier: Number(f.max_tier.value), label: f.label.value.trim(), confirm: true });
+    const r = await json("/api/clients", "POST", { kind: f.kind.value, max_clearance: Number(f.max_clearance.value), label: f.label.value.trim(), confirm: true });
     closeModal("client-modal");
     showClientToken(`${r.agent.id}: its first token`, r.settings);
     renderClients();

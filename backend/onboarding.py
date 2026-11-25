@@ -73,7 +73,7 @@ def _plan(requester: str, target: dict) -> dict:
                f"{agent_id}{where}. Approving lets {requester} receive it; the command carries {agent_id}'s pull token "
                f"in the script it fetches. Reject if you did not expect this.")
     return {"title": title, "summary": summary,
-            **workflow.plan_binding({"capability": CAPABILITY, "tier": 4, "title": title, "summary": summary,
+            **workflow.plan_binding({"capability": CAPABILITY, "clearance": 4, "title": title, "summary": summary,
                                      "options": [], "target": target})}
 
 
@@ -85,7 +85,7 @@ def _check_requester(requester: str, agent_id: str) -> None:
 def request_enrollment(requester: str, card_id: int, agent_id: str, docker: str | None, docker_user: str,
                        schedule: bool) -> dict:
     """The second way in: an agent (for itself) or an MCP client (for any agent)
-    asks, a person approves in the web UI (a T4 approval workflow), and the
+    asks, a person approves in the web UI (a CL4 approval workflow), and the
     requester then claims the command with claim(). The person is the gate the
     HTTP route's session check is for; the requester never needs a session."""
     _check_requester(requester, agent_id)
@@ -94,7 +94,7 @@ def request_enrollment(requester: str, card_id: int, agent_id: str, docker: str 
     target = {"agent": agent_id, "docker": docker or None, "docker_user": docker_user, "schedule": schedule}
     plan = _plan(requester, target)
     return workflow.create(card_id=card_id, kind="approval", requester=requester, eligible_responder="human",
-                           capability=CAPABILITY, tier=4, title=plan["title"], summary=plan["summary"], options=None,
+                           capability=CAPABILITY, clearance=4, title=plan["title"], summary=plan["summary"], options=None,
                            target=target, plan_revision=plan["plan_revision"], plan_hash=plan["plan_hash"])
 
 

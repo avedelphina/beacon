@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS workflow_requests (
     requester           TEXT NOT NULL,
     eligible_responder  TEXT NOT NULL,
     capability          TEXT NOT NULL,
-    tier                INTEGER NOT NULL,
+    clearance                INTEGER NOT NULL,
     title               TEXT NOT NULL,
     summary             TEXT NOT NULL,
     options_json        TEXT NOT NULL DEFAULT '[]',
@@ -207,8 +207,8 @@ CREATE TABLE IF NOT EXISTS host_actions (
     at          REAL NOT NULL,
     actor       TEXT NOT NULL,     -- the person's email, or "beacon" for the MCP token / open mode / an agent
     via         TEXT NOT NULL,     -- session | mcp | agent | open
-    capability  TEXT NOT NULL,     -- a key of tiers.CAPABILITY_TIERS
-    tier        TEXT NOT NULL,     -- T2 ... T5
+    capability  TEXT NOT NULL,     -- a key of clearances.CAPABILITY_CLEARANCES
+    clearance        TEXT NOT NULL,     -- CL2 ... CL5
     target      TEXT,              -- the agent (or template) acted on
     detail      TEXT NOT NULL,     -- what the gate said it would do
     outcome     TEXT NOT NULL      -- requested | succeeded | failed | did not finish | interrupted
@@ -325,6 +325,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
                          ("parent_id", "INTEGER REFERENCES cards (id)")):
         if column not in card_columns:
             conn.execute(f"ALTER TABLE cards ADD COLUMN {column} {decl}")
+    # "tier" became "clearance" (CL0 to CL5, the DeepOcean operating model's word). Existing databases keep their
+    # rows: the column is renamed, and the names stored in host_actions ("T2") become "CL2".
+    for table in ("workflow_requests", "host_actions"):
+        names = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if "tier" in names and "clearance" not in names:
+            conn.execute(f"ALTER TABLE {table} RENAME COLUMN tier TO clearance")
+    # Only when there is something to change: every connection runs this, and a write each time would collide.
+    if conn.execute("SELECT 1 FROM host_actions WHERE clearance GLOB 'T[0-5]' LIMIT 1").fetchone():
+        conn.execute("UPDATE host_actions SET clearance = 'CL' || substr(clearance, 2) WHERE clearance GLOB 'T[0-5]'")
     request_columns = {row[1] for row in conn.execute("PRAGMA table_info(workflow_requests)")}
     for column, decl in (("consulted_json", "TEXT NOT NULL DEFAULT '[]'"), ("consult_skipped", "TEXT"),
                          ("consult_flag", "TEXT"), ("require_human", "INTEGER NOT NULL DEFAULT 0"),

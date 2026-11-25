@@ -2,7 +2,7 @@ import re
 import zoneinfo
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 # Charset for every Beacon-owned record id (hosts, agents, cron jobs,
 # templates) — it becomes a fleet/ filename, so nothing path-like gets in.
@@ -154,19 +154,20 @@ class AgentReach(BaseModel):
 # everything that treats the mesh (peers, the mailbox, reminders, availability).
 #
 # `acts_for` binds the client to one operator (an email): it is whose requests the client reads and
-# answers (backend/workflow.py), up to `max_tier` and never above T3. `enabled` is the off switch.
+# answers (backend/workflow.py), up to `max_clearance` and never above CL3. `enabled` is the off switch.
 # They change only through /api/clients, by a person in a browser session; the client cannot.
 class AgentClient(BaseModel):
     board: bool = True
     acts_for: str | None = None
-    max_tier: int = 3
+    # `max_tier` is the name records were saved under before the clearance rename; it is still read.
+    max_clearance: int = Field(3, validation_alias=AliasChoices("max_clearance", "max_tier"))
     enabled: bool = True
 
-    @field_validator("max_tier")
+    @field_validator("max_clearance")
     @classmethod
-    def _tier_below_four(cls, v: int) -> int:
+    def _clearance_below_four(cls, v: int) -> int:
         if v < 0 or v > 3:
-            raise ValueError("max_tier is 0 to 3: tier 4 and above are for a person in the web page")
+            raise ValueError("max_clearance is 0 to 3: CL4 and above are for a person in the web page")
         return v
 
     @field_validator("acts_for")
@@ -276,7 +277,7 @@ class CronJob(BaseModel):
     timezone: str = "UTC"
     # Fixed set of Beacon-native actions. Shell execution is intentionally
     # excluded from v1 — it would be a large, hard-to-audit attack surface
-    # and would bypass the tier/confirm gates already wired into app.py.
+    # and would bypass the clearance/confirm gates already wired into app.py.
     command: dict = Field(default_factory=dict)
     target_agent_ids: list[str] = Field(default_factory=list)
     timeout: int | None = Field(default=None, ge=1)
