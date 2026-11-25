@@ -239,9 +239,11 @@ def build() -> MCPServer:
 
     @server.tool()
     def agent_owner(ctx: Context, agent_id: str | None = None) -> dict:
-        """Who owns an agent: its owner's email, or null. Leave agent_id out for your own. Use
-        the email as workflow_create's eligible_responder to ask that person; "human" asks any
-        operator instead. You may look up your own owner and the owners of agents you may call."""
+        """Who owns an agent: its owner's email, or null. Leave agent_id out for your own. For a
+        clearance 4 request (execute with human approval) the owner is the human authority: use
+        `ask_with` as workflow_create's eligible_responder. For clearance 5 (human-only) use "human",
+        an operator: an owner who is not an operator is refused. You may look up your own owner and
+        the owners of agents you may call."""
         return owner_lookup(_author(ctx), agent_id)
 
     @server.tool()
@@ -312,7 +314,10 @@ def build() -> MCPServer:
         the problem and your plan, and pass what you learned as consulted: [{"agent": "<peer>",
         "said": "<what they answered>", "context_id": "<thread, optional>"}]. If a peer cannot help
         (a plain yes/no, nobody to ask), say why in consult_skipped. A request to a person with neither
-        is flagged for them as "no peer consulted"; it is not refused. The person sees the card the request is
+        is flagged for them as "no peer consulted"; it is not refused. clearance is 0 to 5: 3 asks an
+        independent agent to review, 4 asks the human authority (your owner; an operator may always
+        answer), 5 asks an operator only. Beacon sends a clearance 4 request addressed to "human" to
+        your owner when you have one, and refuses 4 or 5 addressed to the wrong person. The person sees the card the request is
         on, but only what it points at: before you ask about a PR, issue or ticket, add it to the card with
         card_reference_add (the full url), because links in the summary are not shown as links. summary is Markdown:
         its first line says what you need, then the short plan. kind: decision (the

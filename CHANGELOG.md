@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Who the human authority is, by clearance.** A CL4 request (execute with human approval) goes to
+  the owner of the agent that asks: asked of `human`, it is sent to that agent's owner if it has one,
+  and it may also name an operator; to anyone else it is refused with the reason. A CL5 request
+  (human-only) goes to an operator (`human` or an operator's email) and only an operator can answer it,
+  never an owner who is not one. An operator can always see and answer a CL4, and nobody answers a
+  request they made. A CL4 left more than four hours on an owner who is not an operator tells the
+  operators once, from the scheduler tick; the card history records it. The agent skill (1.23.0)
+  and the `workflow_create` and `agent_owner` descriptions teach agents which clearance to choose
+  (CL4 for a change that can be rolled back, CL5 for secrets, money or data that cannot be recovered)
+  and whom to ask.
+
 ### Changed (breaking)
 
 - **Tiers are now clearances, CL0 to CL5.** The levels were always the DeepOcean operating model's

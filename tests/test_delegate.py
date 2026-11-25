@@ -130,11 +130,16 @@ def test_clearance_four_is_not_the_clients_to_answer_and_the_operator_is_told(wo
 
 
 def test_a_client_cannot_make_noise_about_a_request_that_is_not_its_operators(world, told):
-    request, binding = _ask(world, ANN, clearance=4)                       # addressed to the other operator
+    request, binding = _ask(world, ANN, clearance=3)                       # addressed to the other operator
     told.clear()
     with pytest.raises(workflow.UnauthorizedResponder):
         _answer(request, binding, actor="claude-tom")
     assert told == []
+    # CL4 is different: an operator may always answer it, so it is also their client's to flag.
+    t4, t4_binding = _ask(world, ANN, clearance=4)
+    with pytest.raises(workflow.HumanApprovalRequired):
+        _answer(t4, t4_binding, actor="claude-tom")
+    assert any(TOM in to and "needs you" in subject for to, subject, _ in told)
 
 
 def test_the_ceiling_a_client_was_given_holds(world):

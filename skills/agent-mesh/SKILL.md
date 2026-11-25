@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.22.0
+version: 1.23.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -218,21 +218,19 @@ only then.
   approves, the card is assigned to it, and if it declines, nothing changes),
   `review` (check work) or `approval` (permission to do something);
 - `eligible_responder`: who may answer. Beacon refuses any name that is not one
-  of these three, so a first name on its own does not work:
-  - `human`: any operator using Beacon's web page. Use it when it does not
-    matter which person answers;
+  of these three, so a first name on its own does not work. Which to use depends
+  on the clearance (see "Which clearance, and who answers" below):
+  - `human`: any operator using Beacon's web page;
   - the email of one person: call `agent_owner` first. It gives you your own
     owner, or the owner of an agent you may call, and the exact value to use
-    (`ask_with`). When the agent has no owner, it says `human`. Ask the owner
-    about their own agent; ask `human` for anything about the fleet;
-  - an agent id, if that agent's operator lets you ask it;
+    (`ask_with`). When the agent has no owner, it says `human`;
+  - an agent id, for a clearance 3 review, if that agent's operator lets you ask it;
 - `capability`: a short name for what you want to do, for example `ask`,
   `publish-report` or `delete-old-logs`;
-- `clearance`: how risky it is, from 0 to 5. Use `1` for a plain question. Use `3`
-  for a review of something that changes things, and `4` for an approval of
-  something hard to undo. Clearance 3 and above needs someone other than you to
-  answer, and CL4 and 5 need a person in the web page: an agent cannot
-  answer those;
+- `clearance`: how much oversight the action needs, from 0 to 5. These are the
+  clearances of the DeepOcean operating model. Use `1` for a plain question. Choose
+  the rest by the table below. CL3 and above needs someone other than you to answer,
+  and CL4 and CL5 need a person in the web page: an agent cannot answer those;
 - `title`: a few words that name the choice, such as "Roll out canary first?";
 - `summary`: the plan, in Markdown, short enough to read in a minute. A person reads
   it without your conversation, and for an approval it is the plan they approve, so
@@ -259,6 +257,26 @@ only then.
   cannot help (a plain yes or no, nobody to ask), say why in `consult_skipped`. A request to a
   person with neither is flagged for them as "no peer consulted"; it is not refused. A plain
   `question` is not flagged.
+
+**Which clearance, and who answers.** The clearance says how much oversight the action
+needs, and with it who the human authority is:
+
+| Clearance | You do | Who answers | Examples |
+|---|---|---|---|
+| CL0 Observe | read; no request | n/a | logs, metrics, inventory, reading docs |
+| CL1 Propose | prepare a proposal (a PR, a plan, a runbook), execute nothing | n/a, unless you ask a question | config PRs, capacity plans, postmortems |
+| CL2 Execute reversible | do it, then say what you did on the card | n/a | restarting a service, renewing a certificate, publishing a doc |
+| CL3 Execute with review | ask a `review`, act only when `approved` | an independent agent: another agent you may call, an operator's AI client, or `human` | package upgrades, dependency updates, routine rollouts |
+| CL4 Execute with human approval | prepare and stage, ask an `approval`, execute only when `approved`, exactly as written | **your owner** (`agent_owner`, use `ask_with`); an operator may always answer too | config rollouts, new service deploys, DNS changes, branch protection, merges to a shared main |
+| CL5 Human-only | ask an `approval`, execute only when `approved`, exactly as written | **an operator**: `human`, or an operator's email. Never an owner who is not an operator | credential rotation, payment or subscription changes, destructive data operations, hardware decommission |
+
+How to tell CL4 from CL5. Ask what is at stake if it goes wrong. If the change can be rolled back and
+touches something someone owns and relies on, it is CL4. If it touches secrets, money, or data that
+cannot be recovered, or it removes something for good, it is CL5. When you are between two, take the
+higher one; never take the lower to get a faster answer. Beacon helps: a CL4 request that you address
+to `human` goes to your owner if you have one, and a CL4 or CL5 request addressed to the wrong person
+is refused with the reason. If your owner does not answer a CL4 in about four hours, the operators are
+told, and they may answer it.
 
 Leave out `plan_revision` and `plan_hash`. Beacon ties the request to its own
 text. Then wait: do not do the thing until the state is `approved`.
@@ -291,8 +309,9 @@ it leads to:
 - If the action is hard to undo or changes a system other people rely on (branch protection,
   access, credentials, a deletion, a production setting), ask for an `approval` of the exact
   change before you do it. Put the real values in the plan: which system, which setting, the
-  old value, the new value. Use clearance `4` for something hard to undo; a person answers it in the
-  web page, and you cannot answer it yourself. Do not act until it is `approved`, and do
+  old value, the new value. Use CL4 for a change that can be rolled back and CL5 for one that cannot
+  (secrets, money, data that cannot be recovered); a person answers either in the web page, and you
+  cannot answer it yourself. Do not act until it is `approved`, and do
   exactly what it says.
 - If the action is easy to undo and inside your own work, carry on, and say what you did on
   the card.

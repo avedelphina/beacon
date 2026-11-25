@@ -141,6 +141,7 @@ def _visible(request: dict, actor: str, human: bool = False) -> bool:
         actor == request["requester"]
         or _is_responder(actor, eligible_responder)
         or (human and (eligible_responder == "human" or bool(request["require_human"])))
+        or (human and request["clearance"] >= 4 and _is_operator(actor))  # an operator may always see CL4 and CL5
     ):
         return True
     delegate = _delegate(actor)  # a client reads what the operator it acts for reads
@@ -186,6 +187,8 @@ def _card_text(request_id: int, row, kind: str, from_state: str | None, to_state
         return f"{label}: {to_state}{by}" + (f": {str(detail)[:300]}" if detail else "")
     if kind == "revised":
         return f"{label}: plan revised, pending again"
+    if kind == "operators_told":
+        return f"{label}: still waiting on {row['eligible_responder']} after {OPERATOR_NUDGE_SECONDS // 3600} h; the operators were told"
     if kind == "escalated":
         return f"{label}: needs a person: {payload.get('reason', '')[:200]}"
     if kind == "expired":
@@ -291,6 +294,10 @@ def _eligible(request: dict, actor: str, human: bool) -> bool:
     eligible_responder = request["eligible_responder"]
     if (delegate := _delegate(actor)) is not None and not human:
         return _delegate_note(request, actor, delegate)["can_answer"]
+    if request["clearance"] >= 4 and human and _is_operator(actor):
+        return actor.casefold() != request["requester"].casefold()  # an operator may always answer CL4, and only they CL5
+    if request["clearance"] >= 5:
+        return False
     if request["require_human"]:
         # Sent to a person: only a person in the browser answers. The named person if it names one;
         # otherwise (an agent, or any operator) any operator, since the agent it named may not.
@@ -360,6 +367,42 @@ def validate_participants(requester: str, eligible_responder: str) -> None:
         raise UnauthorizedWorkflowAccess(f"{eligible_responder} does not accept workflow requests from {requester}")
 
 
+def _is_operator(email: str) -> bool:
+    from . import auth  # not at import: auth reads its settings when it loads
+    return auth.role_for_email(email) == "operator"
+
+
+# Who is the human authority at each clearance. CL4 (execute with human approval) is the owner of the agent
+# that asks, and an operator may always answer it. CL5 (human-only) is an operator. The doc these levels come
+# from (DeepOcean's operating model) names the authority per object class; the owner of the asking agent is
+# the nearest thing Beacon knows, and the operators stay the backstop.
+OPERATOR_NUDGE_SECONDS = 4 * 3600  # a CL4 left this long with a non-operator owner: the operators are told
+
+
+def _route_clearance(requester: str, eligible_responder: str, clearance: int) -> str:
+    """Where a CL4 or CL5 request goes. CL4 asked of "human" by an agent that has an owner goes to that owner;
+    CL4 may also name an operator. CL5 goes to an operator ("human", or an operator's email), never to an
+    owner who is not one. Below CL4 the request is addressed as asked."""
+    if clearance < 4:
+        return eligible_responder
+    named = "@" in eligible_responder
+    if clearance >= 5:
+        if eligible_responder == "human" or (named and _is_operator(eligible_responder)):
+            return eligible_responder
+        raise WorkflowError("clearance 5 (human-only) goes to an operator: address it to \"human\" (any operator) or "
+                            "to an operator's email, not to an agent or to an agent's owner")
+    try:
+        owner = store.get_agent(requester).owner  # a person or Beacon asking has none
+    except (store.NotFound, store.InvalidId):
+        owner = None
+    if eligible_responder == "human":
+        return owner.casefold() if owner else "human"
+    if named and (_is_operator(eligible_responder) or (owner and eligible_responder.casefold() == owner.casefold())):
+        return eligible_responder
+    raise WorkflowError("clearance 4 (execute with human approval) goes to the owner of the agent that asks"
+                        + (f" ({owner})" if owner else "") + " or to an operator, not to an agent or to someone else")
+
+
 def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
            capability: str, clearance: int, title: str, summary: str,
            options: list[str] | None, target: dict[str, Any] | None,
@@ -380,6 +423,7 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
     validate_kind_for_clearance(kind, clearance)
     _validate_requester_responder(requester, eligible_responder, clearance)
     validate_participants(requester, eligible_responder)
+    eligible_responder = _route_clearance(requester, eligible_responder, clearance)
     if not isinstance(title, str) or not title.strip():
         raise WorkflowError("title must not be empty")
     if not isinstance(summary, str) or not summary.strip():
@@ -452,7 +496,7 @@ def list_requests(*, card_id: int | None = None, state: str | None = None,
             for name, as_person in viewers:
                 if as_person:
                     alternatives.append("(requester = ? OR lower(eligible_responder) = lower(?) OR eligible_responder = 'human'"
-                                        " OR require_human = 1)")
+                                        " OR require_human = 1" + (" OR clearance >= 4)" if _is_operator(name) else ")"))
                 else:
                     alternatives.append("(requester = ? OR (eligible_responder != 'human' AND lower(eligible_responder) = lower(?)))")
                 params.extend((name, name))
@@ -623,6 +667,28 @@ def escalate(request_id: int, *, actor: str, human: bool, reason: str, context_i
     escalated = get(request_id)
     _tell(notify.workflow_escalated, escalated, actor)
     return escalated
+
+
+def nudge_operators(now: float | None = None) -> int:
+    """A CL4 request addressed to an owner who is not an operator, still pending after OPERATOR_NUDGE_SECONDS: tell
+    the operators once, since they may always answer it. For the scheduler. Returns how many."""
+    now = time.time() if now is None else now
+    told = []
+    with opstore.connect() as db:
+        _expire_due(db, now)
+        rows = db.execute(
+            "SELECT * FROM workflow_requests WHERE state = 'pending' AND clearance = 4 AND operators_told_at IS NULL"
+            " AND created_at <= ? AND eligible_responder LIKE '%@%'", (now - OPERATOR_NUDGE_SECONDS,)).fetchall()
+        for row in rows:
+            request = _decode(row)
+            if _is_operator(request["eligible_responder"]):
+                continue  # an operator already has it
+            db.execute("UPDATE workflow_requests SET operators_told_at = ? WHERE id = ?", (now, request["id"]))
+            _event(db, request["id"], "beacon", "operators_told", "pending", "pending", {})
+            told.append(request)
+    for request in told:
+        _tell(notify.workflow_waiting_on_owner, get(request["id"]))
+    return len(told)
 
 
 def revise(request_id: int, *, actor: str, plan_revision: str, plan_hash: str,
