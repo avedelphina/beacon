@@ -115,6 +115,28 @@ def client_needs_person(request: dict, client: str, person: str) -> None:
         logger.exception("clearance-4 notice for request %s failed", request.get("id"))
 
 
+OPERATOR_NUDGE_HOURS = 4  # backend/workflow.py: OPERATOR_NUDGE_SECONDS
+
+
+def workflow_waiting_on_owner(request: dict) -> None:
+    """A CL4 request has waited on its owner: the operators may answer it, so they are told."""
+    try:
+        hours = OPERATOR_NUDGE_HOURS
+        _tell({p.casefold() for p in _operators()} - {request["requester"].casefold()},
+              f"Beacon: {request['title'][:80]} is waiting on {request['eligible_responder']}",
+              f"{request['requester']} asked {request['eligible_responder']} for {_what(request)} at CL{request['clearance']}: "
+              f"workflow request #{request['id']}, \"{request['title'][:200]}\". It has waited {hours} hours.\n\n"
+              "As an operator you can answer it yourself. Open the Workflows tab: "
+              f"{mesh.public_url() or 'your Beacon page'}\n")
+    except Exception:
+        logger.exception("owner-silent notice for request %s failed", request.get("id"))
+
+
+def _operators() -> set[str]:
+    from . import auth
+    return set(auth.ALLOWED_EMAILS)
+
+
 def _what(request: dict) -> str:
     return {"approval": "an approval", "review": "a review", "decision": "a decision", "question": "a question", "handoff": "a handoff"}.get(request["kind"], "an answer")
 

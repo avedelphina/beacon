@@ -176,7 +176,8 @@ def housekeeping() -> None:
     agent (backend/board.py, remind). Each part is isolated: one failing must not stop the
     other, or the cron jobs of the same tick."""
     from . import board, workflow
-    for name, step in (("workflow expiry", workflow.expire_due), ("board reminders", board.remind)):
+    for name, step in (("workflow expiry", workflow.expire_due), ("owner nudges", workflow.nudge_operators),
+                       ("board reminders", board.remind)):
         try:
             step()
         except Exception as exc:  # a cron-triggered process: log it and carry on
