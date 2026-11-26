@@ -147,7 +147,7 @@ def subscriptions(people: set[str]) -> list[dict]:
 # --- sending -----------------------------------------------------------------
 
 
-def deliver(subscription: dict, title: str) -> int | str:
+def deliver(subscription: dict, title: str, urgent: bool = False) -> int | str:
     """Send one notice now. The push service's HTTP status, or the error text."""
     key = _private_key()
     if key is None:
@@ -157,7 +157,9 @@ def deliver(subscription: dict, title: str) -> int | str:
         response = httpx.post(endpoint, timeout=10, content=encrypt(
             json.dumps({"title": title}).encode(), subscription["p256dh"], subscription["auth"]), headers={
                 "Authorization": _vapid(endpoint, key), "Content-Encoding": "aes128gcm",
-                "Content-Type": "application/octet-stream", "TTL": str(TTL_SECONDS)})
+                "Content-Type": "application/octet-stream", "TTL": str(TTL_SECONDS),
+                # RFC 8030: "high" asks the push service to wake a sleeping device now
+                **({"Urgency": "high"} if urgent else {})})
     except (httpx.HTTPError, ValueError) as exc:  # ValueError: keys that are not a P-256 point
         logger.warning("push to %s not sent: %s", urlparse(endpoint).hostname, exc)
         return str(exc)
@@ -168,11 +170,11 @@ def deliver(subscription: dict, title: str) -> int | str:
     return response.status_code
 
 
-def send(people: set[str], title: str) -> None:
+def send(people: set[str], title: str, urgent: bool = False) -> None:
     """Every browser these people subscribed, in the background: a slow push
     service must never hold up the agent pull or request that caused the notice."""
     if not people or _private_key() is None:
         return
     browsers = subscriptions(people)
     if browsers:
-        threading.Thread(target=lambda: [deliver(b, title) for b in browsers], daemon=True).start()
+        threading.Thread(target=lambda: [deliver(b, title, urgent) for b in browsers], daemon=True).start()

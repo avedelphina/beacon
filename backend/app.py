@@ -14,7 +14,7 @@ from pydantic import AliasChoices, BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import audit, auth, availability, board, bus, clients, cron_store, fleet, gitea_intake, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow
+from . import audit, auth, availability, board, bus, clients, cron_store, fleet, gitea_intake, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow, workhours
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, AgentClient, CronJob, Host
@@ -71,6 +71,7 @@ logger = logging.getLogger("beacon")
 
 @contextlib.asynccontextmanager
 async def lifespan(_app):
+    workhours.window()  # a mistyped BEACON_WORK_HOURS stops the start, not the first request
     fleet.bootstrap()  # a store with no fleet yet takes the YAML one, once
     try:
         problems = policy.problems(policy.load(), store.list_agents())
@@ -553,6 +554,7 @@ class WorkflowCreateRequest(BaseModel):
     context_id: str | None = None  # the A2A thread the request was made under, kept in the card's history
     consulted: list[dict] = []  # peers asked first: [{agent, said, context_id?}]
     consult_skipped: str | None = None  # why none was, when asking a person
+    urgent_reason: str | None = None  # why it cannot wait for working hours
 
 
 class WorkflowResponseRequest(BaseModel):
@@ -658,7 +660,7 @@ def _create_workflow(card_id: int, body: WorkflowCreateRequest, request: Request
         clearance=body.clearance, title=body.title, summary=body.summary, options=body.options,
         target=body.target, plan_revision=body.plan_revision, plan_hash=body.plan_hash,
         expires_at=body.expires_at, context_id=body.context_id,
-        consulted=body.consulted, consult_skipped=body.consult_skipped,
+        consulted=body.consulted, consult_skipped=body.consult_skipped, urgent_reason=body.urgent_reason,
     )
 
 

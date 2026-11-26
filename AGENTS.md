@@ -52,6 +52,8 @@ backend/
   schemas.py      pydantic models: Host, Agent, CronJob, SSHConfig
   templates.py    config template load/validate/deep-merge under `desired`
   clearances.py        capability -> CL0–CL5 autonomy clearance registry
+  workhours.py    fleet-wide working hours (BEACON_WORK_HOURS): waits for a person count
+                  these, urgent requests count the clock
   bus.py          agent bus: one A2A v1.0 SendMessage to an agent's reach.endpoint
   policy.py       the access policy (YAML text in the store): tag rules
                   (Tailscale-style) behind may_call; preview/save for the Policy
