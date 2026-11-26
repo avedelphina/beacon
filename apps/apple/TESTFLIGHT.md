@@ -88,6 +88,8 @@ None of this can be checked in the simulator or in CI.
       the value, and the host's file is gone.
 - [ ] Give an agent a secret, multi-line too: Face ID, then the file is in `beacon-secrets/inbox/`.
 - [ ] With a value shown, the app switcher shows a blank card; after returning from another app it is gone.
+- [ ] Pause a project from the phone: its agents get the notice; resume it. A "project … is paused"
+      notification opens that project.
 - [ ] iPad: both orientations, Split View, a hardware keyboard (⌘R, ⌘↩).
 - [ ] Dark mode, the largest Dynamic Type size, and VoiceOver on the answer
       buttons and the availability labels.

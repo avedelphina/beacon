@@ -39,10 +39,12 @@ struct AgentsView: View {
             }
             .refreshable { await load() }
         } detail: {
-            if let agent = agents.first(where: { $0.id == selected }) {
-                AgentDetailView(agent: agent, availability: availability[agent.id]).id(agent.id)
-            } else {
-                ContentUnavailableView("No agent selected", systemImage: "cpu")
+            NavigationStack {  // so that "Logs" pushes onto it
+                if let agent = agents.first(where: { $0.id == selected }) {
+                    AgentDetailView(agent: agent, availability: availability[agent.id]).id(agent.id)
+                } else {
+                    ContentUnavailableView("No agent selected", systemImage: "cpu")
+                }
             }
         }
         .task { await load() }

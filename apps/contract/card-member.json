@@ -1,0 +1,100 @@
+{
+  "assignee": "alpha",
+  "blocked_by": [],
+  "blocked_reason": null,
+  "blocks": [],
+  "body": "Old key expires Friday.",
+  "can": {
+    "change": true
+  },
+  "children": [],
+  "created_at": 1795000000.0,
+  "created_by": "tom@example.com",
+  "depends_on": [],
+  "done_when": null,
+  "escalated_at": null,
+  "events": [
+    {
+      "author": "tom@example.com",
+      "body": "Rotate the DNS key",
+      "card_id": 1,
+      "context_id": null,
+      "created_at": 1795000000.0,
+      "id": 1,
+      "kind": "created",
+      "notice_id": null
+    },
+    {
+      "author": "beacon",
+      "body": "notice queued for alpha",
+      "card_id": 1,
+      "context_id": null,
+      "created_at": 1795000000.0,
+      "id": 2,
+      "kind": "assign_notice",
+      "notice": {
+        "attempts": 0,
+        "last_error": null,
+        "state": "queued",
+        "task_id": "mbx-1",
+        "to": "alpha",
+        "updated_at": 1795000000.0
+      },
+      "notice_id": 1
+    },
+    {
+      "author": "tom@example.com",
+      "body": "added gitea pull_request 42: Rotate key",
+      "card_id": 1,
+      "context_id": null,
+      "created_at": 1795000000.0,
+      "id": 3,
+      "kind": "reference",
+      "notice_id": null
+    },
+    {
+      "author": "alpha",
+      "body": "workflow #1 (decision) Which key size?: asked human, URGENT (expires Friday) (after consulting beta)",
+      "card_id": 1,
+      "context_id": null,
+      "created_at": 1795000000.0,
+      "id": 4,
+      "kind": "workflow",
+      "notice_id": null
+    }
+  ],
+  "help_asked_at": null,
+  "help_by": null,
+  "help_roles": [],
+  "id": 1,
+  "links": [],
+  "milestone_id": null,
+  "next_action": null,
+  "parent": null,
+  "parent_id": null,
+  "participants": [],
+  "project": "infra",
+  "references": [
+    {
+      "card_id": 1,
+      "created_at": 1795000000.0,
+      "created_by": "tom@example.com",
+      "external_id": "42",
+      "id": 1,
+      "kind": "pull_request",
+      "label": "Rotate key",
+      "last_seen_at": null,
+      "last_seen_state": null,
+      "provider": "gitea",
+      "updated_at": 1795000000.0,
+      "url": "https://git.example.com/infra/pulls/42",
+      "workflow_id": null
+    }
+  ],
+  "reminded_at": null,
+  "reminders": 0,
+  "state": "todo",
+  "title": "Rotate the DNS key",
+  "updated_at": 1795000000.0,
+  "waiting_on": null
+}

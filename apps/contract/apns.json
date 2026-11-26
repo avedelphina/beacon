@@ -58,6 +58,17 @@
       "sound": "default"
     }
   },
+  "project": {
+    "aps": {
+      "alert": {
+        "title": "project infra is paused"
+      },
+      "sound": "default"
+    },
+    "beacon": {
+      "project": 3
+    }
+  },
   "secret": {
     "aps": {
       "alert": {

@@ -147,7 +147,7 @@ struct RequestDetailView: View {
             Section {
                 LabeledContent("Kind", value: "\(request.kind.capitalized) · CL\(request.clearance)")
                 LabeledContent("From", value: request.requester)
-                LabeledContent("To", value: request.eligibleResponder == "human" ? "a person" : request.eligibleResponder)
+                LabeledContent("To", value: request.responderLabel)
                 LabeledContent("Expires", value: Date(timeIntervalSince1970: request.expiresAt).formatted(date: .abbreviated, time: .shortened))
                 LabeledContent("State", value: request.state.replacingOccurrences(of: "_", with: " "))
                 if let urgent = request.urgentReason { Text(verbatim: "Urgent: \(urgent)").foregroundStyle(.red) }

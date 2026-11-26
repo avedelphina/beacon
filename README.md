@@ -1568,7 +1568,8 @@ session: they contain nothing about the fleet.
 
 The iOS and iPadOS app lives in [`apps/apple/`](apps/apple)
 ([plan](docs/ios-app-plan.md)): requests you can answer (with lock-screen Approve
-and Reject up to CL3), agents with their state, logs and restart, and the board.
+and Reject up to CL3), agents with their state, logs, restart and secrets, the
+board, and projects (read, pause, resume, status).
 Setup, running it on a device and TestFlight are in
 [`apps/apple/TESTFLIGHT.md`](apps/apple/TESTFLIGHT.md). It does not keep a
 browser session. It logs in once and Beacon gives the device a token of its own.

@@ -429,6 +429,12 @@ View, dark mode, Dynamic Type, VoiceOver labels on the action buttons).
 P1 and P3's login/skeleton can run in parallel once the endpoint shapes in §3.1
 are fixed; P3 needs P1 merged for anything past login.
 
+**P7 — Secrets (done).** `apps/apple/Beacon/Secrets.swift`: list, reveal and give, signed after Face
+ID; nothing kept on the device.
+
+**P8 — Projects (done).** `Projects.swift`: read, pause/resume, status, comment. Creating, goals,
+milestones and closing stay in the web page.
+
 **Later, not in this plan:** macOS destination; CL4/CL5 direct actions in the
 app (policy save, decommission — the backend already accepts a signed request);
 widgets; a "trust this CA" option; Xcode Cloud or fastlane; Critical Alerts, so

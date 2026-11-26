@@ -1,0 +1,34 @@
+[
+  {
+    "active_at": 1795000000.0,
+    "can": {
+      "goal": true,
+      "steer": true
+    },
+    "cards": {
+      "todo": 1
+    },
+    "created_at": 1795000000.0,
+    "created_by": "tom@example.com",
+    "done_when": "none expires",
+    "evidence": null,
+    "goal": "Keys stay fresh",
+    "goal_by": "tom@example.com",
+    "id": 1,
+    "links": [
+      {
+        "label": "repo",
+        "url": "https://git.example.com/infra"
+      }
+    ],
+    "name": "infra",
+    "owner": "tom@example.com",
+    "paused_by": null,
+    "stall_at": null,
+    "stall_step": 0,
+    "state": "active",
+    "status": "Waiting for the approval",
+    "status_at": 1795000000.0,
+    "updated_at": 1795000000.0
+  }
+]

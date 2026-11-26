@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Projects in the app.** A Projects tab: each project's state, owner and card counts; its goal,
+  status, milestones with their evidence, links, cards and history. The owner side can pause one (its
+  agents are told to stop), resume it and post a status; anyone who sees it can comment. Tapping a
+  project notice opens the project. Creating, goals, milestones and closing stay in the web page. Cards
+  show when help is wanted and their milestone; a review asked of a class of agent reads "any <class>";
+  and a member is no longer offered a state change on someone else's card (a member's card answer now
+  has `can.change`).
 - **Secrets in the app.** An agent's screen opens its secrets: what it left for you, revealed once after
   Face ID or Touch ID, and giving it a password, key or token. The app keeps nothing: a revealed value is
   covered when the app is not in front and gone once it is in the background, a copy stays on the device

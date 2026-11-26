@@ -1,0 +1,131 @@
+{
+  "active_at": 1795000000.0,
+  "can": {
+    "goal": true,
+    "steer": true
+  },
+  "card_list": [
+    {
+      "assignee": "alpha",
+      "blocked_by_count": 0,
+      "blocked_reason": null,
+      "body": "Old key expires Friday.",
+      "created_at": 1795000000.0,
+      "created_by": "tom@example.com",
+      "delivery": {
+        "answered_at": null,
+        "error": null,
+        "sent_at": 1795000000.0,
+        "state": "queued",
+        "to": "alpha"
+      },
+      "done_when": null,
+      "escalated_at": null,
+      "help_asked_at": null,
+      "help_by": null,
+      "help_roles": [],
+      "id": 1,
+      "links": [],
+      "milestone_id": null,
+      "next_action": null,
+      "parent_id": null,
+      "participants": [],
+      "project": "infra",
+      "references": [
+        {
+          "card_id": 1,
+          "created_at": 1795000000.0,
+          "created_by": "tom@example.com",
+          "external_id": "42",
+          "id": 1,
+          "kind": "pull_request",
+          "label": "Rotate key",
+          "last_seen_at": null,
+          "last_seen_state": null,
+          "provider": "gitea",
+          "updated_at": 1795000000.0,
+          "url": "https://git.example.com/infra/pulls/42",
+          "workflow_id": null
+        }
+      ],
+      "reminded_at": null,
+      "reminders": 0,
+      "state": "todo",
+      "title": "Rotate the DNS key",
+      "updated_at": 1795000000.0,
+      "waiting_on": null
+    }
+  ],
+  "created_at": 1795000000.0,
+  "created_by": "tom@example.com",
+  "done_when": "none expires",
+  "events": [
+    {
+      "author": "tom@example.com",
+      "body": "goal: Keys stay fresh\ndone when: none expires\nowner: tom@example.com",
+      "created_at": 1795000000.0,
+      "id": 1,
+      "kind": "created",
+      "project_id": 1
+    },
+    {
+      "author": "tom@example.com",
+      "body": "added #1 New key live (done when: all zones signed)",
+      "created_at": 1795000000.0,
+      "id": 2,
+      "kind": "milestone",
+      "project_id": 1
+    },
+    {
+      "author": "tom@example.com",
+      "body": "status: Waiting for the approval",
+      "created_at": 1795000000.0,
+      "id": 3,
+      "kind": "status",
+      "project_id": 1
+    },
+    {
+      "author": "tom@example.com",
+      "body": "links changed",
+      "created_at": 1795000000.0,
+      "id": 4,
+      "kind": "edit",
+      "project_id": 1
+    }
+  ],
+  "evidence": null,
+  "goal": "Keys stay fresh",
+  "goal_by": "tom@example.com",
+  "id": 1,
+  "links": [
+    {
+      "label": "repo",
+      "url": "https://git.example.com/infra"
+    }
+  ],
+  "milestones": [
+    {
+      "can_change": true,
+      "closed_at": null,
+      "closed_by": null,
+      "created_at": 1795000000.0,
+      "done_when": "all zones signed",
+      "due": "2026-12-01",
+      "evidence": null,
+      "id": 1,
+      "project_id": 1,
+      "set_by": "tom@example.com",
+      "state": "open",
+      "title": "New key live"
+    }
+  ],
+  "name": "infra",
+  "owner": "tom@example.com",
+  "paused_by": null,
+  "stall_at": null,
+  "stall_step": 0,
+  "state": "active",
+  "status": "Waiting for the approval",
+  "status_at": 1795000000.0,
+  "updated_at": 1795000000.0
+}

@@ -68,6 +68,7 @@ struct CardRow: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(card.title).lineLimit(2)
             Text(["#\(card.id)", card.assignee ?? "unassigned", card.project, card.blockedReason,
+                  card.helpBy == nil ? nil : "help wanted",
                   card.blockedByCount.flatMap { $0 > 0 ? "after \($0) other\($0 == 1 ? "" : "s")" : nil }]
                 .compactMap { $0 }.joined(separator: " · "))
                 .font(.caption).foregroundStyle(.secondary)
@@ -95,10 +96,21 @@ struct CardView: View {
                     if let project = card.project { LabeledContent("Project", value: project) }
                     LabeledContent("Made by", value: card.createdBy)
                     // A closure, not `set: move`: Swift 6.3 (Xcode 26, as on CI) crashes on the method reference.
-                    Picker("State", selection: Binding(get: { card.state }, set: { move(to: $0) })) {
-                        ForEach(Board.states, id: \.self) { Text($0).tag($0) }
+                    if card.mayChange {
+                        Picker("State", selection: Binding(get: { card.state }, set: { move(to: $0) })) {
+                            ForEach(Board.states, id: \.self) { Text($0).tag($0) }
+                        }
+                        .disabled(working)
+                    } else {
+                        LabeledContent("State", value: card.state)
+                        Text("Someone else's card in a project you take part in: you can read and comment.")
+                            .font(.footnote).foregroundStyle(.secondary)
                     }
-                    .disabled(working)
+                    if let milestone = card.milestoneId { LabeledContent("Milestone", value: "#\(milestone)") }
+                    if let asking = card.helpBy {
+                        let roles = (card.helpRoles ?? []).joined(separator: ", ")
+                        LabeledContent("Help wanted", value: roles.isEmpty ? "asked by \(asking)" : "\(roles), asked by \(asking)")
+                    }
                     if card.state == "blocked" {
                         LabeledContent("Why", value: [card.blockedReason, card.waitingOn].compactMap { $0 }.joined(separator: ": "))
                     }
