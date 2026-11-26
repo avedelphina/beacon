@@ -154,6 +154,9 @@ nonisolated struct Client: Sendable {
     let server: URL
     let token: String?
 
+    /// No disk cache and no cookies: what Beacon answers (plans, logs, a revealed secret) is not kept.
+    static let session = URLSession(configuration: .ephemeral)
+
     static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -197,7 +200,7 @@ nonisolated struct Client: Sendable {
             request.setValue(signedAt, forHTTPHeaderField: "X-Beacon-Signed-At")
             request.setValue(signature.base64EncodedString(), forHTTPHeaderField: "X-Beacon-Signature")
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 401, token != nil { throw APIError.loggedOut }
         guard (200..<300).contains(status) else {

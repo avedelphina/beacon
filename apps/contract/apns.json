@@ -57,5 +57,16 @@
       },
       "sound": "default"
     }
+  },
+  "secret": {
+    "aps": {
+      "alert": {
+        "title": "alpha has a secret for you"
+      },
+      "sound": "default"
+    },
+    "beacon": {
+      "agent": "alpha"
+    }
   }
 }

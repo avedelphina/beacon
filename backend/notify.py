@@ -296,10 +296,11 @@ def _footer() -> str:
 
 
 def secret_offered(agent_id: str, name: str) -> None:
-    """Names only: the value stays on the host until a person reveals it."""
+    """Names only: the value stays on the host until a person reveals it. The app is told which
+    agent, so that a tap opens its secrets."""
     _tell(_people_for(agent_id), f"Beacon: {agent_id} has a secret for you",
           f"{agent_id} left a secret named {name!r} for you. Reveal it under Agents, Inspect, Secrets: "
-          f"{mesh.public_url() or 'your Beacon page'}\n")
+          f"{mesh.public_url() or 'your Beacon page'}\n", about={"agent": agent_id})
 
 
 # --- email -----------------------------------------------------------------

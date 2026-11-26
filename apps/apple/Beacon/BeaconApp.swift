@@ -25,6 +25,8 @@ final class Session {
     var incompatible: String?
     /// A request to show, from a tapped notification.
     var openRequest: Int?
+    /// An agent whose secrets to show, from a tapped notification ("alpha has a secret for you").
+    var openSecrets: String?
     /// Bumped when something changed the requests (a notice arrived, an answer from a notification).
     var refreshes = 0
     var pushProblem: String?
@@ -116,5 +118,6 @@ struct MainView: View {
         .onChange(of: phase) { if phase == .active { Task { await session.resumeNotifications() } } }
         // A tapped notification is about a request, whichever tab was open.
         .onChange(of: session.openRequest, initial: true) { if session.openRequest != nil { tab = .requests } }
+        .onChange(of: session.openSecrets, initial: true) { if session.openSecrets != nil { tab = .agents } }
     }
 }
