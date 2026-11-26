@@ -97,6 +97,7 @@ frontend/         static page, no build
 apps/contract/    what every native app is tested against: the signature test vector, and
                   API answers written and checked by tests/test_app_contract.py
                   (BEACON_UPDATE_CONTRACT=1 to regenerate after an intended change)
+                  The app keeps no secret value and no cache of Beacon's answers.
 apps/apple/       the iOS/iPadOS app: SwiftUI, no packages, Xcode project with synchronized
                   folders (add a .swift file to Beacon/ and it is in the target); personal
                   signing settings in the gitignored Config/Local.xcconfig

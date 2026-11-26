@@ -84,6 +84,10 @@ None of this can be checked in the simulator or in CI.
       again and a notice arrives without logging in again.
 - [ ] Log out: no further notices arrive on that phone.
 - [ ] Restart an agent: Beacon's "Would restart…" text shows first.
+- [ ] A secret an agent offers: the notification opens its secrets; Reveal asks for Face ID once, shows
+      the value, and the host's file is gone.
+- [ ] Give an agent a secret, multi-line too: Face ID, then the file is in `beacon-secrets/inbox/`.
+- [ ] With a value shown, the app switcher shows a blank card; after returning from another app it is gone.
 - [ ] iPad: both orientations, Split View, a hardware keyboard (⌘R, ⌘↩).
 - [ ] Dark mode, the largest Dynamic Type size, and VoiceOver on the answer
       buttons and the availability labels.
