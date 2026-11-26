@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 /// Who is logged in where, this person's devices, and logging out.
 struct SettingsView: View {
@@ -6,6 +7,9 @@ struct SettingsView: View {
     @State private var devices: [Device] = []
     @State private var version: Version?
     @State private var problem: String?
+    @State private var notifications: UNAuthorizationStatus?
+    @Environment(\.scenePhase) private var phase
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
@@ -27,8 +31,16 @@ struct SettingsView: View {
                 } footer: {
                     Text("A device stays logged in until it has not been used for 30 days. Log out a lost one from the web page.")
                 }
-                if let pushProblem = session.pushProblem {
-                    Section("Notifications") { Text(pushProblem).foregroundStyle(.red) }
+                Section {
+                    LabeledContent("Notifications", value: Self.describe(notifications))
+                    if notifications == .denied, let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+                        Button("Open notification settings") { openURL(url) }
+                    }
+                    if let pushProblem = session.pushProblem { Text(pushProblem).foregroundStyle(.red) }
+                } footer: {
+                    if notifications == .denied {
+                        Text("Without them this device hears nothing about requests that wait for you.")
+                    }
                 }
                 Section {
                     Button("Log out", role: .destructive, action: logOut)
@@ -36,12 +48,22 @@ struct SettingsView: View {
                 if let problem { Section { Text(problem).foregroundStyle(.red) } }
             }
             .navigationTitle("Settings")
+            .task(id: phase) { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
             .task {
                 guard let client = session.client else { return }
                 version = try? await client.get("/api/version")
                 let all: [Device] = (try? await client.get("/api/app/devices")) ?? []
                 devices = all.filter { $0.email == session.email }
             }
+        }
+    }
+
+    static func describe(_ status: UNAuthorizationStatus?) -> String {
+        switch status {
+        case .authorized, .provisional, .ephemeral: "On"
+        case .denied: "Off"
+        case .notDetermined: "Not asked yet"
+        default: "-"
         }
     }
 

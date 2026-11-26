@@ -185,7 +185,15 @@ nonisolated struct Client: Sendable {
         if let key {
             let signedAt = String(Date().timeIntervalSince1970)
             let message = Signing.requestMessage(method: method, path: path, signedAt: signedAt, body: body ?? Data())
-            let signature = try await Task.detached { try key.sign(message, reason: reason) }.value
+            let signature: Data
+            do {
+                signature = try await Task.detached { try key.sign(message, reason: reason) }.value
+            } catch {
+                // The system's own error says little. Either the person cancelled, or the key is gone
+                // (`.biometryCurrentSet`: a face or finger added since login destroys it).
+                throw APIError.unreadable("Not signed, so nothing was sent. If you did not cancel \(Biometry.name): a face or "
+                                          + "finger added since you logged in ends this device's key. Log out and log in again.")
+            }
             request.setValue(signedAt, forHTTPHeaderField: "X-Beacon-Signed-At")
             request.setValue(signature.base64EncodedString(), forHTTPHeaderField: "X-Beacon-Signature")
         }

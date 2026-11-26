@@ -58,6 +58,9 @@ final class Session {
         token = nil
         deviceId = nil
         role = nil
+        // A logged-out phone shows nothing of Beacon's: no more notices, none left on the lock screen.
+        UIApplication.shared.unregisterForRemoteNotifications()
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         UNUserNotificationCenter.current().setBadgeCount(0)
     }
 
@@ -97,6 +100,7 @@ struct RootView: View {
 /// A tab bar on iPhone; on iPad the same tabs can be a sidebar.
 struct MainView: View {
     @Environment(Session.self) private var session
+    @Environment(\.scenePhase) private var phase
     @State private var tab = Tabs.requests
 
     enum Tabs: Hashable { case requests, agents, board, settings }
@@ -109,6 +113,7 @@ struct MainView: View {
             Tab("Settings", systemImage: "gearshape", value: Tabs.settings) { SettingsView() }
         }
         .tabViewStyle(.sidebarAdaptable)
+        .onChange(of: phase) { if phase == .active { Task { await session.resumeNotifications() } } }
         // A tapped notification is about a request, whichever tab was open.
         .onChange(of: session.openRequest, initial: true) { if session.openRequest != nil { tab = .requests } }
     }

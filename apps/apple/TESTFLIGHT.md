@@ -79,7 +79,10 @@ None of this can be checked in the simulator or in CI.
 - [ ] A tap on a notification opens that request, from a closed app too.
 - [ ] A member account sees only its agents, cards and requests.
 - [ ] Revoke the device on the web page: the app returns to login.
-- [ ] Add a face or finger in Settings: a CL4 answer asks you to log in again.
+- [ ] Add a face or finger in Settings: a CL4 answer is not sent and says to log in again.
+- [ ] Turn Beacon's notifications off in the system Settings: the app's Settings says Off; turn them on
+      again and a notice arrives without logging in again.
+- [ ] Log out: no further notices arrive on that phone.
 - [ ] Restart an agent: Beacon's "Would restart…" text shows first.
 - [ ] iPad: both orientations, Split View, a hardware keyboard (⌘R, ⌘↩).
 - [ ] Dark mode, the largest Dynamic Type size, and VoiceOver on the answer

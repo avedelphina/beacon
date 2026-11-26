@@ -21,7 +21,8 @@ struct AgentsView: View {
                             Spacer()
                             AvailabilityPill(state: availability[agent.id]?.state ?? "unknown")
                         }
-                        Text(([agent.host] + agent.tags).joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
+                        Text(verbatim: ([agent.host] + agent.tags).joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
+                        if let owner = agent.owner { Text(verbatim: owner).font(.caption).foregroundStyle(.secondary) }
                     }
                     .tag(agent.id)
                 }
@@ -32,7 +33,7 @@ struct AgentsView: View {
                 }
             }
             .navigationTitle("Agents")
-            .searchable(text: $search, prompt: "Name, host or tag")
+            .searchable(text: $search, prompt: "Name, host, tag or owner")
             .toolbar {
                 ToolbarItem { Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }.keyboardShortcut("r") }
             }
@@ -50,7 +51,7 @@ struct AgentsView: View {
     static func matching(_ agents: [Agent], _ search: String) -> [Agent] {
         let needle = search.trimmingCharacters(in: .whitespaces).lowercased()
         guard !needle.isEmpty else { return agents }
-        return agents.filter { a in ([a.id, a.host] + a.tags).contains { $0.lowercased().contains(needle) } }
+        return agents.filter { a in ([a.id, a.host, a.owner ?? ""] + a.tags).contains { $0.lowercased().contains(needle) } }
     }
 
     private func load() async {
