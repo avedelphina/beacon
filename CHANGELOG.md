@@ -47,6 +47,11 @@
   share one hourly limit per person. The app registers its token with `PUT /api/app/devices/self/apns`.
   New dependency: `httpx[http2]` (adds `h2`), since APNs speaks only HTTP/2. `*.p8` is gitignored.
 
+### Changed
+
+- **Workflow requests show their number** (`#15`) beside the kind and clearance, the same number the
+  card history, the notices and the board tools use.
+
 ## [0.40.0] — 2026-11-26
 
 ### Upgrading

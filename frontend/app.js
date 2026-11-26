@@ -1630,7 +1630,7 @@ function renderWorkflowItems(items) {
     return `<article class="workflow-item">
       <header class="wf-head">
         <div>
-          <div class="wf-kind">${esc(WORKFLOW_KIND_LABEL[w.kind] || w.kind)} · CL${esc(w.clearance)}${w.urgent_reason ? ' · <strong class="wf-urgent">URGENT</strong>' : ""}</div>
+          <div class="wf-kind">#${esc(w.id)} · ${esc(WORKFLOW_KIND_LABEL[w.kind] || w.kind)} · CL${esc(w.clearance)}${w.urgent_reason ? ' · <strong class="wf-urgent">URGENT</strong>' : ""}</div>
           <h3 class="wf-title">${esc(w.title)}</h3>
         </div>
         <span class="chip">${esc(w.state)}</span>

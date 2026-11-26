@@ -499,7 +499,7 @@ def test_a_project_does_not_widen_or_offer_a_pr_conversation(client, gitea, monk
     assert members.card_manageable("tom@example.com", listed[0])
     assert not intake.agent_may_see("outsider", listed[0])
     with pytest.raises(ValueError, match="participants"):
-        board.update_card("operator", card_id, help_wanted=True)
+        board.update_card("beacon", card_id, help_wanted=True)
 
 
 def test_oversized_stream_is_rejected(client, gitea):
