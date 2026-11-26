@@ -65,6 +65,7 @@
   "next_action": null,
   "parent": null,
   "parent_id": null,
+  "participants": [],
   "project": "infra",
   "references": [
     {

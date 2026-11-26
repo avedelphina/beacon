@@ -104,7 +104,9 @@ def _owned_agent(email: str, agent_id: str):
 
 
 def card_visible(email: str, card: dict) -> bool:
-    from . import intake  # not at import: intake imports board, which imports this package's store
+    from . import board, intake  # avoid board/intake import cycle at module load
+    if board.is_pr_conversation(card):
+        return bool(board.participant_ids(card) & owned_ids(email))
     return card["created_by"].casefold() == email.casefold() or (
         card["assignee"] is not None and card["assignee"] in owned_ids(email)) or (
         intake.is_intake(card) and intake.visibility()["members"])
