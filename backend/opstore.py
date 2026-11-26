@@ -283,6 +283,21 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     auth        TEXT NOT NULL,
     created_at  REAL NOT NULL
 );
+
+-- Phones and tablets logged in through the native app, one row per device (backend/app_devices.py).
+-- The token is kept only as a hash; the public key is the device's Secure Enclave key, which signs
+-- what needs a person (CL4/CL5). Logging out or revoking deletes the row.
+CREATE TABLE IF NOT EXISTS app_devices (
+    id              TEXT PRIMARY KEY,
+    email           TEXT NOT NULL,      -- whose device it is, casefolded
+    name            TEXT NOT NULL,
+    token_hash      TEXT NOT NULL UNIQUE,
+    public_key      TEXT NOT NULL,      -- base64 X9.63 P-256 point
+    last_signed_at  REAL NOT NULL DEFAULT 0,
+    created_at      REAL NOT NULL,
+    last_seen_at    REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS app_devices_by_email ON app_devices (email);
 """
 
 

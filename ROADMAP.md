@@ -259,15 +259,20 @@ Related foundation work, in Horizon 0:
    Face ID before an approval. Prerequisites:
    - an Apple Developer Program membership, for APNs and TestFlight;
    - login without a browser cookie: a Zitadel native client (PKCE through
-     `ASWebAuthenticationSession`), and Beacon accepting Zitadel access tokens
-     as `Bearer`, with the role read on every request as for sessions;
+     `ASWebAuthenticationSession`) whose ID token Beacon exchanges once for a
+     device token of its own, with the role read on every request as for
+     sessions, and CL4/CL5 signed by a Face ID-gated device key *(delivered:
+     `backend/app_devices.py`)*;
    - the app's login counts as a human, as a browser session does (decided
      2026-11-07): it answers workflow requests, CL4/CL5 ones included, and runs
      CL4/CL5 actions directly (policy, access, enrollment, decommission).
      `_workflow_human` and `_require_human_session` must accept that login
-     and never the MCP token or an agent's token;
+     and never the MCP token or an agent's token *(delivered)*;
    - an APNs sender (HTTP/2 with token auth) next to `backend/push.py`;
-   - a stable API contract that the app can check with `/api/version`.
+   - a stable API contract that the app can check with `/api/version`
+     *(delivered: its `api` number)*.
+
+   The plan, with the decisions taken: [docs/ios-app-plan.md](docs/ios-app-plan.md).
 
 ## Horizon 0 — Protect and stabilize the foundation
 

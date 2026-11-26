@@ -4,6 +4,17 @@
 
 ### Added
 
+- **Login for the native app.** The iOS and iPadOS app (being built, see `docs/ios-app-plan.md`) logs in
+  through a native Zitadel client (`ZITADEL_APP_CLIENT_ID`) and gets a device token from Beacon
+  (`POST /auth/app/login`). The token is that person, with the role read on every request as for a
+  browser session; it ends after 30 days without use, at most 10 per person. Up to CL3 the token is
+  enough, so a lock-screen Approve can work; a CL4/CL5 answer or action also needs a signature by the
+  device's Face ID-gated Secure Enclave key, which works once and only within 2 minutes. People see and
+  log out their devices under **App devices** on the Agents tab (`GET`/`DELETE /api/app/devices`), an
+  operator anyone's. What the app does is recorded under the person, `via` = `app`. `GET /api/version`
+  now also answers `api`, which changes only when a change breaks the app. `apps/contract/` holds the
+  signature test vector the app is tested against.
+
 - **Who the human authority is, by clearance.** A CL4 request (execute with human approval) goes to
   the owner of the agent that asks: asked of `human`, it is sent to that agent's owner if it has one,
   and it may also name an operator; to anyone else it is refused with the reason. A CL5 request

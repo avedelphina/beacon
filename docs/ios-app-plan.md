@@ -1,6 +1,6 @@
 # Beacon for iOS and iPadOS — technical plan
 
-Status: proposed, 2026-11-26. Implements step 2 of the App track in
+Status: decisions taken 2026-11-26 (§8); P1 built on `feat/app-login`. Implements step 2 of the App track in
 [ROADMAP.md](../ROADMAP.md), iOS and iPadOS first; macOS later from the same code.
 
 Audience: whoever builds it — a person or an agent with this repository. Each
@@ -85,8 +85,8 @@ app                              Zitadel                         Beacon
 | `token_hash` | sha256 of the token; the token itself is never stored |
 | `public_key` | 65-byte X9.63 P-256 point, base64 |
 | `last_signed_at` | float; replay guard, see §3.2 |
-| `apns_token`, `apns_env` | null until the app registers; `sandbox` or `production` |
-| `created_at`, `last_seen_at`, `expires_at`, `revoked_at` | |
+| `created_at`, `last_seen_at` | expiry is `last_seen_at` + 30 days; logout and revoke delete the row |
+| `apns_token`, `apns_env` | added in P2: null until the app registers; `sandbox` or `production` |
 
 - Token: `bk_app_` + 32 random bytes, url-safe. Expiry 30 days after last use
   (sliding; `last_seen_at` is written at most once a minute). Decided in §8.
@@ -104,7 +104,7 @@ the browser.
 | `POST /auth/app/login` | anyone | the flow above |
 | `GET /api/app/devices` | person | their own devices; an operator gets everyone's |
 | `DELETE /api/app/devices/{id}` | person | their own (logout = delete self); an operator may revoke any |
-| `PUT /api/app/devices/self/apns` | app | `{token, env}`; the app calls it at each launch |
+| `PUT /api/app/devices/self/apns` | app | P2. `{token, env}`; the app calls it at each launch |
 
 Add the three `/api/app/devices…` routes to `members._ROUTES` (own devices only).
 
