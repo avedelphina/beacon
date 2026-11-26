@@ -92,8 +92,12 @@ backend/
                   used to validate config paths before push
 fleet/            YAML inventory (see Tech stack)
 frontend/         static page, no build
-apps/contract/    what every native app is tested against (signature test vector);
-                  apps/<platform>/ will hold the apps themselves (docs/ios-app-plan.md)
+apps/contract/    what every native app is tested against: the signature test vector, and
+                  API answers written and checked by tests/test_app_contract.py
+                  (BEACON_UPDATE_CONTRACT=1 to regenerate after an intended change)
+apps/apple/       the iOS/iPadOS app: SwiftUI, no packages, Xcode project with synchronized
+                  folders (add a .swift file to Beacon/ and it is in the target); personal
+                  signing settings in the gitignored Config/Local.xcconfig
 mcp/              MCP server service (own Dockerfile + requirements)
 tbot/             Teleport tbot sidecar (own Dockerfile + run.sh)
 scripts/dump_hermes_config_schema.py  regenerates the config-schema snapshot
@@ -135,6 +139,12 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
   requirements file changes.
 
 ## Testing
+
+The app: `cd apps/apple && xcodebuild test -project Beacon.xcodeproj -scheme Beacon
+-destination 'platform=iOS Simulator,name=iPhone 17'` (CI: `.github/workflows/apple.yml`,
+only when `apps/` changes). A change to an API answer the app decodes fails
+`tests/test_app_contract.py` until `apps/contract/` is regenerated; a change that breaks the app
+also raises `app_devices.API`.
 
 ```bash
 .venv/bin/pip install -r requirements-dev.txt

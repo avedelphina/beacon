@@ -1,6 +1,6 @@
 # Beacon for iOS and iPadOS — technical plan
 
-Status: decisions taken 2026-11-26 (§8). P1 merged (#127); P2 built on `feat/apns`. Implements step 2 of the App track in
+Status: decisions taken 2026-11-26 (§8). P1 merged (#127), P2 merged (#128); P3 built on `feat/ios-app`. Implements step 2 of the App track in
 [ROADMAP.md](../ROADMAP.md), iOS and iPadOS first; macOS later from the same code.
 
 Audience: whoever builds it — a person or an agent with this repository. Each
@@ -364,26 +364,16 @@ of iPhone and iPad in the PR.
 
 ## 5. CI
 
-A separate `.github/workflows/apple.yml`, so macOS runner minutes are spent
-only when the app or its contract changes:
+`.github/workflows/apple.yml` (built in P3) runs only when `apps/apple/` or
+`apps/contract/` changes, so macOS runner minutes are spent only then. It
+runs `xcodebuild test` on the first iPhone simulator the runner has. The tests
+are signed "to run locally" (no team needed) rather than unsigned
+(`CODE_SIGNING_ALLOWED=NO`), because the device-key test needs the Keychain,
+and an unsigned app has no Keychain access. A change to an answer the app decodes
+already fails `tests/test_app_contract.py` in the main CI.
 
-```yaml
-on:
-  push: {paths: ['apps/apple/**', 'apps/contract/**', 'tests/test_app_contract.py']}
-  pull_request: {paths: ['apps/apple/**', 'apps/contract/**', 'tests/test_app_contract.py']}
-jobs:
-  test:
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - run: >
-          xcodebuild test -project apps/apple/Beacon.xcodeproj -scheme Beacon
-          -destination 'platform=iOS Simulator,name=iPhone 16'
-          CODE_SIGNING_ALLOWED=NO
-```
-
-No signing, no upload in CI; TestFlight builds are archived from Xcode by hand
-until that hurts.
+No upload in CI; TestFlight builds are archived from Xcode by hand until that
+hurts.
 
 ## 6. Phases
 

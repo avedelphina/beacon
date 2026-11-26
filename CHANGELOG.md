@@ -14,6 +14,10 @@
   operator anyone's. What the app does is recorded under the person, `via` = `app`. `GET /api/version`
   now also answers `api`, which changes only when a change breaks the app. `apps/contract/` holds the
   signature test vector the app is tested against.
+- **The iOS and iPadOS app, first version** (`apps/apple/`, not yet on TestFlight): log in with Beacon's
+  address and your usual account, see the workflow requests you can see, and answer them as on the
+  web page; CL4/CL5 answers ask for Face ID. `apps/contract/` now also holds the API answers the app
+  decodes, which `tests/test_app_contract.py` keeps current.
 - **Notifications to the native app.** With `BEACON_APNS_KEY_FILE`, `_KEY_ID`, `_TEAM_ID` and `_TOPIC`
   set (an APNs key from the Apple Developer account), Beacon sends the app the notices that browsers
   get, through Apple's push service: the subject line only, plus, for a workflow request, its ids and a
