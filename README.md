@@ -1479,8 +1479,11 @@ session: they contain nothing about the fleet.
 
 ### Native app login
 
-The native app (in progress, [plan](docs/ios-app-plan.md)) does not keep a
-browser session. It logs in once and Beacon gives the device a token of its own.
+The iOS and iPadOS app lives in [`apps/apple/`](apps/apple) (in progress,
+[plan](docs/ios-app-plan.md)). To run it on a device, copy
+`apps/apple/Config/Local.xcconfig.example` to `Local.xcconfig` with your Apple
+team and bundle id, open `apps/apple/Beacon.xcodeproj` in Xcode, and run. It
+does not keep a browser session. It logs in once and Beacon gives the device a token of its own.
 
 - **Setup.** In Zitadel, add a second application to Beacon's project: type
   Native, PKCE, redirect URI `<the app's bundle id>:/oauth/callback`, with user

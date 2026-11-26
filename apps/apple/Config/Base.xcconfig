@@ -1,0 +1,22 @@
+// Settings every target shares. What is personal (the Apple team, the real bundle id) goes in
+// Local.xcconfig, which is gitignored: copy Local.xcconfig.example. The public repository holds
+// only org.example.beacon.
+
+BEACON_BUNDLE_ID = org.example.beacon
+DEVELOPMENT_TEAM =
+CODE_SIGN_STYLE = Automatic
+
+SDKROOT = iphoneos
+SUPPORTED_PLATFORMS = iphoneos iphonesimulator
+IPHONEOS_DEPLOYMENT_TARGET = 18.0
+TARGETED_DEVICE_FAMILY = 1,2
+SWIFT_VERSION = 6.0
+SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor
+SWIFT_APPROACHABLE_CONCURRENCY = YES
+CLANG_ENABLE_MODULES = YES
+ENABLE_USER_SCRIPT_SANDBOXING = YES
+GENERATE_INFOPLIST_FILE = YES
+CURRENT_PROJECT_VERSION = 1
+MARKETING_VERSION = 0.1.0
+
+#include? "Local.xcconfig"
