@@ -4,6 +4,49 @@
 
 ## [0.40.0] — 2026-11-26
 
+### Upgrading
+
+This release renames database columns and parts of the API. Read this before you upgrade.
+
+1. **Back up the database.** Stop Beacon first, so that the copy is complete. Keep the copy outside
+   the repository folder: it holds your whole fleet.
+
+   ```bash
+   docker compose stop beacon mcp
+   cp -a state ../beacon-state-0.39   # may need sudo: the files belong to uid 10001
+   ```
+
+2. **Set your working hours** in `.env`, with your own time zone. Without this, Beacon uses
+   `Mon-Fri 08:00-17:00 UTC`. Use `always` to count clock time, as before. A value that Beacon
+   cannot read stops it from starting.
+
+   ```bash
+   BEACON_WORK_HOURS=Mon-Fri 08:00-17:00 Europe/Berlin
+   ```
+
+   If your scheduler tick runs outside the container (system cron, launchd or systemd with a
+   virtualenv), set the same variable for it too.
+
+3. **Get 0.40.0 and rebuild all services.** The database is migrated on the first start; there is
+   no separate migration command.
+
+   ```bash
+   git fetch --tags && git checkout v0.40.0
+   docker compose up -d --build
+   ```
+
+4. **Update your own API clients and scripts.** Use `/api/clearances` and `clearance` (`CL0` to
+   `CL5`). `tier` and `max_tier` are accepted on input in this release only. See "Changed
+   (breaking)" below.
+5. **Restart agent gateways**, so that they load the new tool descriptions. Their hosts install the
+   new agent skill on the next sync.
+6. **Check the Workflows tab.** Ask again for any enrollment request that was pending during the
+   upgrade: its approval no longer matches.
+
+**To go back to 0.39.2**, stop `beacon` and `mcp`, put the backup back in place of `state/`, check
+out `v0.39.2` and rebuild. 0.39.2 cannot use a migrated database, and changes made after the backup
+are lost.
+
 ### Added
 
 - **Working hours.** `BEACON_WORK_HOURS` (days, hours, time zone; default `Mon-Fri 08:00-17:00 UTC`;
