@@ -29,7 +29,7 @@ def crew(fleet, monkeypatch):
     monkeypatch.setattr(workflow.notify, "workflow_created", lambda *a, **k: None)
     monkeypatch.setattr(workflow.notify, "workflow_answered", lambda *a, **k: None)
     emails = []
-    monkeypatch.setattr(notify, "_tell", lambda to, subject, body: emails.append((sorted(to), subject, body)))
+    monkeypatch.setattr(notify, "_tell", lambda to, subject, body, **_: emails.append((sorted(to), subject, body)))
     return emails
 
 

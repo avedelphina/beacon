@@ -1447,7 +1447,9 @@ configured with a fixed API key rather than walked through a browser login.
 ## App and notifications
 
 The page installs as an app (a PWA) on a phone, a tablet or a desktop, and it
-can send notifications. There is no separate app to build or host.
+can send notifications. A native iOS and iPadOS app is being built
+([plan](docs/ios-app-plan.md)); its login is described under
+[Native app login](#native-app-login).
 
 - **Install it.** iPhone and iPad (iOS 16.4 or later): open Beacon in Safari,
   tap Share, then Add to Home Screen, and open Beacon from the Home Screen.
@@ -1487,6 +1489,58 @@ wherever the device is. The device must reach Beacon only to open the page.
 Each push is encrypted to the browser (RFC 8291), so the push service cannot
 read it. The manifest, the service worker and the icons load without a
 session: they contain nothing about the fleet.
+
+### Native app login
+
+The iOS and iPadOS app lives in [`apps/apple/`](apps/apple) (in progress,
+[plan](docs/ios-app-plan.md)). To run it on a device, copy
+`apps/apple/Config/Local.xcconfig.example` to `Local.xcconfig` with your Apple
+team and bundle id, open `apps/apple/Beacon.xcodeproj` in Xcode, and run. It
+does not keep a browser session. It logs in once and Beacon gives the device a token of its own.
+
+- **Setup.** In Zitadel, add a second application to Beacon's project: type
+  Native, PKCE, redirect URI `<the app's bundle id>:/oauth/callback`, with user
+  info in the ID token. Set its client ID as `ZITADEL_APP_CLIENT_ID`. OIDC login
+  must be on too. The app asks `GET /auth/app/config` for the rest, so a person
+  types only Beacon's URL.
+- **The login.** The device makes a key in its Secure Enclave that works only
+  after Face ID. The app logs in with Zitadel (the ID token's nonce is the hash
+  of that key) and sends the ID token, the public key and a signature by the key
+  to `POST /auth/app/login`. Beacon admits the person by the same rules as the
+  page (operators, and members with a verified email) and answers with a token
+  (`bk_app_…`), shown once and kept only as a hash.
+- **The token.** It counts as that person, with the role read from the email on
+  every request, as for a session. It ends after 30 days without use, and a
+  person may have 10 devices. People see and log out their devices under
+  **App devices** on the Agents tab; an operator sees and logs out anyone's.
+- **CL4 and CL5 need Face ID.** The token alone counts as a person up to CL3,
+  so a lock-screen Approve can work. A CL4/CL5 answer or action must also carry
+  `X-Beacon-Signed-At` (Unix seconds) and `X-Beacon-Signature`: an ECDSA
+  P-256/SHA-256 signature (DER, base64) by the device key over
+  `beacon-app-v1\n<METHOD>\n<path with query>\n<signed-at>\n<hex sha256 of the body>`.
+  The time must be within 2 minutes of Beacon's clock and later than the
+  device's last signature, so each signature works once.
+  [`apps/contract/signature-v1.json`](apps/contract/signature-v1.json) is a test
+  vector for both sides.
+- **What is recorded.** Actions from the app are recorded under the person,
+  with `via` = `app` in the audit log.
+- **Notifications (APNs).** The app sends its APNs token to
+  `PUT /api/app/devices/self/apns` at each launch. Beacon then sends the app
+  the same notices as the browsers get, through Apple's push service, holding
+  only the subject line. Browsers and the app share one limit of 10 per hour to
+  a person. A workflow request also carries its ids and a category, which
+  chooses the actions the notification shows:
+
+  | Category | When | Actions |
+  |---|---|---|
+  | `WF_APPROVE` | approval or review, CL3 and below | Approve, Reject (on the lock screen, after unlocking), Open |
+  | `WF_HUMAN` | any request at CL4 or CL5 | opens the app, where Face ID signs the answer |
+  | `WF_OPEN` | decision, question, handoff | opens the app |
+
+  CL4/CL5 and urgent requests are Time Sensitive (they break through Focus).
+  To turn it on, set the four `BEACON_APNS_*` settings in `.env` (see
+  `.env.example`) from your Apple Developer account, and let Beacon reach
+  `api.push.apple.com:443`. Without them the app works, without notifications.
 
 ## MCP server
 
@@ -1540,7 +1594,12 @@ this one credential.
 | `POST` | `/api/templates/{name}/apply` | Add a template to agents (`{"agent_ids": [...], "confirm": true}`) — CL2 |
 | `GET` | `/api/agents/{id}/status` | Live status |
 | `GET` | `/api/agents/{id}/logs?lines=N` | Log tail |
-| `GET` | `/api/version` | Running Beacon version (shown in the page header) |
+| `GET` | `/api/version` | Running Beacon version (shown in the page header), and `api`: a number that changes only when a change breaks the native app |
+| `GET` | `/auth/app/config` | No login needed. What the native app needs to log in: `issuer`, `client_id`, `api`. 404 without `ZITADEL_APP_CLIENT_ID` |
+| `POST` | `/auth/app/login` | No login needed. `{id_token, public_key, name, signature}` from the app; answers `{token, device_id, email, name, role, idle_days}`. See [Native app login](#native-app-login) |
+| `GET` | `/api/app/devices` | Devices logged in through the app: your own, or everyone's for an operator. `current` marks the one asking |
+| `PUT` | `/api/app/devices/self/apns` | The app's APNs token: `{token, env}`, `env` being `sandbox` (a build from Xcode) or `production` (TestFlight). App devices only |
+| `DELETE` | `/api/app/devices/{id}` | Log a device out: your own (the app's logout), or anyone's for an operator |
 | `GET` | `/api/clearances` | Clearance registry — every gated capability, its clearance, and why |
 | `POST` | `/api/agents/{id}/deploy?confirm=true` | Install/bring up (streamed) — CL3 |
 | `GET`/`POST` | `/api/agents/{id}/reconcile` | Diagnose / apply one fix (`{"fix": "...", "confirm": true}`) — apply is CL2 |
@@ -1733,6 +1792,8 @@ backend/
   schemas.py      Host/Agent pydantic models
   templates.py    config templates: load, validate, deep-merge under `desired`
   push.py         Web Push to people's browsers (encryption, VAPID, subscriptions)
+  app_devices.py  native app login: device tokens, Face ID signatures for CL4/CL5
+  apns.py         notifications to the native app through Apple's push service
   drivers/
     hermes.py     the only driver so far
 fleet/            the YAML form of the fleet, for import and export (real files gitignored)

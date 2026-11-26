@@ -297,6 +297,23 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     auth        TEXT NOT NULL,
     created_at  REAL NOT NULL
 );
+
+-- Phones and tablets logged in through the native app, one row per device (backend/app_devices.py).
+-- The token is kept only as a hash; the public key is the device's Secure Enclave key, which signs
+-- what needs a person (CL4/CL5). Logging out or revoking deletes the row.
+CREATE TABLE IF NOT EXISTS app_devices (
+    id              TEXT PRIMARY KEY,
+    email           TEXT NOT NULL,      -- whose device it is, casefolded
+    name            TEXT NOT NULL,
+    token_hash      TEXT NOT NULL UNIQUE,
+    public_key      TEXT NOT NULL,      -- base64 X9.63 P-256 point
+    last_signed_at  REAL NOT NULL DEFAULT 0,
+    created_at      REAL NOT NULL,
+    last_seen_at    REAL NOT NULL,
+    apns_token      TEXT,               -- where Apple delivers this device's notifications (backend/apns.py)
+    apns_env        TEXT                -- "sandbox" (a build from Xcode) or "production" (TestFlight)
+);
+CREATE INDEX IF NOT EXISTS app_devices_by_email ON app_devices (email);
 """
 
 
@@ -363,6 +380,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     delivery_columns = {row[1] for row in conn.execute("PRAGMA table_info(intake_deliveries)")}
     if delivery_columns and "claim_token" not in delivery_columns:
         conn.execute("ALTER TABLE intake_deliveries ADD COLUMN claim_token TEXT")
+    device_columns = {row[1] for row in conn.execute("PRAGMA table_info(app_devices)")}
+    for column in ("apns_token", "apns_env"):
+        if device_columns and column not in device_columns:
+            conn.execute(f"ALTER TABLE app_devices ADD COLUMN {column} TEXT")
     claim_columns = {row[1] for row in conn.execute("PRAGMA table_info(card_reference_claims)")}
     if claim_columns and "last_event_at" not in claim_columns:
         conn.execute("ALTER TABLE card_reference_claims ADD COLUMN last_event_at REAL")

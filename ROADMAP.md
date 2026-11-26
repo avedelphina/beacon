@@ -259,15 +259,20 @@ Related foundation work, in Horizon 0:
    Face ID before an approval. Prerequisites:
    - an Apple Developer Program membership, for APNs and TestFlight;
    - login without a browser cookie: a Zitadel native client (PKCE through
-     `ASWebAuthenticationSession`), and Beacon accepting Zitadel access tokens
-     as `Bearer`, with the role read on every request as for sessions;
+     `ASWebAuthenticationSession`) whose ID token Beacon exchanges once for a
+     device token of its own, with the role read on every request as for
+     sessions, and CL4/CL5 signed by a Face ID-gated device key *(delivered:
+     `backend/app_devices.py`)*;
    - the app's login counts as a human, as a browser session does (decided
      2026-11-07): it answers workflow requests, CL4/CL5 ones included, and runs
      CL4/CL5 actions directly (policy, access, enrollment, decommission).
      `_workflow_human` and `_require_human_session` must accept that login
-     and never the MCP token or an agent's token;
+     and never the MCP token or an agent's token *(delivered)*;
    - an APNs sender (HTTP/2 with token auth) next to `backend/push.py`;
-   - a stable API contract that the app can check with `/api/version`.
+   - a stable API contract that the app can check with `/api/version`
+     *(delivered: its `api` number)*.
+
+   The plan, with the decisions taken: [docs/ios-app-plan.md](docs/ios-app-plan.md).
 
 ## Horizon 0 — Protect and stabilize the foundation
 
@@ -389,6 +394,88 @@ raises `require_human` on a CL3 review, after which its own approval is refused 
 accepted; it cannot change its binding.
 
 **Open:** whether to expire a binding after a set time, and rate limits on answers per hour.
+
+## Projects — long-term work with an owner and a goal
+
+**Goal:** work that spans several cards or several agents has one owner, a stated goal and a visible
+state, so that agents can start it, carry it and finish it without a person driving each step. Today a
+card's `project` is free text: nothing says why the work exists, and nobody notices when every card is
+closed and the goal is not reached. Design agreed 2026-11-26; not built.
+
+**Principles**
+
+- **Autonomy first.** An agent or a person starts a project and uses it to deliver. Creating and
+  running one needs no approval, and a person is not asked where nothing needs a person. Clearances
+  still gate the actions themselves.
+- **Coordination only.** Evidence lives in tickets and repositories. Beacon keeps links to it, does
+  not verify it, and the page says so: "the owner claims done", never "verified".
+- **Not a planning tool.** No estimates, sprints, Gantt charts, sub-projects or percentage of cards
+  closed. Progress is which milestones are met.
+
+**A project** has a name, a goal, a done-when, an **owner** (a person or an agent, who is responsible
+for delivery), a state (`active`, `paused`, `done`, `abandoned`), a status note that the owner keeps
+current, links, and a history. Cards belong to at most one project. Card parents and dependencies stay
+as they are.
+
+**Responsibility without a person in the loop.** Behind every owner there is a person: the owner
+itself, an agent owner's human `owner`, or the operators for an agent with none. That person is
+informed, not asked, when the project stalls, is paused, is finished or is abandoned. The owner, that
+person and any operator can **pause** a project: no reminders or calls for help go out and the agents
+with open cards are told to stop. It is the brake for agents that generate work in circles, so an
+agent cannot resume a project that a person paused. A client agent may start a project for an agent or
+for its operator; it does not own one.
+
+**When agents start one.** The skill tells agents to create a project for long-term work, work with
+several steps that needs more than one card, or work that needs several agents. A single task with
+steps stays a card. To keep the list useful: goal and done-when are required, the agent is shown
+similar open projects before it creates one, and a project where nothing moves reminds its owner and is
+then paused.
+
+**Goals.** Whoever set the goal or done-when may change it; others propose. An agent that started a
+project adjusts it freely, and the history keeps each version. When a person set the goal and handed
+the project to an agent, the agent proposes a change through a workflow request that the person
+answers, so the bar cannot be lowered by the one who has to clear it.
+
+**Members** use projects fully and freely; they are where a member steers their agents. In a project
+that they or one of their agents own, a member does everything the owner can: start it, set and change
+goals and milestones, create and manage its cards (other agents' cards in it included), call for help,
+pause, resume and close it. In a project where they or their agent only hold a card, they see the whole
+project (goal, milestones, status, every card and its history) and contribute with comments and cards;
+steering stays with the owner's side. They do not see projects they take no part in. The limits that
+protect other people stay: a member assigns only to agents they may assign to, a goal set by someone
+else changes only with that person's answer, and nothing here opens fleet configuration. Each new route
+needs its entry in `members.py` (default deny), and a card's visibility to a member then also follows
+from its project.
+
+**Steps**, each useful on its own:
+
+1. **Records.** Projects in the operational store, cards linked to them, `project_*` board tools and
+   REST routes, a Projects view, member access, the skill, and the project's goal in assignment notices
+   so the agent knows why. Each existing free-text project name becomes a project with no goal and no
+   owner (the operators'), which gets no stall reminders until someone sets both. The card's `project`
+   field stays, as the name, so existing clients keep reading it; a name that matches no project is
+   refused with the similar ones, which stops accidental duplicates.
+2. **Milestones, evidence and stall.** A short ordered list of milestones (title, done-when, optional
+   date), which cards may point to. The owner closes a milestone or the project with a link to a
+   ticket, pull request or commit, or says why there is none. An active project with no card in `todo`,
+   `doing` or `review` reminds its owner to plan the next step, then tells the person behind it, then
+   pauses. These run on the scheduler tick.
+3. **Help from the fleet.** An owner who knows whom to ask assigns a card, as today. Otherwise they
+   mark it **help wanted**: every agent that the access policy would let the card's creator assign it to
+   gets one notice, and the first to claim it takes it. Nobody is obliged to. A helper sees the
+   project's goal and its own card. A member's call reaches only the agents that member may assign to,
+   so one member cannot draft another's agents.
+
+**Acceptance:** an agent given a multi-step goal creates a project with a goal and done-when, breaks it
+into cards and finishes it with evidence links, with no human action; the person behind it is told it
+finished; an agent cannot change a goal that a person set without that person's answer; a paused
+project sends nothing and only a person can resume what a person paused; a help-wanted card is claimed
+once, by an agent the policy allows; a member runs a project of their own from start to finish with no
+operator, sees every card in a project they take part in, and sees nothing of one they do not.
+
+**Open:** how long nothing may move before the reminder and the pause (likely working hours, as for
+other waits on people); a limit on open projects per owner; what counts as a similar project; whether a
+project's priority should order reminders and calls for help.
 
 ## Horizon 1 — Make observation first-class
 

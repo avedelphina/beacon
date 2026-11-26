@@ -1,6 +1,6 @@
 # Beacon for iOS and iPadOS — technical plan
 
-Status: proposed, 2026-11-26. Implements step 2 of the App track in
+Status: decisions taken 2026-11-26 (§8). P1 merged (#127), P2 merged (#128); P3 built on `feat/ios-app`. Implements step 2 of the App track in
 [ROADMAP.md](../ROADMAP.md), iOS and iPadOS first; macOS later from the same code.
 
 Audience: whoever builds it — a person or an agent with this repository. Each
@@ -85,8 +85,8 @@ app                              Zitadel                         Beacon
 | `token_hash` | sha256 of the token; the token itself is never stored |
 | `public_key` | 65-byte X9.63 P-256 point, base64 |
 | `last_signed_at` | float; replay guard, see §3.2 |
-| `apns_token`, `apns_env` | null until the app registers; `sandbox` or `production` |
-| `created_at`, `last_seen_at`, `expires_at`, `revoked_at` | |
+| `created_at`, `last_seen_at` | expiry is `last_seen_at` + 30 days; logout and revoke delete the row |
+| `apns_token`, `apns_env` | added in P2: null until the app registers; `sandbox` or `production` |
 
 - Token: `bk_app_` + 32 random bytes, url-safe. Expiry 30 days after last use
   (sliding; `last_seen_at` is written at most once a minute). Decided in §8.
@@ -104,7 +104,7 @@ the browser.
 | `POST /auth/app/login` | anyone | the flow above |
 | `GET /api/app/devices` | person | their own devices; an operator gets everyone's |
 | `DELETE /api/app/devices/{id}` | person | their own (logout = delete self); an operator may revoke any |
-| `PUT /api/app/devices/self/apns` | app | `{token, env}`; the app calls it at each launch |
+| `PUT /api/app/devices/self/apns` | app | P2. `{token, env}`; the app calls it at each launch |
 
 Add the three `/api/app/devices…` routes to `members._ROUTES` (own devices only).
 
@@ -219,15 +219,14 @@ The `.p8` is key material: gitignored path, mounted, never in the image.
 | `WF_OPEN` | `decision`, `question`, `handoff` | Open |
 | none | health, quiet, stuck cards | tap opens the app |
 
-`interruption-level: time-sensitive` and `apns-priority: 10` for `WF_HUMAN`
-and for any notice sent with `urgent=True`; everything else `active` with
-priority 5. Time-sensitive needs the Time Sensitive capability on the App ID.
+`interruption-level: time-sensitive` for `WF_HUMAN` and for any notice sent
+with `urgent=True`, `active` for other requests. `apns-priority: 10` for every
+workflow request and urgent notice (someone is waiting), 5 for the rest. Time-sensitive needs the Time Sensitive capability on the App ID.
 It can break through Focus and the notification summary where the person
 allows that, but it does not sound on a muted phone.
 
-**notify.py integration** — builds on the `urgent` flag that the
-working-hours branch (`feat/working-hours`, in progress on 2026-11-26) adds to
-`_tell` and `push.send`; rebase P2 on it. The signature becomes
+**notify.py integration** — builds on the `urgent` flag from working hours
+(0.40.0). The signature becomes
 `_tell(recipients, subject, body, urgent=False, about=None)`:
 `about` is `{"workflow": id, "clearance": n, "kind": k, "card": c}` from
 `workflow_created`, `workflow_escalated`, `client_needs_person` and
@@ -365,26 +364,16 @@ of iPhone and iPad in the PR.
 
 ## 5. CI
 
-A separate `.github/workflows/apple.yml`, so macOS runner minutes are spent
-only when the app or its contract changes:
+`.github/workflows/apple.yml` (built in P3) runs only when `apps/apple/` or
+`apps/contract/` changes, so macOS runner minutes are spent only then. It
+runs `xcodebuild test` on the first iPhone simulator the runner has. The tests
+are signed "to run locally" (no team needed) rather than unsigned
+(`CODE_SIGNING_ALLOWED=NO`), because the device-key test needs the Keychain,
+and an unsigned app has no Keychain access. A change to an answer the app decodes
+already fails `tests/test_app_contract.py` in the main CI.
 
-```yaml
-on:
-  push: {paths: ['apps/apple/**', 'apps/contract/**', 'tests/test_app_contract.py']}
-  pull_request: {paths: ['apps/apple/**', 'apps/contract/**', 'tests/test_app_contract.py']}
-jobs:
-  test:
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - run: >
-          xcodebuild test -project apps/apple/Beacon.xcodeproj -scheme Beacon
-          -destination 'platform=iOS Simulator,name=iPhone 16'
-          CODE_SIGNING_ALLOWED=NO
-```
-
-No signing, no upload in CI; TestFlight builds are archived from Xcode by hand
-until that hurts.
+No upload in CI; TestFlight builds are archived from Xcode by hand until that
+hurts.
 
 ## 6. Phases
 

@@ -5,6 +5,27 @@
 ### Added
 
 - **Mapped Gitea pull-request conversations (PoC, disabled by default).** When the signed Gitea intake is enabled and `BEACON_GITEA_AGENT_MAP` contains an explicit JSON mapping from Gitea login to a board-capable Beacon agent, the PR card records those participants. Mapped agents may read and comment through the Beacon board; PR-card state, assignment, references, relationships, workflow, enrollment, and forge actions remain unavailable to agents. Every membership change is recorded in the card's history, and every read checks the current configuration: removing a mapping, or a complete event snapshot without the participant, revokes access immediately. Invalid mapping configuration fails closed and does not change stored memberships. PR events and card comments reach mapped participants as ordinary mailbox notices; an agent's comment nudges only participants its mesh call policy allows it to call.
+- **Login for the native app.** The iOS and iPadOS app (being built, see `docs/ios-app-plan.md`) logs in
+  through a native Zitadel client (`ZITADEL_APP_CLIENT_ID`) and gets a device token from Beacon
+  (`POST /auth/app/login`). The token is that person, with the role read on every request as for a
+  browser session; it ends after 30 days without use, at most 10 per person. Up to CL3 the token is
+  enough, so a lock-screen Approve can work; a CL4/CL5 answer or action also needs a signature by the
+  device's Face ID-gated Secure Enclave key, which works once and only within 2 minutes. People see and
+  log out their devices under **App devices** on the Agents tab (`GET`/`DELETE /api/app/devices`), an
+  operator anyone's. What the app does is recorded under the person, `via` = `app`. `GET /api/version`
+  now also answers `api`, which changes only when a change breaks the app. `apps/contract/` holds the
+  signature test vector the app is tested against.
+- **The iOS and iPadOS app, first version** (`apps/apple/`, not yet on TestFlight): log in with Beacon's
+  address and your usual account, see the workflow requests you can see, and answer them as on the
+  web page; CL4/CL5 answers ask for Face ID. `apps/contract/` now also holds the API answers the app
+  decodes, which `tests/test_app_contract.py` keeps current.
+- **Notifications to the native app.** With `BEACON_APNS_KEY_FILE`, `_KEY_ID`, `_TEAM_ID` and `_TOPIC`
+  set (an APNs key from the Apple Developer account), Beacon sends the app the notices that browsers
+  get, through Apple's push service: the subject line only, plus, for a workflow request, its ids and a
+  category that decides the notification's actions (Approve/Reject on the lock screen up to CL3; CL4 and
+  CL5 open the app for Face ID). CL4/CL5 and urgent requests are Time Sensitive. Browsers and the app
+  share one hourly limit per person. The app registers its token with `PUT /api/app/devices/self/apns`.
+  New dependency: `httpx[http2]` (adds `h2`), since APNs speaks only HTTP/2. `*.p8` is gitignored.
 
 ## [0.40.0] — 2026-11-26
 

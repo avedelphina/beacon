@@ -1511,6 +1511,36 @@ async function renderClients() {
   body.querySelectorAll("[data-client-toggle]").forEach((b) => b.addEventListener("click", () => toggleClient(b.dataset.clientToggle, b.dataset.on === "1")));
 }
 
+// Devices logged in through the native app (backend/app_devices.py). Shown only when there are
+// some: most people never install the app, and an empty table would only ask why.
+async function renderDevices() {
+  let list;
+  try {
+    list = await json("/api/app/devices");
+  } catch (err) {
+    list = [];
+  }
+  document.getElementById("devices-panel").hidden = list.length === 0;
+  const when = (t) => new Date(t * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  const body = document.getElementById("devices-body");
+  body.innerHTML = list.map((d) => `<tr>
+      <td><strong>${esc(d.name)}</strong></td>
+      <td>${esc(d.email)}</td>
+      <td>${esc(when(d.created_at))}</td>
+      <td>${esc(when(d.last_seen_at))}</td>
+      <td class="row-actions"><button class="link-btn danger" data-device="${esc(d.id)}" data-name="${esc(d.name)}">Log out</button></td>
+    </tr>`).join("");
+  body.querySelectorAll("[data-device]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm(`Log out ${b.dataset.name}? The app on it stops working until someone logs in again.`)) return;
+    try {
+      await json(`/api/app/devices/${encodeURIComponent(b.dataset.device)}`, "DELETE");
+      renderDevices();
+    } catch (err) {
+      alert(err.message);
+    }
+  }));
+}
+
 function showClientToken(title, settings) {
   document.getElementById("client-token-title").textContent = title;
   document.getElementById("client-token-settings").textContent = settings;
@@ -1760,6 +1790,7 @@ async function start() {
   }
   renderWorkflows();  // the page opens on Workflows
   if (!isMember) renderClients();
+  renderDevices();
   renderAgents();
   renderBoard();
 }

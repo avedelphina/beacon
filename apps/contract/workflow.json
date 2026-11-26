@@ -1,0 +1,62 @@
+{
+  "answered_by": null,
+  "capability": "ask",
+  "card_id": 1,
+  "clearance": 2,
+  "consult_flag": null,
+  "consult_skipped": null,
+  "consulted": [
+    {
+      "agent": "beta",
+      "context_id": "ctx-1",
+      "said": "P-256 is enough"
+    }
+  ],
+  "created_at": 1795000000.0,
+  "eligible_responder": "human",
+  "escalated_by": null,
+  "escalated_reason": null,
+  "events": [
+    {
+      "actor": "alpha",
+      "created_at": 1795000000.0,
+      "from_state": null,
+      "id": 1,
+      "kind": "created",
+      "payload": {
+        "capability": "ask",
+        "clearance": 2,
+        "consult_flag": null,
+        "consult_skipped": null,
+        "consulted": [
+          "beta"
+        ],
+        "kind": "decision",
+        "urgent_reason": "expires Friday"
+      },
+      "request_id": 1,
+      "to_state": "pending"
+    }
+  ],
+  "expires_at": 1795086400.0,
+  "id": 1,
+  "kind": "decision",
+  "on_behalf_of": null,
+  "operators_told_at": null,
+  "options": [
+    "P-256",
+    "P-384"
+  ],
+  "plan_hash": "8f88ff93775dc4e3af62dcb4161b0e1314452c2608a0bb60eafffbf362af814b",
+  "plan_revision": "desired:8f88ff93775dc4e3",
+  "requester": "alpha",
+  "require_human": false,
+  "responded_at": null,
+  "response": null,
+  "state": "pending",
+  "summary": "**P-256** or P-384?",
+  "target": {},
+  "title": "Which key size?",
+  "updated_at": 1795000000.0,
+  "urgent_reason": "expires Friday"
+}
