@@ -174,6 +174,12 @@ def is_gitea_pr(card: dict) -> bool:
         for ref in card.get("references", []))
 
 
+def is_pr_conversation(card: dict) -> bool:
+    """A PR card while conversations are switched on: only then do the participant rules apply."""
+    from . import gitea_intake
+    return gitea_intake.conversations_on() and is_gitea_pr(card)
+
+
 def agent_may_see_pr(agent: str, card: dict) -> bool:
     """A PR conversation is visible only to an explicitly mapped participant.
 
@@ -826,7 +832,8 @@ def _notify_comment(card_id: int, author: str, text: str) -> None:
     on a Gitea PR conversation. A participant nudge is still a normal mailbox
     notice and therefore remains subject to Beacon's mesh call policy."""
     card = get_card(card_id)
-    if is_gitea_pr(card):
+    conversation = is_pr_conversation(card)
+    if conversation:
         recipients = sorted(participant_ids(card) - {author})
     else:
         recipients = [card["assignee"]] if card["assignee"] else []
@@ -837,11 +844,11 @@ def _notify_comment(card_id: int, author: str, text: str) -> None:
             target = store.get_agent(recipient)
         except (store.NotFound, store.InvalidId):
             continue
-        if not target.reach or (is_gitea_pr(card) and _is_agent(author)
-                                and not mesh.may_call(author, target)):
+        if not target.reach or (conversation and _is_agent(author) and not mesh.may_call(author, target)):
             continue
+        yours = "" if conversation else " on the Beacon board, which is assigned to you"
         _send_notice(card_id, author, recipient, "comment_notice",
-                     f"{author} commented on Beacon card #{card_id}.\n"
+                     f"{author} commented on card #{card_id}{yours}.\n"
                      f"Title: {card['title']}\nState: {card['state']}\n\n{text[:NOTICE_BODY]}")
 
 

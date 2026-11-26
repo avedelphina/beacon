@@ -468,6 +468,20 @@ def test_member_sees_a_pr_card_only_through_an_agent_they_own(client, gitea, mon
     assert not members.card_visible("other@example.com", card)
 
 
+def test_without_a_mapping_pr_cards_follow_the_intake_visibility_switches(client, gitea, monkeypatch):
+    monkeypatch.delenv(gitea_intake.AGENT_MAP_ENV, raising=False)
+    _add_board_agent("worker", owner="tom@example.com")
+    intake.set_visibility("operator", members=True, agents=True)
+    card = board.get_card(_post(client, _body()).json()["card_id"])
+    assert intake.agent_may_see("worker", card)
+    assert members.card_visible("tom@example.com", card)
+    assert card["next_action"].startswith("Triage:")
+
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, "not-json")
+    assert not intake.agent_may_see("worker", card)
+    assert not members.card_visible("tom@example.com", card)
+
+
 def test_oversized_stream_is_rejected(client, gitea):
     body = b"x" * (64 * 1024 + 1)
     response = client.post("/intake/gitea", content=body, headers={

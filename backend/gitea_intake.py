@@ -121,6 +121,12 @@ def _agent_mapping_config() -> tuple[dict[str, str], bool]:
     return mapped, True
 
 
+def conversations_on() -> bool:
+    """The map is set, validly or not. Unset, a PR card is an ordinary intake card; set but
+    broken stays closed, so a typo cannot widen who sees a conversation."""
+    return bool(os.environ.get(AGENT_MAP_ENV, "").strip())
+
+
 def agent_mapping() -> dict[str, str]:
     return _agent_mapping_config()[0]
 
@@ -187,9 +193,8 @@ def _participant_snapshot(pull_request: dict) -> tuple[list[tuple[str, str]], bo
 
 def mapping_status() -> dict:
     """Operator-facing summary without exposing any secret or remote payload."""
-    raw = os.environ.get(AGENT_MAP_ENV, "")
     mapping, valid = _agent_mapping_config()
-    return {"configured": bool(raw.strip()), "valid": valid, "entries": len(mapping)}
+    return {"configured": conversations_on(), "valid": valid, "entries": len(mapping)}
 
 
 def _text(value, limit: int) -> str:
@@ -311,7 +316,9 @@ def record(source: str, event: str | None, body: bytes) -> dict:
 
     card, _, created, accepted = board.create_card_with_reference(
         _AUTHOR, card_title, card_body,
-        next_action="Use this Beacon PR conversation to coordinate review; Beacon will not change Gitea.",
+        next_action=("Use this Beacon PR conversation to coordinate review; Beacon will not change Gitea."
+                     if conversations_on() else
+                     "Triage: decide whether this pull request is eligible for the approved merge workflow."),
         provider="gitea", kind="pull_request", external_id=external_id,
         url=url, label=label, last_seen_state=f"{state} ({action})",
         last_seen_at=time.time(), external_event_at=event_time,

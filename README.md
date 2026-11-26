@@ -855,7 +855,8 @@ history, but every read checks the current mapping: removing a mapping, or a com
 without the participant, revokes access immediately, and invalid mapping configuration fails
 closed without changing stored memberships. PR events and card comments reach mapped participants
 as ordinary mailbox notices; an agent's comment nudges only participants its mesh call policy
-allows it to call. Beacon still never writes back to Gitea.
+allows it to call. Beacon still never writes back to Gitea. With the variable unset, PR cards are
+ordinary intake cards and the intake visibility switches apply to them.
 
 - **Secrets, one per source.** Set `BEACON_INTAKE_SECRET_<SOURCE>` (upper case, `-` as `_`)
   for each source, so a valid signature for one source cannot stand for another. A source with

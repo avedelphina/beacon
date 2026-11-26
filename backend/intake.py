@@ -131,14 +131,14 @@ def agent_may_see(author: str, card: dict) -> bool:
     list; the generic intake visibility toggle never widens a PR conversation.
     Other intake cards remain operator-only unless the operators opt agents in.
     """
-    if card.get("created_by") == "intake:gitea":
+    from . import board, gitea_intake  # not at import: both import this module
+    if card.get("created_by") == "intake:gitea" and gitea_intake.conversations_on():
         try:
             agent = store.get_agent(author)
         except (store.NotFound, store.InvalidId):
             return True  # Beacon/operator callers are not agent-filtered here.
         if agent.client is not None or agent.reach is None:
             return True  # an operator's own MCP client keeps its ordinary board access
-        from . import board
         return board.agent_may_see_pr(author, card)
     if not is_intake(card) or visibility()["agents"]:
         return True
