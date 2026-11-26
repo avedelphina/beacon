@@ -1183,6 +1183,11 @@ async function openCard(id) {
   form.milestone.value = String(c.milestone_id ?? 0);
   document.getElementById("card-help").hidden = !(c.help_by || (projectRef?.state === "active" && !c.assignee && c.state !== "done"));
   form.help_wanted.checked = !!c.help_by;
+  const roles = document.getElementById("card-help").hidden ? [] : await json("/api/roles").catch(() => []);
+  form.help_roles.innerHTML = roles.map((r) => `<option value="${esc(r.role)}"${c.help_roles.includes(r.role) ? " selected" : ""}${
+    r.agents.length ? "" : " disabled"}>${esc(r.role)}: ${esc(r.description)}${r.agents.length ? "" : " (nobody you may ask)"}</option>`).join("");
+  form.help_roles.disabled = !!c.help_by;  // an open call keeps the classes it was made with
+  document.getElementById("card-help-roles").hidden = !roles.length;
   form.dataset.milestone = String(c.milestone_id ?? 0);
   form.dataset.help = c.help_by ? "1" : "";
   openModal("card-modal");
@@ -1245,7 +1250,8 @@ document.getElementById("card-update-form").addEventListener("submit", async (e)
         waiting_on: f.state.value === "blocked" ? f.waiting_on.value.trim() || null : null,
         // Only when changed: asking for help again, or re-pointing, is an action of its own.
         milestone: f.milestone.value !== f.dataset.milestone ? Number(f.milestone.value) : null,
-        help_wanted: f.help_wanted.checked !== !!f.dataset.help ? f.help_wanted.checked : null });
+        help_wanted: f.help_wanted.checked !== !!f.dataset.help ? f.help_wanted.checked : null,
+        help_roles: f.help_wanted.checked && !f.dataset.help ? [...f.help_roles.selectedOptions].map((o) => o.value) : null });
     closeModal("card-modal");
     renderBoard();
   } catch (err) {
@@ -1612,7 +1618,8 @@ function renderWorkflowItems(items) {
       ? `<div class="wf-note"><strong>Changes requested</strong>${renderMarkdown(w.response.note)}</div>` : "";
     const waiting = w.state === "changes_requested"
       ? '<p class="hint">Waiting for the requester to send a changed plan.</p>' : "";
-    const responder = w.eligible_responder === "human" ? "any operator" : w.eligible_responder;
+    const responder = w.eligible_responder === "human" ? "any operator"
+      : w.eligible_responder.startsWith("role:") ? `any ${w.eligible_responder.slice(5)} agent (or an operator)` : w.eligible_responder;
     // Whether the requester asked a peer before asking a person: its own account, shown so the
     // person can judge the question. A request that did neither is flagged.
     const consulted = (w.consulted || []).length

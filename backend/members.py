@@ -49,6 +49,7 @@ _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject i
     ("POST", r"/api/board/cards", None),
     ("GET", r"/api/board/cards/(?P<id>\d+)", "card"),
     # Projects they or their agents take part in; projects.py decides what they may change.
+    ("GET", r"/api/roles", None),
     ("GET", r"/api/projects", None),
     ("POST", r"/api/projects", None),
     ("GET", r"/api/projects/(?P<id>\d+)", "project"),

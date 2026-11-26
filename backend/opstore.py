@@ -391,7 +391,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
                          ("escalated_at", "REAL"), ("next_action", "TEXT"), ("done_when", "TEXT"),
                          ("links", "TEXT NOT NULL DEFAULT '[]'"), ("blocked_reason", "TEXT"), ("waiting_on", "TEXT"),
                          ("parent_id", "INTEGER REFERENCES cards (id)"),
-                         ("milestone_id", "INTEGER"), ("help_by", "TEXT"), ("help_asked_at", "REAL")):
+                         ("milestone_id", "INTEGER"), ("help_by", "TEXT"), ("help_asked_at", "REAL"),
+                         ("help_roles", "TEXT NOT NULL DEFAULT '[]'")):
         if column not in card_columns:
             conn.execute(f"ALTER TABLE cards ADD COLUMN {column} {decl}")
     # "tier" became "clearance" (CL0 to CL5, the DeepOcean operating model's word). Existing databases keep their

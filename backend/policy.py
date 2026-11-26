@@ -136,6 +136,20 @@ class Policy(BaseModel):
     # Agents that any member (an agent's owner) may hand board cards to, not
     # only their own: a coordinator that organises work for everyone.
     members_may_assign: list[str] = Field(default_factory=list)
+    # Classes of agent that work can be asked of (a call for help, a review): name -> what the class
+    # is for. An agent belongs to every class whose name is among its tags. A class says who may be
+    # asked, never who may call: `may_call` still decides that.
+    roles: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("roles")
+    @classmethod
+    def _role_names(cls, v: dict[str, str]) -> dict[str, str]:
+        for name, purpose in v.items():
+            if not ID_RE.fullmatch(name):
+                raise ValueError(f"role {name!r} must match {ID_RE.pattern}")
+            if not purpose.strip():
+                raise ValueError(f"role {name!r} needs a description of what it is for")
+        return v
 
     @field_validator("members_may_assign")
     @classmethod
@@ -228,11 +242,12 @@ def problems(policy: Policy | None, fleet: list[Agent]) -> list[str]:
         return ["no access policy is set: only Beacon may call agents; "
                 'write {from: ["*"], to: ["*"]} to let every agent talk to every other'] if fleet else []
     found = []
-    declared = set(policy.tags)
+    declared = set(policy.tags) | set(policy.roles) if policy.tags else set()
     ids = {a.id for a in fleet}
     used = {t for a in fleet for t in a.tags}
     if declared:
         found += [f"agent {a.id!r} has undeclared tag {t!r}" for a in fleet for t in a.tags if t not in declared]
+    found += [f"role {name!r}: no agent has that tag, so nobody can be asked" for name in policy.roles if name not in used]
     class _Selectors:  # members_may_assign is a plain list: give it the shape of a rule
         def __init__(self, selectors):
             self.for_ = selectors

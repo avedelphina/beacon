@@ -44,11 +44,20 @@ def workflow_created(request: dict, revised: bool = False) -> None:
     responder, and email the people who may answer."""
     try:
         lead = "changed the plan and asks again for" if revised else "asks you for"
-        _agent_notice(request["eligible_responder"], request, (
+        responder = request["eligible_responder"]
+        asked = [responder]
+        if responder.startswith("role:"):
+            from . import workflow
+            asked = workflow.role_holders(request["requester"], responder[len("role:"):])
+            lead = (f"{'changed the plan and asks again' if revised else 'asks'}, of any {responder[len('role:'):]} "
+                    "(the first answer counts), for")
+        text = (
             f"{request['requester']} {lead} {_what(request)}: workflow request #{request['id']} on card "
             f"#{request['card_id']}.\nTitle: {request['title']}\nClearance: CL{request['clearance']}\n\n"
             f"{request['summary'][:SUMMARY_CHARS]}\n\nRead it with workflow_get({request['id']}) and answer "
-            f"with workflow_respond. It expires {_when(request['expires_at'])}."), skip=request["requester"])
+            f"with workflow_respond. It expires {_when(request['expires_at'])}.")
+        for agent_id in asked:
+            _agent_notice(agent_id, request, text, skip=request["requester"])
         _tell(_people_to_ask(request),
               f"Beacon: {_urgent_mark(request)}{request['requester']} {'changed a plan and ' if revised else ''}needs your answer",
               _created_body(request), **_urgency(request), **_about(request))

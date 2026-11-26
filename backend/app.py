@@ -528,6 +528,7 @@ class CardUpdate(BaseModel):
     waiting_on: str | None = None  # what a waiting card waits on, or what a cannot card lacks
     milestone: int | None = None  # a milestone of the card's project; 0 clears it
     help_wanted: bool | None = None  # ask the agents you may assign to; the first to claim takes it
+    help_roles: list[str] | None = None  # with help_wanted: only agents of these classes (policy `roles`)
 
 
 class CardComment(BaseModel):
@@ -771,6 +772,12 @@ def milestone_add(project_id: int, body: MilestoneCreate, request: Request) -> d
 def milestone_change(project_id: int, milestone_id: int, body: MilestoneUpdate, request: Request) -> dict:
     return _project_for_viewer(request, projects.change_milestone(
         _board_author(request), project_id, milestone_id, **body.model_dump()))
+
+
+@app.get("/api/roles")
+def role_list(request: Request) -> list[dict]:
+    """The agent classes the policy declares, and whom of each the viewer may ask."""
+    return board.role_directory(_board_author(request))
 
 
 @app.get("/api/projects")

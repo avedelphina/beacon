@@ -1132,6 +1132,15 @@ unfinished: the board already chases those.
 the asker may assign it to gets one notice, and the first `card_claim` takes it. A member's call reaches
 only the agents that member may assign to. One call per card per day.
 
+**Agent classes.** The access policy may declare `roles`, name to what the class is for; an agent
+belongs to every class among its tags, so it can hold several. A call for help may name classes
+(`help_roles`), and a workflow request at CL0 to CL3 may be addressed to `role:<name>`: every holder
+the requester may call is told, the first answer counts, and the requester never answers itself. An
+operator may stand in; a member may not. Membership is read when answering. A class only narrows whom
+a request reaches: it grants no call (but a `tag:` rule on the same name does, so check the Policy
+tab's preview before tagging). Handoffs and CL4/CL5 cannot be addressed to a class. `role_list`
+(`GET /api/roles`) shows the classes and whom of each you may ask.
+
 | Who | May |
 |---|---|
 | The **owner side**: the owner, the person behind it (an agent's `owner`; else the operators), operators, and a client that started it | rename, change owner, state, status, links |
@@ -1626,6 +1635,7 @@ this one credential.
 | `PUT` | `/api/app/devices/self/apns` | The app's APNs token: `{token, env}`, `env` being `sandbox` (a build from Xcode) or `production` (TestFlight). App devices only |
 | `DELETE` | `/api/app/devices/{id}` | Log a device out: your own (the app's logout), or anyone's for an operator |
 | `GET` | `/api/clearances` | Clearance registry — every gated capability, its clearance, and why |
+| `GET` | `/api/roles` | The declared [agent classes](#projects), what each is for and whom of it you may ask |
 | `GET`/`POST` | `/api/projects` | List (`include_closed=true` for done and abandoned) or start a [project](#projects): `{name, goal, done_when, owner?, links?, confirm_new?}` |
 | `GET`/`PATCH` | `/api/projects/{id}` | One project with its history and cards; change `name`, `goal`, `done_when`, `owner`, `state`, `status`, `links`, with a `note` |
 | `POST` | `/api/projects/{id}/comments` | Comment (`{"text": "..."}`) |

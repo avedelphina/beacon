@@ -467,6 +467,13 @@ from its project.
    project's goal with the call, and once its agent holds the card its owner takes part like anyone else. A member's call reaches only the agents that member may assign to,
    so one member cannot draft another's agents.
 
+4. **Agent classes** *(built)*. The organisation behind a fleet has roles (an operating model's Skeptic
+   or Steward), and an agent may hold several. The access policy declares them (`roles`: name and
+   purpose), and an agent holds those among its tags, so only an operator assigns them. A call for help
+   may be narrowed to classes, and a review or decision up to CL3 may be addressed to a class, answered
+   by the first holder the requester may call. A class narrows and never grants. Not built: a default
+   clearance or review class per role.
+
 **Acceptance:** an agent given a multi-step goal creates a project with a goal and done-when, breaks it
 into cards and finishes it with evidence links, with no human action; the person behind it is told it
 finished; an agent cannot change a goal that a person set without that person's answer; a paused

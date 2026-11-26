@@ -198,6 +198,13 @@ def build() -> MCPServer:
             evidence_links=evidence_links, no_evidence_because=no_evidence_because))
 
     @server.tool()
+    def role_list(ctx: Context) -> list[dict]:
+        """The classes of agent you can ask: what each is for, and which agents of it you may ask.
+        Use a class in card_update(help_roles=[...]) or as a workflow's eligible_responder
+        "role:<name>" when you need that kind of agent rather than one in particular."""
+        return board.role_directory(_author(ctx))
+
+    @server.tool()
     def card_claim(ctx: Context, card_id: int) -> dict:
         """Take a card that asks for help (help_by set, nobody assigned). Only claim what you can
         finish; then work on it like any card assigned to you. The first claim wins."""
@@ -223,7 +230,7 @@ def build() -> MCPServer:
                     links: list[dict] | None = None, note: str | None = None,
                     context_id: str | None = None, blocked_reason: str | None = None,
                     waiting_on: str | None = None, milestone: int | None = None,
-                    help_wanted: bool | None = None) -> dict:
+                    help_wanted: bool | None = None, help_roles: list[str] | None = None) -> dict:
         """Change a card: move its state (todo, doing, blocked, review, done), reassign it
         (assignee="" unassigns), or edit it. Keep next_action current as the work moves;
         "" clears it or done_when. links replaces the whole list of {url, label}, so send
@@ -239,13 +246,14 @@ def build() -> MCPServer:
 
         milestone points the card at a milestone of its project (0 clears). help_wanted=true on an
         unassigned card of an active project asks every agent you could assign it to, once; the
-        first to claim it takes it. Use it when you do not know whom to ask."""
+        first to claim it takes it. Use it when you do not know whom to ask. help_roles narrows
+        the call to agents of those classes (role_list)."""
         _visible_card(ctx, card_id)
         return board.update_card(_author(ctx), card_id, state=state, assignee=assignee, title=title,
                                  body=body, project=project, next_action=next_action,
                                  done_when=done_when, links=links, note=note, context_id=context_id,
                                  blocked_reason=blocked_reason, waiting_on=waiting_on,
-                                 milestone=milestone, help_wanted=help_wanted)
+                                 milestone=milestone, help_wanted=help_wanted, help_roles=help_roles)
 
     @server.tool()
     def card_comment(ctx: Context, card_id: int, text: str, context_id: str | None = None) -> dict:
@@ -398,7 +406,9 @@ def build() -> MCPServer:
                         plan_hash: str | None = None, context_id: str | None = None,
                         consulted: list[dict] | None = None, consult_skipped: str | None = None,
                         urgent_reason: str | None = None, tier: int | None = None) -> dict:
-        """Create a pending typed workflow request attached to a board card. When you ask a person
+        """Create a pending typed workflow request attached to a board card. eligible_responder may
+        be "role:<name>" (see role_list) for CL0 to CL3: every agent of that class you may call is
+        told, and the first answer counts. When you ask a person
         (eligible_responder "human" or an email), first consult at least one peer you may call about
         the problem and your plan, and pass what you learned as consulted: [{"agent": "<peer>",
         "said": "<what they answered>", "context_id": "<thread, optional>"}]. If a peer cannot help

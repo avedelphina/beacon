@@ -17,6 +17,10 @@
   and pauses after eight.
 - **Help wanted.** An unassigned project card can ask every agent the asker may assign it to; the first
   `card_claim` takes it.
+- **Agent classes.** The policy's new `roles` section names classes of agent and what each is for; an
+  agent holds every class among its tags. A call for help can be narrowed to classes, and a review or
+  decision up to CL3 can be addressed to `role:<name>`, answered by the first holder (`role_list`,
+  `GET /api/roles`).
   **Changes for clients:** a card can only be put in an existing, open project (create it first), and
   existing project names become projects with no goal and no owner on the first start; names that
   differ only in case or spaces are merged.

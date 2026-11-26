@@ -6,6 +6,14 @@
 # rule matches and some `rules` entry does. Beacon itself (operators, MCP
 # clients) is always allowed. With no file at all, only Beacon may call agents.
 
+# Optional: classes of agent that help, or a review, can be asked of. Name -> what
+# the class is for (agents read this to choose). An agent belongs to every class
+# among its tags, and these need no entry under `tags` too. A class never grants
+# a call: only `rules` do.
+# roles:
+#   skeptic: "Highest-capability reviewer of staged changes"
+#   steward: "Housekeeping: removes and contains stale things"
+
 # Optional: declare the tags in use, so a typo is reported instead of
 # silently matching nothing.
 tags: [family-a, family-b, mobile]

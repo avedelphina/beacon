@@ -179,7 +179,8 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
                 title: str | None = None, body: str | None = None, project: str | None = None,
                 next_action: str | None = None, done_when: str | None = None, links: list | None = None,
                 note: str | None = None, context_id: str | None = None, blocked_reason: str | None = None,
-                waiting_on: str | None = None, milestone: int | None = None, help_wanted: bool | None = None) -> dict:
+                waiting_on: str | None = None, milestone: int | None = None, help_wanted: bool | None = None,
+                help_roles: list[str] | None = None) -> dict:
     """Change what's given; each change is its own event. `assignee=""`
     unassigns, `next_action=""`/`done_when=""` clear, `links` replaces the list.
     `note` explains the change and is recorded with it. Moving a card to blocked
@@ -213,12 +214,17 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
     elif moved and card["milestone_id"]:
         changes.append(("milestone_id", "edit", None, "milestone: - (it belonged to the other project)"))
     leaving = moved or state == "done" or bool(assignee)
+    if help_roles and not help_wanted:
+        raise ValueError("help_roles goes with help_wanted=true")
     if help_wanted:
         if leaving or card["assignee"] and assignee != "":
             raise ValueError("help is asked for an unassigned card that stays open in its project")
         if not card["help_by"]:
-            _check_may_ask_help(author, card)
-            changes.append(("help_by", "edit", author, "help wanted"))
+            wanted = _check_roles(help_roles or [])
+            _check_may_ask_help(author, card, wanted)
+            changes.append(("help_roles", "edit", json.dumps(wanted), None))
+            changes.append(("help_by", "edit", author,
+                            "help wanted" + (f" from {', '.join(wanted)}" if wanted else "")))
     elif card["help_by"] and (help_wanted is False or leaving):
         if help_wanted is False and not leaving:
             _check_may_steer_help(author, card)
@@ -259,13 +265,31 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
 HELP_AGAIN_SECONDS = 24 * 3600  # a card asks the fleet at most this often
 
 
-def eligible_helpers(asker: str) -> list[str]:
+def _check_roles(roles: list[str]) -> list[str]:
+    from . import policy
+    declared = (policy.load() or policy.Policy()).roles
+    unknown = [r for r in roles if r not in declared]
+    if unknown:
+        raise ValueError(f"unknown class {', '.join(unknown)}. Declared: {', '.join(declared) or 'none'}")
+    return sorted(set(roles))
+
+
+def role_directory(asker: str) -> list[dict]:
+    """The classes the policy declares, what each is for, and whom of it `asker` may ask."""
+    from . import policy
+    return [{"role": name, "description": purpose, "agents": eligible_helpers(asker, [name])}
+            for name, purpose in (policy.load() or policy.Policy()).roles.items()]
+
+
+def eligible_helpers(asker: str, roles: list[str] | None = None) -> list[str]:
     """The agents `asker` may give a card to, which is exactly who may be asked: a call for help
-    must not reach an agent that an assignment could not. Clients take no work."""
+    must not reach an agent that an assignment could not. `roles` narrows that to agents of any of
+    those classes, and never widens it. Clients take no work."""
     from . import members
     exposure = mesh.open_chats()
     fleet = [a for a in store.list_agents()
-             if a.reach and a.client is None and a.id != asker and mesh.board_allowed(a, exposure)]
+             if a.reach and a.client is None and a.id != asker and mesh.board_allowed(a, exposure)
+             and (not roles or set(roles) & set(a.tags))]
     if projects._is_member(asker):
         allowed = members.assignable_ids(asker)
         return sorted(a.id for a in fleet if a.id in allowed)
@@ -281,7 +305,7 @@ def _check_may_steer_help(author: str, card: dict) -> None:
         raise projects.NotAllowed("only whoever made the card, or the project's owner side, asks for help with it")
 
 
-def _check_may_ask_help(author: str, card: dict) -> None:
+def _check_may_ask_help(author: str, card: dict, roles: list[str]) -> None:
     from . import intake
     project = projects.for_card(card["project"])
     if project is None or project["state"] != "active" or card["state"] == "done":
@@ -291,8 +315,9 @@ def _check_may_ask_help(author: str, card: dict) -> None:
         raise ValueError("this is an intake card and agents may not see those")
     if card["help_asked_at"] and time.time() - card["help_asked_at"] < HELP_AGAIN_SECONDS:
         raise ValueError("the fleet was asked about this card less than a day ago")
-    if not eligible_helpers(author):
-        raise ValueError("there is no agent you may give this card to, so nobody can be asked")
+    if not eligible_helpers(author, roles):
+        of_class = f" of class {', '.join(roles)}" if roles else ""
+        raise ValueError(f"there is no agent{of_class} you may give this card to, so nobody can be asked")
 
 
 def _ask_for_help(card_id: int, asker: str) -> None:
@@ -300,13 +325,14 @@ def _ask_for_help(card_id: int, asker: str) -> None:
     card = get_card(card_id)
     with opstore.connect() as db:
         db.execute("UPDATE cards SET help_asked_at = ? WHERE id = ?", (time.time(), card_id))
-    text = (f"Help is wanted on card #{card_id} on the Beacon board, asked by {asker}. Nobody has to take it. "
+    of_class = f" You are asked as {', '.join(card['help_roles'])}." if card["help_roles"] else ""
+    text = (f"Help is wanted on card #{card_id} on the Beacon board, asked by {asker}.{of_class} Nobody has to take it. "
             f"If you can do it, call card_claim({card_id}): the first to claim gets it.\n"
             f"Title: {card['title']}\n{_project_lines(card)}"
             + "".join(f"{label}: {card[column][:NOTICE_BODY]}\n" for column, label in
                       (("next_action", "Next action"), ("done_when", "Done when")) if card[column])
             + f"\n{card['body'][:NOTICE_BODY]}")
-    for agent_id in eligible_helpers(asker):
+    for agent_id in eligible_helpers(asker, card["help_roles"]):
         _send_notice(card_id, asker, agent_id, "help_notice", text)
 
 
@@ -319,8 +345,9 @@ def claim(agent_id: str, card_id: int) -> dict:
         raise ValueError(f"card #{card_id} is not asking for help (someone may have taken it)")
     if project is None or project["state"] != "active":
         raise ValueError("its project is not active")
-    if agent_id not in eligible_helpers(card["help_by"]):
-        raise projects.NotAllowed(f"{card['help_by']} may not give you work, so you cannot take this card")
+    if agent_id not in eligible_helpers(card["help_by"], card["help_roles"]):
+        raise projects.NotAllowed("this call is not for you: it asks for a class you are not in, or "
+                                  f"{card['help_by']} may not give you work")
     now = time.time()
     with opstore.connect() as db:
         if db.execute("UPDATE cards SET assignee = ?, help_by = NULL, updated_at = ? WHERE id = ?"
@@ -908,6 +935,7 @@ MAX_LINKS = 20
 def _card(row) -> dict:
     card = dict(row)
     card["links"] = json.loads(card["links"] or "[]")
+    card["help_roles"] = json.loads(card.get("help_roles") or "[]")
     return card
 
 

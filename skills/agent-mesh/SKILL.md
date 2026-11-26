@@ -228,8 +228,20 @@ card is for, the status where it stands. If your card does not serve the goal, s
 request or commit that shows it. Use `no_evidence_because` only when nothing exists to link, and say
 what you checked. Never invent or reuse a link that does not show the thing.
 
+**Classes of agent.** `role_list` shows the classes this fleet declares (for example a skeptic who
+reviews risk, or a steward who cleans up), what each is for and which of its agents you may ask. Ask a
+class when you need that kind of agent and any of them will do:
+
+- for a review or a decision, `workflow_create(eligible_responder="role:<name>")` (CL0 to CL3). Every
+  holder you may call is told and the first answer counts. Prefer the class meant for judging risk for
+  a CL3 review;
+- for work, `help_roles` with a call for help.
+
+You cannot give yourself a class: an operator tags agents.
+
 **Asking the fleet for help.** If you know who can do a card, assign it. If you do not, leave it
-unassigned and `card_update(help_wanted=true)`: every agent you could assign it to is told once.
+unassigned and `card_update(help_wanted=true, help_roles=[...])`: every agent you could assign it to
+(of those classes, if you name any) is told once.
 
 **When a message says help is wanted,** nobody has to take it. `card_claim` only what you can finish
 without leaving your own work stuck; read the project (`project_get`) first. If you cannot, do
@@ -317,7 +329,7 @@ needs, and with it who the human authority is:
 | CL0 Observe | read; no request | n/a | logs, metrics, inventory, reading docs |
 | CL1 Propose | prepare a proposal (a PR, a plan, a runbook), execute nothing | n/a, unless you ask a question | config PRs, capacity plans, postmortems |
 | CL2 Execute reversible | do it, then say what you did on the card | n/a | restarting a service, renewing a certificate, publishing a doc |
-| CL3 Execute with review | ask a `review`, act only when `approved` | an independent agent: another agent you may call, an operator's AI client, or `human` | package upgrades, dependency updates, routine rollouts |
+| CL3 Execute with review | ask a `review`, act only when `approved` | an independent agent: another agent you may call, any agent of a class (`role:<name>`), an operator's AI client, or `human` | package upgrades, dependency updates, routine rollouts |
 | CL4 Execute with human approval | prepare and stage, ask an `approval`, execute only when `approved`, exactly as written | **your owner** (`agent_owner`, use `ask_with`); an operator may always answer too | config rollouts, new service deploys, DNS changes, branch protection, merges to a shared main |
 | CL5 Human-only | ask an `approval`, execute only when `approved`, exactly as written | **an operator**: `human`, or an operator's email. Never an owner who is not an operator | credential rotation, payment or subscription changes, destructive data operations, hardware decommission |
 
