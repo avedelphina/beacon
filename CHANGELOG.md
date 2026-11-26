@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Secret transfer.** Move a password, key or token between a person and an agent, or between two
+  agents, without Beacon keeping it. The value goes over SSH into or out of a 0600 file under
+  `beacon-secrets/` in the agent's Hermes home; the database, mailbox, audit and logs get names only.
+  A person pastes or reveals under Agents, Inspect, Secrets: browser session (or the app with Face ID,
+  once the app has the screen), never the MCP token; owners only for their own agents. Agents use the
+  new board tools `secret_send` (to an agent the access policy lets them call) and `secret_offer` (to
+  their people, who are told). The `agent-mesh` skill (1.25.0) tells agents never to print a value.
+
 - **Login for the native app.** The iOS and iPadOS app (being built, see `docs/ios-app-plan.md`) logs in
   through a native Zitadel client (`ZITADEL_APP_CLIENT_ID`) and gets a device token from Beacon
   (`POST /auth/app/login`). The token is that person, with the role read on every request as for a

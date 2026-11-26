@@ -900,7 +900,8 @@ Beacon deliberately does not become:
   configuration management;
 - an arbitrary remote shell or script runner;
 - a required hop between agents that can reach each other directly;
-- a secret-value vault or secret exfiltration service;
+- a secret-value vault or secret exfiltration service (it can pass a secret through to an agent's
+  file, and keeps nothing);
 - a universal enterprise RBAC/approval matrix;
 - an automatic revert engine for every drift event;
 - a claim of compliance when evidence is stale or the host is unreachable;

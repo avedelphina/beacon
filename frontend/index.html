@@ -316,6 +316,19 @@
     </div>
     <div id="inspect-restart-output" class="inspect-status" hidden></div>
 
+    <div class="inspect-logs-head">
+      <span class="hint">Secrets</span>
+      <button type="button" class="link-btn" id="inspect-secrets-list">Check what it left</button>
+    </div>
+    <p class="hint">Goes straight to a file on the agent's host; Beacon keeps nothing. Revealing removes the file.</p>
+    <div id="inspect-secrets-results" class="reconcile-results"></div>
+    <pre id="inspect-secret-value" class="inspect-logs" hidden></pre>
+    <form id="inspect-secret-form" autocomplete="off">
+      <input name="name" placeholder="name, e.g. api-key" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" aria-label="Secret name">
+      <textarea name="value" rows="2" required placeholder="paste the secret" aria-label="Secret value" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+      <button type="submit" class="btn">Send to agent</button>
+    </form>
+
     <div class="op-only">
     <div class="inspect-logs-head">
       <span class="hint">Plugins</span>

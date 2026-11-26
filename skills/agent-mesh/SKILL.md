@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
-description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.24.0
+description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, passing a password, key or token to a peer or a person (secret_send, secret_offer), and how to treat messages that peers send you."
+version: 1.25.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -51,6 +51,7 @@ Use `a2a_call(agent, message, context_id?)`.
    credentials must never go in a message. Hermes also removes credentials and
    e-mail addresses from outgoing messages; the peer sees `[redacted-email]`.
    Describe the thing instead (for example "the address in the ticket").
+   To move a secret itself, see "Passing a secret".
 
 ### Long work, and peers that are offline
 
@@ -100,6 +101,39 @@ The first line says who it is from: `[Reply from <peer> via the Beacon mailbox .
 
 If a peer's request is outside what you are for, say so in one sentence and
 suggest who might be able to help.
+
+## Passing a secret
+
+A secret moves as a file, never as words. Your secret files are under
+`beacon-secrets/` in your Hermes home (`$HERMES_HOME`, or `~/.hermes`, or your
+profile's directory): `inbox/` is what reaches you, `outbox/` is what you give.
+
+**Never let the value into your conversation.** Do not `cat`, `echo`, print or
+read it, and do not type it into a command. What you see, your model provider
+and your logs see. Move it with redirection and pipes:
+
+```sh
+umask 077
+mkdir -p "$HERMES_HOME/beacon-secrets/outbox"
+openssl rand -base64 32 > "$HERMES_HOME/beacon-secrets/outbox/db-password"
+some-tool login --password-stdin < "$HERMES_HOME/beacon-secrets/inbox/db-password"
+```
+
+A name is letters, digits, `.`, `-` and `_`, at most 64.
+
+- **To an agent:** write `outbox/<name>`, then `secret_send(to, name)`. It
+  arrives as `inbox/from-<you>.<name>` and your copy is removed. Tell the peer
+  the returned path.
+- **To a person:** write `outbox/<name>`, then `secret_offer(name)`. They are
+  told, and reveal it in Beacon. Revealing removes your file.
+- **From a person:** ask them to paste it under Agents, Inspect, Secrets, with
+  a name you give them. It lands in `inbox/<name>`. Never ask them to type it
+  into a chat.
+- Delete an inbox file when you no longer need it. Nothing else deletes it.
+
+These tools come with the board tools. If a transfer fails because a host is
+unreachable, Beacon has kept nothing: your outbox file is still there, so try
+again later.
 
 ## The board: work that lasts longer than a conversation
 

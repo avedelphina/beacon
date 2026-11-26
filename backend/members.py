@@ -13,6 +13,7 @@ which agents exist.
 What a member may do, and why those:
 - see their agents (a trimmed record: no endpoint, config or host details) and
   whether each answers over A2A;
+- paste a secret to their agent, and reveal one it left for them;
 - restart the gateway of their agent: reversible, the usual fix, CL2 with the
   same confirm gate as for an operator;
 - read an agent's logs only where an operator turned `member_logs` on for it,
@@ -41,6 +42,10 @@ _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject i
     ("GET", r"/api/agents/(?P<id>[^/]+)/status", "agent"),
     ("POST", r"/api/agents/(?P<id>[^/]+)/restart", "agent"),
     ("GET", r"/api/agents/(?P<id>[^/]+)/logs", "logs"),
+    # Secrets of their own agents (backend/secret_pipe.py).
+    ("GET", r"/api/agents/(?P<id>[^/]+)/secrets", "agent"),
+    ("POST", r"/api/agents/(?P<id>[^/]+)/secrets", "agent"),
+    ("POST", r"/api/agents/(?P<id>[^/]+)/secrets/[^/]+/reveal", "agent"),
     ("GET", r"/api/board", None),
     ("GET", r"/api/board/assignees", None),
     ("POST", r"/api/board/cards", None),

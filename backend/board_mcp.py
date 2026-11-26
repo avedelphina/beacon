@@ -2,7 +2,8 @@
 
 Served by Beacon itself, at the address agents already reach for their
 mesh config, rather than by the fleet MCP service: that one carries fleet
-operations an agent must never get. Only board tools live here.
+operations an agent must never get. Only board tools live here, and the two
+that move a file of the agent's own (backend/secret_pipe.py).
 
 The caller comes from the request: an agent's own derived token (the one
 it pulls its mesh config with) makes it that agent; the MCP bearer makes
@@ -19,9 +20,10 @@ import hmac
 from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import Context, MCPServer
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 
-from . import auth, board, clients, intake, mesh, onboarding, store, workflow
+from . import auth, board, clients, intake, mesh, onboarding, secret_pipe, store, workflow
 
 INSTRUCTIONS = """The Beacon fleet board: shared cards for work that spans agents, hosts, or days.
 Use it to hand work to another agent, to record progress where others can see it, and to find
@@ -163,6 +165,25 @@ def build() -> MCPServer:
         """Add progress or a question to a card's history. context_id links an A2A thread."""
         _visible_card(ctx, card_id)
         return board.comment(_author(ctx), card_id, text, context_id)
+
+    # async + threadpool: these two wait on SSH, which must not stall the event loop.
+    @server.tool()
+    async def secret_send(ctx: Context, to: str, name: str) -> dict:
+        """Move a secret to another agent without it passing through any conversation. First write it
+        to `beacon-secrets/outbox/<name>` under your Hermes home with shell redirection (never print
+        it). Beacon moves the file to the other agent's inbox as `from-<you>.<name>` and removes
+        yours. Tell the other agent only the returned path. Allowed for agents you may call."""
+        author = _author(ctx)
+        path = await run_in_threadpool(secret_pipe.send, author, to, name)
+        return {"to": to, "path": path}
+
+    @server.tool()
+    async def secret_offer(ctx: Context, name: str) -> dict:
+        """Hand a secret to your people. First write it to `beacon-secrets/outbox/<name>` under your
+        Hermes home with shell redirection (never print it). They are told its name and reveal it in
+        Beacon's page or app; revealing removes the file."""
+        await run_in_threadpool(secret_pipe.offer, _author(ctx), name)
+        return {"offered": name}
 
     @server.tool()
     def card_set_parent(ctx: Context, card_id: int, parent_id: int | None = None,

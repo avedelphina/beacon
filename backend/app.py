@@ -7,17 +7,17 @@ import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import app_devices, audit, auth, availability, board, bus, clients, cron_store, fleet, gitea_intake, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow, workhours
+from . import app_devices, audit, auth, availability, board, bus, clients, cron_store, fleet, gitea_intake, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, secret_pipe, store, templates, workflow, workhours
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
-from .schemas import Agent, AgentClient, CronJob, Host
+from .schemas import Agent, AgentClient, CronJob, Host, SecretError
 from .clearances import CLEARANCE_LABELS, CAPABILITY_CLEARANCES, requires_confirm, clearance_for
 
 
@@ -228,6 +228,7 @@ app.add_exception_handler(workflow.UnauthorizedWorkflowAccess, _error_handler(40
 app.add_exception_handler(workflow.HumanApprovalRequired, _error_handler(403))
 app.add_exception_handler(workflow.StalePlan, _error_handler(409))
 app.add_exception_handler(NoSSH, _error_handler(409))
+app.add_exception_handler(SecretError, _error_handler(409))
 app.add_exception_handler(store.HostInUse, _error_handler(409))
 
 
@@ -1459,6 +1460,64 @@ def restart_agent(id_: str, request: Request, confirm: bool = False) -> dict:
     logger.warning("gateway restart of %s by %s", id_, _board_author(request))
     agent, host, driver = for_agent(id_)
     return driver.restart(agent, host)
+
+
+def _refuse_mcp_secrets(request: Request) -> None:
+    if getattr(request.state, "auth_via_mcp", False):
+        raise HTTPException(403, "secrets need a human browser session; MCP callers cannot see them")
+
+
+class SecretPutRequest(BaseModel):
+    name: str = Field(max_length=64)
+    value: str = Field(max_length=secret_pipe.MAX_BYTES)
+    confirm: bool = False
+
+
+@app.get("/api/agents/{id_}/secrets")
+def list_secrets(id_: str, request: Request, response: Response) -> dict:
+    """Names waiting in the agent's outbox. Names only, so an app needs no Face ID to look."""
+    _refuse_mcp_secrets(request)
+    response.headers["Cache-Control"] = "no-store"
+    return {"names": secret_pipe.names(id_)}
+
+
+@app.post("/api/agents/{id_}/secrets")
+def put_secret(id_: str, body: SecretPutRequest, request: Request) -> dict:
+    """A person's paste, into the agent's inbox (backend/secret_pipe.py). Nothing is kept."""
+    _require_human_session(request, "secret_put")
+    if (gate := _confirm_gate("secret_put", body.confirm, f"put secret {body.name!r} in the inbox of {id_!r}",
+                              target=id_)) is not None:
+        return gate
+    action = audit.CURRENT.get()
+    try:
+        path = secret_pipe.put(id_, body.name, body.value.encode())
+    except Exception:
+        audit.finish(action, "failed")
+        raise
+    audit.finish(action, "succeeded")
+    return {"ok": True, "path": path}
+
+
+@app.post("/api/agents/{id_}/secrets/{name}/reveal")
+def reveal_secret(id_: str, name: str, request: Request, response: Response, confirm: bool = False) -> dict:
+    """Show outbox/<name> once: the file is removed after it has been read."""
+    _require_human_session(request, "secret_reveal")
+    if (gate := _confirm_gate("secret_reveal", confirm, f"reveal secret {name!r} of {id_!r} and remove it",
+                              target=id_)) is not None:
+        return gate
+    action = audit.CURRENT.get()
+    try:
+        try:
+            value = secret_pipe.read(id_, name).decode()
+        except UnicodeDecodeError:
+            raise SecretError("this is not text, so the page cannot show it; the file is left where it is")
+        secret_pipe.remove(id_, name)
+    except Exception:
+        audit.finish(action, "failed")
+        raise
+    audit.finish(action, "succeeded")
+    response.headers["Cache-Control"] = "no-store"
+    return {"name": name, "value": value}
 
 
 @app.post("/api/agents/{id_}/restart-agent")

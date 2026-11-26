@@ -97,7 +97,7 @@ class FakeSSH:
         self.stream_lines: list[str] = []
         self.stream_error: Exception | None = None
 
-    def run(self, host, command: str, timeout: int = 10) -> SSHResult:
+    def run(self, host, command: str, timeout: int = 10, input: str | None = None) -> SSHResult:
         self.calls.append(command)
         return self.result
 
