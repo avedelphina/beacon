@@ -105,6 +105,9 @@ nonisolated struct Card: Decodable, Sendable {
     let doneWhen: String?
     let references: [Reference]?
     let links: [Link]?
+    let blockedReason: String?
+    let waitingOn: String?
+    let events: [CardEvent]?
 
     nonisolated struct Reference: Decodable, Sendable, Identifiable {
         let id: Int
@@ -161,15 +164,20 @@ nonisolated struct Client: Sendable {
         try await send("GET", path, body: nil)
     }
 
+    /// A POST with no body, which may take Beacon a while: it runs something on a host.
+    func post<T: Decodable>(_ path: String, waiting timeout: TimeInterval = 60) async throws -> T {
+        try await send("POST", path, body: nil, timeout: timeout)
+    }
+
     func send<T: Decodable>(_ method: String, _ path: String, json: some Encodable,
                             signedBy key: DeviceKey? = nil, reason: String = "") async throws -> T {
         try await send(method, path, body: try JSONEncoder().encode(json), signedBy: key, reason: reason)
     }
 
     func send<T: Decodable>(_ method: String, _ path: String, body: Data?,
-                            signedBy key: DeviceKey? = nil, reason: String = "") async throws -> T {
+                            signedBy key: DeviceKey? = nil, reason: String = "", timeout: TimeInterval = 60) async throws -> T {
         guard let url = URL(string: path, relativeTo: server) else { throw APIError.unreadable("bad path \(path)") }
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
         request.httpBody = body
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }

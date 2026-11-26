@@ -19,9 +19,10 @@ import pytest
 from fastapi.testclient import TestClient
 from itsdangerous import TimestampSigner
 
-from backend import auth, board, mesh, store, workflow
+from backend import auth, availability, board, mesh, opstore, store, workflow
 from backend.app import app
 from backend.schemas import Agent
+from backend.ssh import SSHResult
 from tests.conftest import make_host
 
 CONTRACT = Path(__file__).resolve().parent.parent / "apps" / "contract"
@@ -38,7 +39,10 @@ def _shape(value):
 
 
 @pytest.fixture
-def answers(fleet, monkeypatch):
+def answers(fleet, fake_ssh, monkeypatch):
+    monkeypatch.setattr(availability, "probe", lambda agent: (True, ""))
+    fake_ssh.result = SSHResult(ok=True, returncode=0, stderr="", stdout=(
+        "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=4321\nActiveEnterTimestamp=Thu 2026-11-26 08:00:00 UTC\n"))
     monkeypatch.setenv(mesh.SECRET_ENV, "contract-secret")
     monkeypatch.setattr(auth, "AUTH_ENABLED", True)
     monkeypatch.setattr(auth, "ALLOWED_EMAILS", frozenset({"tom@example.com"}))
@@ -46,7 +50,10 @@ def answers(fleet, monkeypatch):
     monkeypatch.setattr(workflow.time, "time", lambda: NOW)
     store.upsert_host(make_host("h1"))
     store.upsert_agent(Agent.model_validate({"id": "alpha", "type": "hermes", "host": "h1", "owner": "ann@example.com",
+                                             "tags": ["family-a"], "notes": "Kitchen assistant",
                                              "reach": {"endpoint": "http://alpha.test:9900", "board": True}}))
+    with opstore.connect() as db:
+        db.execute("INSERT INTO health_events (agent, state, detail, at) VALUES ('alpha', 'restarted', 'no answer twice', ?)", (NOW,))
     client = TestClient(app)
     payload = base64.b64encode(json.dumps({"user": {"email": "tom@example.com"}}).encode()).decode()
     client.cookies.set("session", TimestampSigner(auth.SESSION_SECRET).sign(payload.encode()).decode())
@@ -67,6 +74,24 @@ def answers(fleet, monkeypatch):
         "workflows.json": client.get("/api/workflows", params={"state": "pending"}),
         "card.json": client.get(f"/api/board/cards/{card['id']}"),
         "version.json": client.get("/api/version"),
+        "board.json": client.get("/api/board"),
+        "agents.json": client.get("/api/agents"),
+        "availability.json": client.get("/api/availability"),
+        "health-events.json": client.get("/api/agents/alpha/health-events"),
+        "status.json": client.get("/api/agents/alpha/status"),
+        "logs.json": client.get("/api/agents/alpha/logs"),
+        "restart-gate.json": client.post("/api/agents/alpha/restart"),
+        "restart.json": client.post("/api/agents/alpha/restart?confirm=true"),
+    }
+    # A member gets trimmed views (backend/members.py); the app must decode those too.
+    member = TestClient(app)
+    member_payload = base64.b64encode(json.dumps({"user": {"email": "ann@example.com"}}).encode()).decode()
+    member.cookies.set("session", TimestampSigner(auth.SESSION_SECRET).sign(member_payload.encode()).decode())
+    member.headers["Origin"] = "http://testserver"
+    answers |= {
+        "agents-member.json": member.get("/api/agents"),
+        "availability-member.json": member.get("/api/availability"),
+        "status-member.json": member.get("/api/agents/alpha/status"),
     }
     assert all(r.status_code == 200 for r in answers.values()), {k: r.text for k, r in answers.items()}
     return {k: r.json() for k, r in answers.items()}
@@ -90,7 +115,10 @@ def test_the_notification_payloads_match_what_beacon_sends():
     assert json.loads(path.read_text()) == sent, "Beacon's APNs payloads changed: regenerate apps/contract"
 
 
-@pytest.mark.parametrize("name", ["workflow.json", "workflows.json", "card.json", "version.json"])
+@pytest.mark.parametrize("name", [
+    "workflow.json", "workflows.json", "card.json", "version.json", "board.json", "agents.json", "availability.json",
+    "health-events.json", "status.json", "logs.json", "restart-gate.json", "restart.json", "agents-member.json",
+    "availability-member.json", "status-member.json"])
 def test_the_apps_contract_files_match_the_api(answers, name):
     path = CONTRACT / name
     if os.environ.get("BEACON_UPDATE_CONTRACT"):

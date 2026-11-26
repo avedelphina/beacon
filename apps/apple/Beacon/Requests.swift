@@ -8,7 +8,6 @@ struct RequestsSplitView: View {
     @State private var requests: [WorkflowRequest] = []
     @State private var selected: WorkflowRequest.ID?
     @State private var problem: String?
-    @State private var showSettings = false
 
     var body: some View {
         NavigationSplitView {
@@ -28,7 +27,6 @@ struct RequestsSplitView: View {
             }
             .navigationTitle("Requests")
             .toolbar {
-                ToolbarItem { Button("Settings", systemImage: "gearshape") { showSettings = true } }
                 ToolbarItem { Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }.keyboardShortcut("r") }
             }
             .refreshable { await load() }
@@ -39,7 +37,6 @@ struct RequestsSplitView: View {
                 ContentUnavailableView("No request selected", systemImage: "tray")
             }
         }
-        .sheet(isPresented: $showSettings) { SettingsView() }
         .task { await load() }
         .onChange(of: phase) { if phase == .active { Task { await load() } } }
         .onChange(of: session.refreshes) { Task { await load() } }
@@ -217,6 +214,7 @@ struct RequestDetailView: View {
                     Button("Reject", role: .destructive) { asking = .rejected }
                 default:
                     Button(faceID(request.kind == "handoff" ? "Accept handoff" : "Approve")) { asking = .approved }
+                        .keyboardShortcut(.return, modifiers: .command)  // still asks to confirm
                     Button("Request changes") { noteFor = .changes_requested }
                     Button(request.kind == "handoff" ? "Decline" : "Reject", role: .destructive) { asking = .rejected }
                 }

@@ -18,6 +18,11 @@
   address and your usual account, see the workflow requests you can see, and answer them as on the
   web page; CL4/CL5 answers ask for Face ID. `apps/contract/` now also holds the API answers the app
   decodes, which `tests/test_app_contract.py` keeps current.
+- **Agents and board in the app.** Agents with their availability, searchable by name, host or tag; an
+  agent's service state, health events and logs, and restarting its gateway behind the same confirm step
+  (Beacon's own words are shown first). The board by column: read a card and its history, comment, and
+  move it (a blocked card asks why). Members get what they get on the web page. The app now has tabs, a
+  sidebar on iPad.
 - **The app's notifications.** After login the app asks to send notifications and registers its APNs
   token with Beacon at each launch. Approve and Reject work right on a CL3-or-below approval or review
   notification (the phone must be unlocked; the result comes back as a notification), CL4/CL5 notices

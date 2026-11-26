@@ -1,0 +1,19 @@
+[
+  {
+    "chat_open": null,
+    "host": "h1",
+    "id": "alpha",
+    "member_logs": false,
+    "notes": "Kitchen assistant",
+    "owner": "ann@example.com",
+    "profile": null,
+    "reach": {
+      "board": true,
+      "network": null
+    },
+    "tags": [
+      "family-a"
+    ],
+    "type": "hermes"
+  }
+]

@@ -147,3 +147,54 @@ struct NotificationTests {
         #expect(Notices.tokenHex(Data([0x0A, 0xFF, 0x00])) == "0aff00")
     }
 }
+
+struct FleetDecodingTests {
+    private func decode<T: Decodable>(_ type: T.Type, _ name: String) throws -> T {
+        try Client.decoder.decode(T.self, from: contract(name))
+    }
+
+    @Test func operatorAndMemberViewsOfAgentsBothDecode() throws {
+        let full = try decode([Agent].self, "agents.json")
+        #expect(full.first?.reach?.endpoint == "http://alpha.test:9900" && full.first?.tags == ["family-a"])
+        let trimmed = try decode([Agent].self, "agents-member.json")
+        #expect(trimmed.first?.reach?.endpoint == nil && trimmed.first?.memberLogs == false)
+        #expect(try decode([String: Availability].self, "availability.json")["alpha"]?.state == "online")
+        #expect(try decode([String: Availability].self, "availability-member.json")["alpha"]?.state == "online")
+    }
+
+    @Test func statusHealthLogsAndRestartDecode() throws {
+        #expect(try decode(AgentStatus.self, "status.json").state == "active")
+        #expect(try decode(AgentStatus.self, "status-member.json").subState == "running")
+        #expect(try decode([HealthEvent].self, "health-events.json").first?.state == "restarted")
+        #expect(try !decode(Logs.self, "logs.json").text.isEmpty)
+        let gate = try decode(WouldRun.self, "restart-gate.json")
+        #expect(gate.wouldRun && gate.clearance == "CL2")
+        #expect(try decode(CommandResult.self, "restart.json").ok)
+    }
+
+    @Test func theBoardAndACardsHistoryDecode() throws {
+        let cards = try decode([CardSummary].self, "board.json")
+        #expect(cards.first?.assignee == "alpha" && Board.states.contains(cards.first!.state))
+        #expect(try decode(Card.self, "card.json").events?.isEmpty == false)
+    }
+
+    @Test func anAgentIdWithAnUnderscoreKeepsItsName() throws {
+        // convertFromSnakeCase must not rename dictionary keys, or availability would miss such an agent.
+        let json = Data(#"{"my_agent": {"state": "online"}}"#.utf8)
+        #expect(try Client.decoder.decode([String: Availability].self, from: json)["my_agent"] != nil)
+    }
+
+    @Test func aCardChangeSendsOnlyWhatChanged() throws {
+        let sent = try JSONSerialization.jsonObject(with: JSONEncoder().encode(CardChange(state: "doing"))) as! [String: Any]
+        #expect(Array(sent.keys) == ["state"])
+        let blocked = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(CardChange(state: "blocked", blockedReason: "waiting", waitingOn: "beta"))) as! [String: Any]
+        #expect(blocked["blocked_reason"] as? String == "waiting" && blocked["waiting_on"] as? String == "beta")
+    }
+
+    @Test func agentsAreFoundByNameHostOrTag() throws {
+        let agents = try decode([Agent].self, "agents.json")
+        #expect(AgentsView.matching(agents, "FAMILY").count == 1 && AgentsView.matching(agents, "h1").count == 1)
+        #expect(AgentsView.matching(agents, "nothing").isEmpty && AgentsView.matching(agents, "  ").count == 1)
+    }
+}

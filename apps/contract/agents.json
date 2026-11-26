@@ -1,0 +1,27 @@
+[
+  {
+    "chat_open": null,
+    "client": null,
+    "desired": {},
+    "host": "h1",
+    "id": "alpha",
+    "member_logs": false,
+    "notes": "Kitchen assistant",
+    "owner": "ann@example.com",
+    "profile": null,
+    "reach": {
+      "bind": null,
+      "board": true,
+      "callers": null,
+      "capabilities": [],
+      "endpoint": "http://alpha.test:9900",
+      "network": null,
+      "transport": "a2a"
+    },
+    "tags": [
+      "family-a"
+    ],
+    "templates": [],
+    "type": "hermes"
+  }
+]
