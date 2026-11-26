@@ -192,10 +192,10 @@ def test_agent_writes_to_the_board_as_itself(fleet_agents):
         tools = _mcp(c, "tools/list", token=token).json()["result"]["tools"]
 
         assert sorted(t["name"] for t in tools) == [
-            "agent_owner", "board_card", "board_list", "card_add_dependency", "card_comment", "card_create",
+            "agent_owner", "board_card", "board_list", "card_add_dependency", "card_claim", "card_comment", "card_create",
             "card_reference_add", "card_reference_remove", "card_reference_update", "card_references",
             "card_remove_dependency", "card_set_parent", "card_update", "enroll_claim",
-            "enroll_request", "project_comment", "project_create", "project_get", "project_list",
+            "enroll_request", "milestone_add", "milestone_update", "project_comment", "project_create", "project_get", "project_list",
             "project_update", "workflow_create", "workflow_get", "workflow_list", "workflow_require_human",
             "workflow_respond", "workflow_revise",
         ]

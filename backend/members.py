@@ -54,6 +54,8 @@ _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject i
     ("GET", r"/api/projects/(?P<id>\d+)", "project"),
     ("PATCH", r"/api/projects/(?P<id>\d+)", "project"),
     ("POST", r"/api/projects/(?P<id>\d+)/comments", "project"),
+    ("POST", r"/api/projects/(?P<id>\d+)/milestones", "project"),
+    ("PATCH", r"/api/projects/(?P<id>\d+)/milestones/\d+", "project"),
     ("PATCH", r"/api/board/cards/(?P<id>\d+)", "card"),
     ("POST", r"/api/board/cards/(?P<id>\d+)/comments", "card"),
     ("PUT", r"/api/board/cards/(?P<id>\d+)/parent", "card"),

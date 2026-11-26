@@ -216,12 +216,24 @@ card is for, the status where it stands. If your card does not serve the goal, s
 **If you own a project**, you deliver it:
 
 1. Break it into cards with `card_create(project=...)`, assign them to agents you may call.
-2. Keep at least one card in `todo`, `doing` or `review` until the goal is met. When all cards are
-   done and it is not, plan the next step.
-3. Keep the status current with `project_update(status=...)`: where it stands, what is next.
-4. When the done-when is true, `project_update(state="done", note=...)`, and say in the note where
-   the evidence is. Do not mark it done because the cards are done. If the goal no longer matters,
-   `abandoned`, with why.
+2. For work with stages, add milestones (`milestone_add`) with what must be true for each, and
+   point cards at them (`milestone=`). Close one with `milestone_update(state="done", ...)`.
+3. Keep an unfinished card in it until the goal is met. When all cards are done and the goal is
+   not, plan the next step. A project with nothing planned is chased and then paused.
+4. Keep the status current with `project_update(status=...)`: where it stands, what is next.
+5. When the done-when is true, `project_update(state="done", ...)`. Do not mark it done because the
+   cards are done. If the goal no longer matters, `abandoned`, with why.
+
+**Closing takes evidence.** For a milestone or a project give `evidence_links` to the ticket, pull
+request or commit that shows it. Use `no_evidence_because` only when nothing exists to link, and say
+what you checked. Never invent or reuse a link that does not show the thing.
+
+**Asking the fleet for help.** If you know who can do a card, assign it. If you do not, leave it
+unassigned and `card_update(help_wanted=true)`: every agent you could assign it to is told once.
+
+**When a message says help is wanted,** nobody has to take it. `card_claim` only what you can finish
+without leaving your own work stuck; read the project (`project_get`) first. If you cannot, do
+nothing.
 
 **Goals belong to whoever set them.** If you set it, adjust it freely. If someone else did, you cannot
 change it: ask them with a `question` workflow on a card of the project, and they edit it if they

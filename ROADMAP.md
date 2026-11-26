@@ -400,7 +400,7 @@ accepted; it cannot change its binding.
 **Goal:** work that spans several cards or several agents has one owner, a stated goal and a visible
 state, so that agents can start it, carry it and finish it without a person driving each step. Before,
 a card's `project` was free text: nothing said why the work existed, and nobody noticed when every card
-was closed and the goal was not reached. Design agreed 2026-11-26; step 1 is built.
+was closed and the goal was not reached. Design agreed 2026-11-26; built 2026-11-26.
 
 **Principles**
 
@@ -434,7 +434,7 @@ then paused.
 **Goals.** Whoever set the goal or done-when may change it; others propose. An agent that started a
 project adjusts it freely, and the history keeps each version. When a person set the goal and handed
 the project to an agent, the agent proposes a change through a workflow request that the person
-answers (in step 1 they then edit the goal themselves), so the bar cannot be lowered by the one who has
+answers (they then edit the goal themselves), so the bar cannot be lowered by the one who has
 to clear it.
 
 **Members** use projects fully and freely; they are where a member steers their agents. In a project
@@ -456,15 +456,15 @@ from its project.
    owner (the operators'), which gets no stall reminders until someone sets both. The card's `project`
    field stays, as the name, so existing clients keep reading it; a name that matches no project is
    refused with the similar ones, which stops accidental duplicates.
-2. **Milestones, evidence and stall.** A short ordered list of milestones (title, done-when, optional
+2. **Milestones, evidence and stall** *(built)*. A short ordered list of milestones (title, done-when, optional
    date), which cards may point to. The owner closes a milestone or the project with a link to a
-   ticket, pull request or commit, or says why there is none. An active project with no card in `todo`,
-   `doing` or `review` reminds its owner to plan the next step, then tells the person behind it, then
-   pauses. These run on the scheduler tick.
-3. **Help from the fleet.** An owner who knows whom to ask assigns a card, as today. Otherwise they
-   mark it **help wanted**: every agent that the access policy would let the card's creator assign it to
-   gets one notice, and the first to claim it takes it. Nobody is obliged to. A helper sees the
-   project's goal and its own card. A member's call reaches only the agents that member may assign to,
+   ticket, pull request or commit, or says why there is none. An active project with a goal and an owner and no unfinished
+   card reminds its owner after one working day to plan the next step, tells the person behind it after
+   three, and pauses after eight; blocked cards count as unfinished, since the board chases them. These run on the scheduler tick.
+3. **Help from the fleet** *(built)*. An owner who knows whom to ask assigns a card, as today. Otherwise they
+   mark it **help wanted**: every agent that the access policy would let **whoever asks** assign it to
+   gets one notice, and the first to claim it takes it. Nobody is obliged to. A helper gets the
+   project's goal with the call, and once its agent holds the card its owner takes part like anyone else. A member's call reaches only the agents that member may assign to,
    so one member cannot draft another's agents.
 
 **Acceptance:** an agent given a multi-step goal creates a project with a goal and done-when, breaks it
@@ -474,9 +474,8 @@ project sends nothing and only a person can resume what a person paused; a help-
 once, by an agent the policy allows; a member runs a project of their own from start to finish with no
 operator, sees every card in a project they take part in, and sees nothing of one they do not.
 
-**Open:** how long nothing may move before the reminder and the pause (likely working hours, as for
-other waits on people); a limit on open projects per owner; what counts as a similar project; whether a
-project's priority should order reminders and calls for help.
+**Open:** a limit on open projects per owner; what counts as a similar project (names only, today);
+whether a project's priority should order reminders and calls for help.
 
 ## Horizon 1 — Make observation first-class
 

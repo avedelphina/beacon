@@ -11,6 +11,12 @@
   so an agent cannot lower a bar a person set. Pausing a project tells its agents to stop and halts
   its reminders; what a person paused only a person restarts. Members start and steer their own
   projects and see everything in the ones they or their agents take part in.
+- **Milestones, evidence, stalled projects.** Projects have milestones that cards point to. Closing a
+  milestone or a project needs links to the evidence, or the reason there is none. A project with
+  nothing unfinished reminds its owner after one working day, tells the person behind them after three
+  and pauses after eight.
+- **Help wanted.** An unassigned project card can ask every agent the asker may assign it to; the first
+  `card_claim` takes it.
   **Changes for clients:** a card can only be put in an existing, open project (create it first), and
   existing project names become projects with no goal and no owner on the first start; names that
   differ only in case or spaces are merged.

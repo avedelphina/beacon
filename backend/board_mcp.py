@@ -161,14 +161,17 @@ def build() -> MCPServer:
     @server.tool()
     def project_update(ctx: Context, project: str, status: str | None = None, state: str | None = None,
                        goal: str | None = None, done_when: str | None = None, owner: str | None = None,
-                       name: str | None = None, links: list[dict] | None = None, note: str | None = None) -> dict:
+                       name: str | None = None, links: list[dict] | None = None, note: str | None = None,
+                       evidence_links: list[dict] | None = None, no_evidence_because: str | None = None) -> dict:
         """Change a project you steer. status is your current summary: where it stands and what is
-        next, replaced each time. state: active, paused, done (every card must be done; say in note
-        where the evidence is) or abandoned. You can change goal and done_when only if you set them;
+        next, replaced each time. state: active, paused, done (every card and milestone must be done; give
+        evidence_links [{url, label}] to the ticket, pull request or commit, or no_evidence_because) or
+        abandoned. You can change goal and done_when only if you set them;
         otherwise propose the change to whoever did. note says why and is kept in the history."""
         return _for_agent(ctx, projects.update(_author(ctx), project, name=name, goal=goal, done_when=done_when,
                                                owner=projects.DEFAULT if owner is None else owner, state=state,
-                                               status=status, links=links, note=note))
+                                               status=status, links=links, note=note, evidence_links=evidence_links,
+                                               no_evidence_because=no_evidence_because))
 
     @server.tool()
     def project_comment(ctx: Context, project: str, text: str) -> dict:
@@ -176,15 +179,42 @@ def build() -> MCPServer:
         return _for_agent(ctx, projects.comment(_author(ctx), project, text))
 
     @server.tool()
+    def milestone_add(ctx: Context, project: str, title: str, done_when: str, due: str | None = None) -> dict:
+        """Add a milestone to a project you steer: a step towards the goal, with what must be true to
+        call it met. due is YYYY-MM-DD, only for readers. Point cards at it with card_create or
+        card_update (milestone=<id>)."""
+        return _for_agent(ctx, projects.add_milestone(_author(ctx), project, title, done_when, due))
+
+    @server.tool()
+    def milestone_update(ctx: Context, project: str, milestone: int, state: str | None = None,
+                         title: str | None = None, done_when: str | None = None, due: str | None = None,
+                         remove: bool = False, evidence_links: list[dict] | None = None,
+                         no_evidence_because: str | None = None) -> dict:
+        """Close a milestone (state="done": its cards must be done; give evidence_links [{url, label}]
+        or no_evidence_because), reopen it ("open"), or edit or remove it. You can change what it
+        requires only if you set it; otherwise ask whoever did."""
+        return _for_agent(ctx, projects.change_milestone(
+            _author(ctx), project, milestone, title=title, done_when=done_when, due=due, state=state, remove=remove,
+            evidence_links=evidence_links, no_evidence_because=no_evidence_because))
+
+    @server.tool()
+    def card_claim(ctx: Context, card_id: int) -> dict:
+        """Take a card that asks for help (help_by set, nobody assigned). Only claim what you can
+        finish; then work on it like any card assigned to you. The first claim wins."""
+        _visible_card(ctx, card_id)
+        return _visible_after(ctx, board.claim(_author(ctx), card_id))
+
+    @server.tool()
     def card_create(ctx: Context, title: str, body: str = "", project: str | None = None,
                     assignee: str | None = None, next_action: str | None = None,
-                    done_when: str | None = None, links: list[dict] | None = None) -> dict:
+                    done_when: str | None = None, links: list[dict] | None = None,
+                    milestone: int | None = None) -> dict:
         """Create a card in state "todo". Put what needs doing in body, the first step in
         next_action, and what must be true to close it in done_when. links is a list of
         {url, label} pointing to PRs or issues elsewhere. assignee is an agent id (see
         board_list or the fleet); that agent gets a notice."""
         return board.create_card(_author(ctx), title, body, project, assignee,
-                                 next_action=next_action, done_when=done_when, links=links)
+                                 next_action=next_action, done_when=done_when, links=links, milestone=milestone)
 
     @server.tool()
     def card_update(ctx: Context, card_id: int, state: str | None = None, assignee: str | None = None,
@@ -192,7 +222,8 @@ def build() -> MCPServer:
                     next_action: str | None = None, done_when: str | None = None,
                     links: list[dict] | None = None, note: str | None = None,
                     context_id: str | None = None, blocked_reason: str | None = None,
-                    waiting_on: str | None = None) -> dict:
+                    waiting_on: str | None = None, milestone: int | None = None,
+                    help_wanted: bool | None = None) -> dict:
         """Change a card: move its state (todo, doing, blocked, review, done), reassign it
         (assignee="" unassigns), or edit it. Keep next_action current as the work moves;
         "" clears it or done_when. links replaces the whole list of {url, label}, so send
@@ -204,12 +235,17 @@ def build() -> MCPServer:
         card, or something outside Beacon; waiting on a person means making a workflow request
         first) or "cannot" (you lack a capability or access: make a workflow request to a person for
         exactly what is missing, then set waiting_on to "workflow:<id>"; you are told when it ends).
-        Do not use blocked for work you could still do."""
+        Do not use blocked for work you could still do.
+
+        milestone points the card at a milestone of its project (0 clears). help_wanted=true on an
+        unassigned card of an active project asks every agent you could assign it to, once; the
+        first to claim it takes it. Use it when you do not know whom to ask."""
         _visible_card(ctx, card_id)
         return board.update_card(_author(ctx), card_id, state=state, assignee=assignee, title=title,
                                  body=body, project=project, next_action=next_action,
                                  done_when=done_when, links=links, note=note, context_id=context_id,
-                                 blocked_reason=blocked_reason, waiting_on=waiting_on)
+                                 blocked_reason=blocked_reason, waiting_on=waiting_on,
+                                 milestone=milestone, help_wanted=help_wanted)
 
     @server.tool()
     def card_comment(ctx: Context, card_id: int, text: str, context_id: str | None = None) -> dict:

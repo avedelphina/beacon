@@ -60,8 +60,11 @@
       "notice_id": null
     }
   ],
+  "help_asked_at": null,
+  "help_by": null,
   "id": 1,
   "links": [],
+  "milestone_id": null,
   "next_action": null,
   "parent": null,
   "parent_id": null,

@@ -500,6 +500,13 @@
 <div class="modal-backdrop" id="project-modal">
   <form class="modal" id="project-form">
     <div id="project-detail"></div>
+    <details id="milestone-add">
+      <summary>Add a milestone</summary>
+      <label>Title <input name="ms_title" maxlength="200"></label>
+      <label>Done when <input name="ms_done_when"></label>
+      <label>Date <span class="hint">(optional)</span> <input type="date" name="ms_due"></label>
+      <button type="button" class="btn" id="milestone-add-button">Add milestone</button>
+    </details>
     <div id="project-edit">
       <label>Status <span class="hint">(where it stands and what is next)</span> <textarea name="status" rows="3"></textarea></label>
       <label>Goal <textarea name="goal" rows="2"></textarea></label>
@@ -538,6 +545,9 @@
       </select></label>
       <label>Waiting on / missing <input name="waiting_on" placeholder="an agent, workflow:12 (a request on this card), or something outside"></label>
     </div>
+    <label id="card-milestone" hidden>Milestone <select name="milestone"></select></label>
+    <label class="check" id="card-help" hidden><input type="checkbox" name="help_wanted"> help wanted
+      <span class="hint">(asks every agent you can give it to; the first to claim takes it)</span></label>
     <label>Next action <input name="next_action"></label>
     <label>Done when <input name="done_when"></label>
     <label>Links <span class="hint">(one per line: URL, then an optional label)</span>

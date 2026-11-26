@@ -175,9 +175,9 @@ def housekeeping() -> None:
     requests that ran out of time, then remind and escalate stale board cards for every
     agent (backend/board.py, remind). Each part is isolated: one failing must not stop the
     other, or the cron jobs of the same tick."""
-    from . import board, workflow
+    from . import board, projects, workflow
     for name, step in (("workflow expiry", workflow.expire_due), ("owner nudges", workflow.nudge_operators),
-                       ("board reminders", board.remind)):
+                       ("board reminders", board.remind), ("stalled projects", projects.check_stalled)):
         try:
             step()
         except Exception as exc:  # a cron-triggered process: log it and carry on

@@ -259,6 +259,19 @@ def project_changed(project: dict, actor: str, person: str | None, note: str | N
         logger.exception("project notice for %s failed", project.get("id"))
 
 
+def project_stalled(project: dict, person: str | None) -> None:
+    """Nothing is planned for a project whose goal is not marked reached."""
+    try:
+        people = {person} if person else {p.casefold() for p in _operators()}
+        _tell(people, f"Beacon: nothing is planned for project {project['name'][:60]}",
+              f"Project #{project['id']} \"{project['name']}\" (owner {project['owner']}) has no unfinished card and is "
+              "not marked done. If nothing is planned it will be paused.\n"
+              f"\nGoal (written by whoever set it): {project['goal'][:400]}\n"
+              f"\nOpen the Projects tab: {mesh.public_url() or 'your Beacon page'}\n")
+    except Exception:
+        logger.exception("stalled-project notice for %s failed", project.get("id"))
+
+
 def _people_for(agent_id: str) -> set[str]:
     from . import auth
     owner = None

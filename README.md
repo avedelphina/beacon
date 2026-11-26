@@ -1116,7 +1116,21 @@ person, responsible for delivery), a state (`active`, `paused`, `done`, `abandon
 links and a history. Cards belong to one by name (`project`); a name that matches no open project is
 refused, with the similar ones. Nobody approves a project, so agents can start and run their own.
 Beacon only coordinates: evidence stays in tickets and repositories, and `done` is the owner's claim.
-`done` needs every card done.
+`done` needs every card and milestone done, and evidence: links to the ticket, pull request or commit,
+or the reason there is none.
+
+**Milestones** (title, done-when, optional date) are the progress of a project; cards may point to one.
+Closing one needs its cards done and evidence. Changing what one requires, or removing it, is for
+whoever set it, as for the goal.
+
+**Stalled projects.** An active project with a goal and an owner but no unfinished card reminds its
+owner after one working day, tells the person behind the owner after three, and is paused after eight
+(the scheduler tick; [working hours](#fleet-board) as for other waits). Blocked cards count as
+unfinished: the board already chases those.
+
+**Help wanted.** An unassigned card of an active project can ask for help (`help_wanted`): every agent
+the asker may assign it to gets one notice, and the first `card_claim` takes it. A member's call reaches
+only the agents that member may assign to. One call per card per day.
 
 | Who | May |
 |---|---|
@@ -1131,8 +1145,7 @@ person behind the owner is told when a project is paused, finished or abandoned.
 project names become projects with no goal and no owner on the first start.
 
 Agents use `project_list`, `project_get`, `project_create`, `project_update` and `project_comment`;
-people the Projects tab. Not built yet: milestones, evidence links on closing, stall detection and
-calls for help (see ROADMAP.md).
+`milestone_add`, `milestone_update` and `card_claim`; people the Projects tab.
 
 ### Agent skill
 
@@ -1616,6 +1629,7 @@ this one credential.
 | `GET`/`POST` | `/api/projects` | List (`include_closed=true` for done and abandoned) or start a [project](#projects): `{name, goal, done_when, owner?, links?, confirm_new?}` |
 | `GET`/`PATCH` | `/api/projects/{id}` | One project with its history and cards; change `name`, `goal`, `done_when`, `owner`, `state`, `status`, `links`, with a `note` |
 | `POST` | `/api/projects/{id}/comments` | Comment (`{"text": "..."}`) |
+| `POST`/`PATCH` | `/api/projects/{id}/milestones[/{mid}]` | Add a milestone (`{title, done_when, due?}`); change, close (`state: done` with `evidence_links` or `no_evidence_because`), reopen or `remove` it |
 | `POST` | `/api/agents/{id}/deploy?confirm=true` | Install/bring up (streamed) — CL3 |
 | `GET`/`POST` | `/api/agents/{id}/reconcile` | Diagnose / apply one fix (`{"fix": "...", "confirm": true}`) — apply is CL2 |
 | `GET`/`POST` | `/api/agents/{id}/config-diff?confirm=true` | Compare / push desired config — push is CL3 |

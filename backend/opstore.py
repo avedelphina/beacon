@@ -82,6 +82,10 @@ CREATE TABLE IF NOT EXISTS projects (
     status      TEXT,                        -- the owner's current summary
     status_at   REAL,
     links       TEXT NOT NULL DEFAULT '[]',  -- JSON [{url, label}]: tickets, repositories
+    evidence    TEXT,                        -- when done: JSON {links, none_because}; a claim, never checked
+    active_at   REAL NOT NULL DEFAULT 0,     -- created, reopened, resumed or planned: the stall clock starts no earlier
+    stall_step  INTEGER NOT NULL DEFAULT 0,  -- 1 owner reminded, 2 person told, 3 paused (projects.check_stalled)
+    stall_at    REAL,                        -- when; a step older than the last activity no longer counts
     created_by  TEXT NOT NULL,
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL
@@ -91,11 +95,26 @@ CREATE TABLE IF NOT EXISTS project_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id  INTEGER NOT NULL REFERENCES projects (id),
     author      TEXT NOT NULL,
-    kind        TEXT NOT NULL,     -- created | comment | goal | owner | status | state | edit
+    kind        TEXT NOT NULL,     -- created | comment | goal | milestone | owner | status | state | edit
     body        TEXT NOT NULL,
     created_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS project_events_by_project ON project_events (project_id);
+
+-- A project's progress is which of these are met, in order of creation.
+CREATE TABLE IF NOT EXISTS project_milestones (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL REFERENCES projects (id),
+    title       TEXT NOT NULL,
+    done_when   TEXT NOT NULL,
+    due         TEXT,              -- YYYY-MM-DD, for people to read; nothing acts on it
+    set_by      TEXT NOT NULL,     -- who set title and done_when: only they change or remove it (as a goal)
+    state       TEXT NOT NULL DEFAULT 'open',  -- open | done
+    evidence    TEXT,              -- as projects.evidence
+    closed_by   TEXT,
+    closed_at   REAL,
+    created_at  REAL NOT NULL
+);
 
 -- "card_id cannot finish until depends_on_id is done". A card's blocked_by is computed from these
 -- edges and the other card's state, never stored (board.get_card). No cycles (board.add_dependency).
@@ -371,7 +390,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for column, decl in (("reminded_at", "REAL"), ("reminders", "INTEGER NOT NULL DEFAULT 0"),
                          ("escalated_at", "REAL"), ("next_action", "TEXT"), ("done_when", "TEXT"),
                          ("links", "TEXT NOT NULL DEFAULT '[]'"), ("blocked_reason", "TEXT"), ("waiting_on", "TEXT"),
-                         ("parent_id", "INTEGER REFERENCES cards (id)")):
+                         ("parent_id", "INTEGER REFERENCES cards (id)"),
+                         ("milestone_id", "INTEGER"), ("help_by", "TEXT"), ("help_asked_at", "REAL")):
         if column not in card_columns:
             conn.execute(f"ALTER TABLE cards ADD COLUMN {column} {decl}")
     # "tier" became "clearance" (CL0 to CL5, the DeepOcean operating model's word). Existing databases keep their

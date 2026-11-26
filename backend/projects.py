@@ -18,21 +18,30 @@ Who may do what, and why:
   an agent proposes (a workflow question to them) and they edit it.
 - Pause is the brake for agents that make work in circles: what a person paused, only a person
   restarts. "beacon" (the MCP bearer) is not a person: agents hold it.
+- Milestones follow the same rule as the goal: each changes or goes at the hands of whoever
+  set it. Closing one, or the project, takes a link to the ticket, pull request or commit, or
+  the reason there is none: a claim others can follow up, never checked here.
+- A project with nothing unfinished and no goal reached is stalled: the scheduler reminds the
+  owner, then tells the person behind it, then pauses (check_stalled).
 - Everyone who has no part reads: agents see all projects, as they see the board. A member
   sees only the ones they or their agents take part in (visible_to).
 """
 
+import datetime
 import difflib
 import json
 import threading
 import time
 
-from . import mailbox, mesh, opstore, store
+from . import mailbox, mesh, opstore, store, workhours
 
 STATES = ("active", "paused", "done", "abandoned")
 CLOSED = ("done", "abandoned")
 MAX_NAME = 80
 MAX_TEXT = 4000
+MAX_MILESTONES = 20
+# Working days with nothing unfinished: remind the owner, tell the person behind it, pause.
+STALL_DAYS = (1, 3, 8)
 DEFAULT = object()  # create(): "the owner was not given", as opposed to None, "the operators"
 
 
@@ -92,12 +101,14 @@ def owner_side(actor: str, project: dict) -> bool:
 
 
 def may_set_goal(actor: str, project: dict) -> bool:
-    if _is_operator_person(actor):
-        return True
     if not project["goal"]:
         return owner_side(actor, project)
-    setter = project["goal_by"]
-    if _same(actor, setter):
+    return _may_move_bar(actor, project, project["goal_by"])
+
+
+def _may_move_bar(actor: str, project: dict, setter: str) -> bool:
+    """Whether `actor` may change what `setter` required: a goal, or a milestone."""
+    if _is_operator_person(actor) or _same(actor, setter):
         return True
     if _is_person(setter):
         return False
@@ -140,7 +151,8 @@ def _check_owner(actor: str, owner: str | None) -> str | None:
 
 
 def _decode(row) -> dict:
-    return {**dict(row), "links": json.loads(row["links"] or "[]")}
+    return {**dict(row), "links": json.loads(row["links"] or "[]"),
+            "evidence": json.loads(row["evidence"]) if row["evidence"] else None}
 
 
 def _rows(db) -> list[dict]:
@@ -208,8 +220,11 @@ def get(actor: str, ref) -> dict:
     with opstore.connect() as db:
         events = [dict(r) for r in db.execute("SELECT * FROM project_events WHERE project_id = ? ORDER BY id",
                                               (project["id"],))]
+        milestones = [dict(r) | {"evidence": json.loads(r["evidence"]) if r["evidence"] else None,
+                                 "can_change": _may_move_bar(actor, project, r["set_by"])} for r in db.execute(
+            "SELECT * FROM project_milestones WHERE project_id = ? ORDER BY id", (project["id"],))]
     cards = board.list_cards(project=project["name"], include_done=True)
-    return _view(actor, project) | {"events": events, "card_list": cards}
+    return _view(actor, project) | {"events": events, "milestones": milestones, "card_list": cards}
 
 
 def for_card(name: str | None) -> dict | None:
@@ -292,9 +307,9 @@ def create(actor: str, name: str, goal: str, done_when: str, owner=DEFAULT, link
                              + ". Add your cards to one of them, or pass confirm_new=true if yours is different.")
         now = time.time()
         project_id = db.execute(
-            "INSERT INTO projects (name, goal, done_when, owner, goal_by, state, links, created_by, created_at,"
-            " updated_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)",
-            (name, goal, done_when, owner, actor, json.dumps(links), actor, now, now)).lastrowid
+            "INSERT INTO projects (name, goal, done_when, owner, goal_by, state, links, active_at, created_by,"
+            " created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)",
+            (name, goal, done_when, owner, actor, json.dumps(links), now, actor, now, now)).lastrowid
         _event(db, project_id, actor, "created", f"goal: {goal}\ndone when: {done_when}\nowner: {owner or 'operators'}")
     project = find(project_id)
     if owner and not _same(owner, actor):
@@ -304,7 +319,8 @@ def create(actor: str, name: str, goal: str, done_when: str, owner=DEFAULT, link
 
 def update(actor: str, ref, *, name: str | None = None, goal: str | None = None, done_when: str | None = None,
            owner=DEFAULT, state: str | None = None, status: str | None = None, links: list | None = None,
-           note: str | None = None) -> dict:
+           note: str | None = None, evidence_links: list | None = None,
+           no_evidence_because: str | None = None) -> dict:
     """Change what is given. Every check happens before the first write."""
     from . import board
     project = find(ref)
@@ -342,6 +358,8 @@ def update(actor: str, ref, *, name: str | None = None, goal: str | None = None,
             raise NotAllowed(f"{project['paused_by']} paused this project: only a person can restart or close it")
         steered.append(("state", new_state, "state", f"{project['state']} -> {new_state}"))
         steered.append(("paused_by", actor if new_state == "paused" else None, "", ""))
+        if project["state"] == "done":
+            steered.append(("evidence", None, "", ""))
     if steered and not owner_side(actor, project):
         raise NotAllowed(f"only the owner of {project['name']!r}, the person behind it or an operator can do that")
     changes += steered
@@ -353,6 +371,12 @@ def update(actor: str, ref, *, name: str | None = None, goal: str | None = None,
         if new_state == "done" and db.execute(
                 "SELECT 1 FROM cards WHERE project = ? COLLATE NOCASE AND state != 'done'", (project["name"],)).fetchone():
             raise ValueError("it still has cards that are not done: finish them, or move them out of the project")
+        if new_state == "done" and db.execute(
+                "SELECT 1 FROM project_milestones WHERE project_id = ? AND state = 'open'", (project["id"],)).fetchone():
+            raise ValueError("it still has open milestones: close them with their evidence first")
+        if new_state == "done":  # asked for last: first say what else stands in the way
+            evidence = _evidence(evidence_links, no_evidence_because)
+            changes.append(("evidence", evidence, "state", f"evidence: {_describe_evidence(evidence)}"))
         renamed = next((v for c, v, *_ in changes if c == "name"), None)
         if renamed and any(_same(p["name"], renamed) for p in _rows(db) if p["id"] != project["id"]):
             raise ValueError(f"the name {renamed!r} is taken")
@@ -364,6 +388,10 @@ def update(actor: str, ref, *, name: str | None = None, goal: str | None = None,
                 _event(db, project["id"], actor, kind, text + (f" ({note})" if note else ""))
         if goal_changed:
             db.execute("UPDATE projects SET goal_by = ? WHERE id = ?", (actor, project["id"]))
+        # The stall clock starts over when work could not have been expected before: resumed, reopened,
+        # or only now given a goal or an owner (a migrated project has neither).
+        if new_state == "active" or goal_changed or any(c == "owner" for c, *_ in changes):
+            db.execute("UPDATE projects SET active_at = ? WHERE id = ?", (now, project["id"]))
         if renamed:
             db.execute("UPDATE cards SET project = ? WHERE project = ? COLLATE NOCASE", (renamed, project["name"]))
         if note and not changes:
@@ -389,6 +417,180 @@ def comment(actor: str, ref, text: str) -> dict:
     if project["owner"]:
         _tell_agent(project, project["owner"], actor, f"{actor} commented:\n{text[:600]}")
     return get(actor, project["id"])
+
+
+# --- milestones ---------------------------------------------------------------
+
+
+def _evidence(links: list | None, none_because: str | None) -> str:
+    from . import board
+    links = board._links(links or [])
+    reason = (none_because or "").strip()[:MAX_TEXT]
+    if not links and not reason:
+        raise ValueError("closing needs evidence: evidence_links to the ticket, pull request or commit, "
+                         "or no_evidence_because")
+    return json.dumps({"links": links, "none_because": reason or None})
+
+
+def _describe_evidence(evidence: str) -> str:
+    value = json.loads(evidence)
+    return ", ".join(link["url"] for link in value["links"]) or f"none, because {value['none_because']}"
+
+
+def _due(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    try:
+        return datetime.date.fromisoformat(value.strip()).isoformat()
+    except ValueError:
+        raise ValueError("due must be a date, YYYY-MM-DD") from None
+
+
+def _open_project(actor: str, ref) -> dict:
+    project = find(ref)
+    if not _may_see(actor, project["name"], _seen_by(actor)):
+        raise store.NotFound(f"project {ref} not found")
+    if project["state"] in CLOSED:
+        raise ValueError(f"the project is {project['state']}: reopen it first")
+    return project
+
+
+def add_milestone(actor: str, ref, title: str, done_when: str, due: str | None = None) -> dict:
+    project = _open_project(actor, ref)
+    if not owner_side(actor, project):
+        raise NotAllowed(f"only the owner side of {project['name']!r} plans its milestones")
+    title, done_when, due = _text(title, "title", 200), _text(done_when, "done_when"), _due(due)
+    now = time.time()
+    with opstore.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        if db.execute("SELECT count(*) AS n FROM project_milestones WHERE project_id = ?",
+                      (project["id"],)).fetchone()["n"] >= MAX_MILESTONES:
+            raise ValueError(f"a project has at most {MAX_MILESTONES} milestones")
+        milestone_id = db.execute(
+            "INSERT INTO project_milestones (project_id, title, done_when, due, set_by, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)", (project["id"], title, done_when, due, actor, now)).lastrowid
+        _event(db, project["id"], actor, "milestone", f"added #{milestone_id} {title} (done when: {done_when})")
+        db.execute("UPDATE projects SET updated_at = ?, active_at = ? WHERE id = ?", (now, now, project["id"]))
+    return get(actor, project["id"])
+
+
+def change_milestone(actor: str, ref, milestone_id: int, *, title: str | None = None, done_when: str | None = None,
+                     due: str | None = None, state: str | None = None, remove: bool = False,
+                     evidence_links: list | None = None, no_evidence_because: str | None = None) -> dict:
+    """Edit, close (state="done"), reopen or remove one. Changing what it requires, and removing
+    it, is for whoever set it; closing, reopening and dating it is for the owner side."""
+    project = _open_project(actor, ref)
+    with opstore.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM project_milestones WHERE id = ? AND project_id = ?",
+                         (milestone_id, project["id"])).fetchone()
+        if row is None:
+            raise store.NotFound(f"milestone {milestone_id} not found in this project")
+        values, said = {}, []
+        for column, value, limit in (("title", title, 200), ("done_when", done_when, MAX_TEXT)):
+            if value is not None and value.strip() != row[column]:
+                values[column] = _text(value, column, limit)
+                said.append(f"{column.replace('_', ' ')}: {values[column]}")
+        if (values or remove) and not _may_move_bar(actor, project, row["set_by"]):
+            raise NotAllowed(f"{row['set_by']} set this milestone, so you cannot change or remove it: ask them "
+                             "(a question workflow on a card of this project)")
+        if values:
+            values["set_by"] = actor
+        new_state = state if state is not None and state != row["state"] else None
+        new_due = _due(due) if due is not None else row["due"]
+        if (new_state or new_due != row["due"]) and not owner_side(actor, project):
+            raise NotAllowed(f"only the owner side of {project['name']!r} closes or dates its milestones")
+        if new_due != row["due"]:
+            values["due"] = new_due
+            said.append(f"due: {new_due or '-'}")
+        if new_state == "done":
+            if db.execute("SELECT 1 FROM cards WHERE milestone_id = ? AND state != 'done'", (milestone_id,)).fetchone():
+                raise ValueError("it still has cards that are not done")
+            evidence = _evidence(evidence_links, no_evidence_because)
+            values |= {"state": "done", "evidence": evidence, "closed_by": actor, "closed_at": time.time()}
+            said.append(f"done, evidence: {_describe_evidence(evidence)}")
+        elif new_state == "open":
+            values |= {"state": "open", "evidence": None, "closed_by": None, "closed_at": None}
+            said.append("reopened")
+        elif new_state:
+            raise ValueError("state must be open or done")
+        now = time.time()
+        if remove:
+            db.execute("UPDATE cards SET milestone_id = NULL WHERE milestone_id = ?", (milestone_id,))
+            db.execute("DELETE FROM project_milestones WHERE id = ?", (milestone_id,))
+            said = [f"removed ({row['title']})"]
+        elif values:
+            db.execute(f"UPDATE project_milestones SET {', '.join(f'{c} = ?' for c in values)} WHERE id = ?",
+                       (*values.values(), milestone_id))
+        if said:
+            _event(db, project["id"], actor, "milestone", f"#{milestone_id} " + "; ".join(said))
+            db.execute("UPDATE projects SET updated_at = ?, active_at = ? WHERE id = ?", (now, now, project["id"]))
+    return get(actor, project["id"])
+
+
+def check_milestone(project_name: str | None, milestone_id: int) -> int:
+    """For the board: the milestone a card is being pointed at must be an open one of its project."""
+    project = for_card(project_name)
+    if project is None:
+        raise ValueError("a milestone needs the card to be in its project")
+    with opstore.connect() as db:
+        row = db.execute("SELECT state FROM project_milestones WHERE id = ? AND project_id = ?",
+                         (milestone_id, project["id"])).fetchone()
+    if row is None:
+        raise ValueError(f"project {project['name']!r} has no milestone {milestone_id}")
+    if row["state"] != "open":
+        raise ValueError(f"milestone {milestone_id} is done: reopen it before adding cards")
+    return milestone_id
+
+
+# --- stalled projects -----------------------------------------------------------
+
+
+def check_stalled(now: float | None = None) -> int:
+    """For the scheduler. A project with a goal and an owner and no unfinished card is waiting for
+    nobody: after one working day the owner is reminded to plan the next step, after three the person
+    behind it is told, after eight it is paused. Anything that happens to its cards or plan starts
+    over. Blocked cards count as unfinished: the board chases those itself. Returns how many steps
+    were taken."""
+    now = time.time() if now is None else now
+    day = workhours.day_seconds()
+    with opstore.connect() as db:
+        rows = db.execute(
+            "SELECT p.*, (SELECT max(c.updated_at) FROM cards c WHERE c.project = p.name) AS card_at FROM projects p"
+            " WHERE p.state = 'active' AND p.goal != '' AND p.owner IS NOT NULL AND NOT EXISTS"
+            " (SELECT 1 FROM cards c WHERE c.project = p.name AND c.state != 'done')").fetchall()
+    taken = 0
+    for row in rows:
+        project, since = _decode(row), max(row["active_at"], row["card_at"] or 0)
+        step = project["stall_step"] if project["stall_at"] and project["stall_at"] >= since else 0
+        if step >= len(STALL_DAYS) or now < workhours.after(since, STALL_DAYS[step] * day):
+            continue
+        with opstore.connect() as db:
+            if db.execute("UPDATE projects SET stall_step = ?, stall_at = ? WHERE id = ? AND state = 'active'"
+                          " AND stall_step = ? AND stall_at IS ?", (step + 1, now, project["id"],
+                          project["stall_step"], project["stall_at"])).rowcount != 1:
+                continue  # another tick has it
+            _event(db, project["id"], mesh.BEACON_PEER, "state" if step == 2 else "edit", (
+                f"nothing planned: reminded {project['owner']}", "nothing planned: told the person behind it",
+                "active -> paused: nothing was planned")[step])
+            if step == 2:
+                db.execute("UPDATE projects SET state = 'paused', paused_by = ?, updated_at = ? WHERE id = ?",
+                           (mesh.BEACON_PEER, now, project["id"]))
+        taken += 1
+        _stalled(find(project["id"]), step)
+    return taken
+
+
+def _stalled(project: dict, step: int) -> None:
+    from . import notify
+    owner, person = project["owner"], person_behind(project["owner"])
+    if step == 2:
+        _announce(project, mesh.BEACON_PEER, "Nothing was planned for it. Resume it when there is a next step.")
+    elif step == 0 and not _is_person(owner):
+        _tell_agent(project, owner, mesh.BEACON_PEER, "Nothing is planned for it and its goal is not marked reached. "
+                    "Create the next card, or mark it done with evidence, or abandon it with why.")
+    elif step == 0 or not _same(owner, person):
+        notify.project_stalled(project, person)
 
 
 # --- telling ------------------------------------------------------------------

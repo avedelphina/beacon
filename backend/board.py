@@ -154,20 +154,21 @@ def get_card(card_id: int) -> dict:
 
 def create_card(author: str, title: str, body: str = "", project: str | None = None,
                 assignee: str | None = None, state: str = "todo", *, next_action: str | None = None,
-                done_when: str | None = None, links: list | None = None) -> dict:
+                done_when: str | None = None, links: list | None = None, milestone: int | None = None) -> dict:
     title = _required(title, "title")
     _check_state(state)
     links = _links(links or [])
     if assignee:
         _check_may_assign(author, assignee)
     project = projects.resolve(author, project) if project and project.strip() else None
+    milestone = projects.check_milestone(project, milestone) if milestone else None
     now = time.time()
     with opstore.connect() as db:
         card_id = db.execute(
             "INSERT INTO cards (title, body, project, assignee, state, next_action, done_when, links,"
-            " created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " created_by, created_at, updated_at, milestone_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (title, body or "", project, assignee or None, state, _text(next_action), _text(done_when),
-             json.dumps(links), author, now, now)).lastrowid
+             json.dumps(links), author, now, now, milestone)).lastrowid
         _event(db, card_id, author, "created", title)
     if assignee:
         _notify_assignee(card_id, author, assignee)
@@ -178,7 +179,7 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
                 title: str | None = None, body: str | None = None, project: str | None = None,
                 next_action: str | None = None, done_when: str | None = None, links: list | None = None,
                 note: str | None = None, context_id: str | None = None, blocked_reason: str | None = None,
-                waiting_on: str | None = None) -> dict:
+                waiting_on: str | None = None, milestone: int | None = None, help_wanted: bool | None = None) -> dict:
     """Change what's given; each change is its own event. `assignee=""`
     unassigns, `next_action=""`/`done_when=""` clear, `links` replaces the list.
     `note` explains the change and is recorded with it. Moving a card to blocked
@@ -204,6 +205,24 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
         if project.casefold() != (card["project"] or "").casefold():
             name = projects.resolve(author, project) if project else None
             changes.append(("project", "edit", name, f"project: {card['project'] or '-'} -> {name or '-'}"))
+    in_project = next((value for column, _, value, _ in changes if column == "project"), card["project"])
+    moved = any(column == "project" for column, *_ in changes)
+    if milestone is not None and (milestone or None) != card["milestone_id"]:
+        target = projects.check_milestone(in_project, milestone) if milestone else None
+        changes.append(("milestone_id", "edit", target, f"milestone: {target or '-'}"))
+    elif moved and card["milestone_id"]:
+        changes.append(("milestone_id", "edit", None, "milestone: - (it belonged to the other project)"))
+    leaving = moved or state == "done" or bool(assignee)
+    if help_wanted:
+        if leaving or card["assignee"] and assignee != "":
+            raise ValueError("help is asked for an unassigned card that stays open in its project")
+        if not card["help_by"]:
+            _check_may_ask_help(author, card)
+            changes.append(("help_by", "edit", author, "help wanted"))
+    elif card["help_by"] and (help_wanted is False or leaving):
+        if help_wanted is False and not leaving:
+            _check_may_steer_help(author, card)
+        changes.append(("help_by", "edit", None, "help no longer wanted"))
     for column, value in (("title", title), ("body", body)):
         if value is not None and value != (card[column] or ""):
             changes.append((column, "edit", value if column != "title" else _required(value, "title"),
@@ -225,11 +244,91 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
         if note and not changes:
             _event(db, card_id, author, "comment", note, context_id)
             db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (now, card_id))
+    if any(column == "help_by" and value for column, _, value, _ in changes):
+        _ask_for_help(card_id, author)
     new_assignee = next((value for column, _, value, _ in changes if column == "assignee"), None)
     if new_assignee:
         _notify_assignee(card_id, author, new_assignee)
     elif note and not changes:
         _notify_comment(card_id, author, note)
+    return get_card(card_id)
+
+
+# --- help wanted --------------------------------------------------------------
+
+HELP_AGAIN_SECONDS = 24 * 3600  # a card asks the fleet at most this often
+
+
+def eligible_helpers(asker: str) -> list[str]:
+    """The agents `asker` may give a card to, which is exactly who may be asked: a call for help
+    must not reach an agent that an assignment could not. Clients take no work."""
+    from . import members
+    exposure = mesh.open_chats()
+    fleet = [a for a in store.list_agents()
+             if a.reach and a.client is None and a.id != asker and mesh.board_allowed(a, exposure)]
+    if projects._is_member(asker):
+        allowed = members.assignable_ids(asker)
+        return sorted(a.id for a in fleet if a.id in allowed)
+    if _is_agent(asker) or _is_client(asker):
+        return sorted(a.id for a in fleet if mesh.may_call(asker, a))
+    return sorted(a.id for a in fleet)
+
+
+def _check_may_steer_help(author: str, card: dict) -> None:
+    project = projects.for_card(card["project"])
+    if author != card["created_by"] and author != card["help_by"] and (
+            project is None or not projects.owner_side(author, project)):
+        raise projects.NotAllowed("only whoever made the card, or the project's owner side, asks for help with it")
+
+
+def _check_may_ask_help(author: str, card: dict) -> None:
+    from . import intake
+    project = projects.for_card(card["project"])
+    if project is None or project["state"] != "active" or card["state"] == "done":
+        raise ValueError("help is asked for an open card of an active project")
+    _check_may_steer_help(author, card)
+    if intake.is_intake(card) and not intake.visibility()["agents"]:
+        raise ValueError("this is an intake card and agents may not see those")
+    if card["help_asked_at"] and time.time() - card["help_asked_at"] < HELP_AGAIN_SECONDS:
+        raise ValueError("the fleet was asked about this card less than a day ago")
+    if not eligible_helpers(author):
+        raise ValueError("there is no agent you may give this card to, so nobody can be asked")
+
+
+def _ask_for_help(card_id: int, asker: str) -> None:
+    """One notice to each agent that could take the card. Nobody is obliged to."""
+    card = get_card(card_id)
+    with opstore.connect() as db:
+        db.execute("UPDATE cards SET help_asked_at = ? WHERE id = ?", (time.time(), card_id))
+    text = (f"Help is wanted on card #{card_id} on the Beacon board, asked by {asker}. Nobody has to take it. "
+            f"If you can do it, call card_claim({card_id}): the first to claim gets it.\n"
+            f"Title: {card['title']}\n{_project_lines(card)}"
+            + "".join(f"{label}: {card[column][:NOTICE_BODY]}\n" for column, label in
+                      (("next_action", "Next action"), ("done_when", "Done when")) if card[column])
+            + f"\n{card['body'][:NOTICE_BODY]}")
+    for agent_id in eligible_helpers(asker):
+        _send_notice(card_id, asker, agent_id, "help_notice", text)
+
+
+def claim(agent_id: str, card_id: int) -> dict:
+    """An agent takes a card that asks for help. Checked again now: the policy, the project or the
+    asker's rights may have changed since the notice."""
+    card = get_card(card_id)
+    project = projects.for_card(card["project"])
+    if not card["help_by"] or card["assignee"]:
+        raise ValueError(f"card #{card_id} is not asking for help (someone may have taken it)")
+    if project is None or project["state"] != "active":
+        raise ValueError("its project is not active")
+    if agent_id not in eligible_helpers(card["help_by"]):
+        raise projects.NotAllowed(f"{card['help_by']} may not give you work, so you cannot take this card")
+    now = time.time()
+    with opstore.connect() as db:
+        if db.execute("UPDATE cards SET assignee = ?, help_by = NULL, updated_at = ? WHERE id = ?"
+                      " AND help_by IS NOT NULL AND assignee IS NULL", (agent_id, now, card_id)).rowcount != 1:
+            raise ValueError(f"card #{card_id} was just taken by someone else")
+        _event(db, card_id, agent_id, "assign", f"- -> {agent_id}: claimed the call for help")
+    _send_notice(card_id, agent_id, card["help_by"], "comment_notice",
+                 f"{agent_id} took card #{card_id} that you asked for help with.\nTitle: {card['title']}")
     return get_card(card_id)
 
 

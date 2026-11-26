@@ -510,6 +510,7 @@ class CardCreate(BaseModel):
     next_action: str | None = None
     done_when: str | None = None
     links: list[dict] | None = None  # [{url, label}]; board._links checks each
+    milestone: int | None = None
 
 
 class CardUpdate(BaseModel):
@@ -525,6 +526,8 @@ class CardUpdate(BaseModel):
     context_id: str | None = None
     blocked_reason: str | None = None  # unclear | waiting | cannot: required when the card moves to blocked
     waiting_on: str | None = None  # what a waiting card waits on, or what a cannot card lacks
+    milestone: int | None = None  # a milestone of the card's project; 0 clears it
+    help_wanted: bool | None = None  # ask the agents you may assign to; the first to claim takes it
 
 
 class CardComment(BaseModel):
@@ -739,6 +742,35 @@ class ProjectUpdate(BaseModel):
     status: str | None = None
     links: list[dict] | None = None
     note: str | None = None
+    evidence_links: list[dict] | None = None  # needed for state "done", or no_evidence_because
+    no_evidence_because: str | None = None
+
+
+class MilestoneCreate(BaseModel):
+    title: str
+    done_when: str
+    due: str | None = None
+
+
+class MilestoneUpdate(BaseModel):
+    title: str | None = None
+    done_when: str | None = None
+    due: str | None = None  # "" clears it
+    state: str | None = None  # open | done
+    remove: bool = False
+    evidence_links: list[dict] | None = None
+    no_evidence_because: str | None = None
+
+
+@app.post("/api/projects/{project_id}/milestones")
+def milestone_add(project_id: int, body: MilestoneCreate, request: Request) -> dict:
+    return _project_for_viewer(request, projects.add_milestone(_board_author(request), project_id, **body.model_dump()))
+
+
+@app.patch("/api/projects/{project_id}/milestones/{milestone_id}")
+def milestone_change(project_id: int, milestone_id: int, body: MilestoneUpdate, request: Request) -> dict:
+    return _project_for_viewer(request, projects.change_milestone(
+        _board_author(request), project_id, milestone_id, **body.model_dump()))
 
 
 @app.get("/api/projects")
@@ -819,7 +851,8 @@ def board_card(card_id: int, request: Request) -> dict:
 def board_create(body: CardCreate, request: Request) -> dict:
     _member_may_assign(request, body.assignee)
     return board.create_card(_board_author(request), body.title, body.body, body.project, body.assignee,
-                             next_action=body.next_action, done_when=body.done_when, links=body.links)
+                             next_action=body.next_action, done_when=body.done_when, links=body.links,
+                             milestone=body.milestone)
 
 
 @app.patch("/api/board/cards/{card_id}")
