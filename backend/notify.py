@@ -243,6 +243,22 @@ def cards_stuck(stuck: list[tuple[dict, str | None, str]]) -> None:
         logger.exception("stuck-card notice failed")
 
 
+def project_changed(project: dict, actor: str, person: str | None, note: str | None) -> None:
+    """A project was paused, finished or abandoned: the person behind its owner (or the
+    operators) is told. Informed, not asked."""
+    try:
+        people = ({person} if person else {p.casefold() for p in _operators()}) - {actor.casefold()}
+        _tell(people, f"Beacon: project {project['name'][:60]} is {project['state']}",
+              f"{actor} marked project #{project['id']} \"{project['name']}\" {project['state']}. This is for your "
+              "information; nothing waits for you.\n"
+              + (f"\nGoal (written by whoever set it): {project['goal'][:400]}\n" if project["goal"] else "")
+              + (f"\nNote: {note[:400]}\n" if note else "")
+              + ("\n\"Done\" is the owner's claim: Beacon has not checked it.\n" if project["state"] == "done" else "")
+              + f"\nOpen the Projects tab: {mesh.public_url() or 'your Beacon page'}\n")
+    except Exception:
+        logger.exception("project notice for %s failed", project.get("id"))
+
+
 def _people_for(agent_id: str) -> set[str]:
     from . import auth
     owner = None

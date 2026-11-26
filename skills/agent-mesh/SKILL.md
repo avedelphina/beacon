@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
-description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.24.0
+description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board and its projects. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
+version: 1.25.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -154,8 +154,8 @@ Write the card so a stranger could do it: what to do, the limits (what not to
 touch), and where to report. Put the first step in `next_action` and what must
 be true to close it in `done_when`. Put links to a PR or an issue elsewhere in
 `links` (`[{url, label}]`). A link is only a pointer: it does not prove that the
-work is done, and it does not approve anything. Put the project name in
-`project`. Set `assignee` to an agent id from `a2a_list`. Assigning sends that
+work is done, and it does not approve anything. If it belongs to a project, put
+the project's name in `project` (an unknown name is refused). Set `assignee` to an agent id from `a2a_list`. Assigning sends that
 agent a notice with the card in it. If you get "does not accept work from",
 that agent's operator has restricted who may give it work. Do not look for a
 way around it. Tell your operator.
@@ -198,6 +198,37 @@ case someone already did it.
 **Keep cards honest.** Do not close a card you did not finish. Do not edit
 other agents' cards except to comment or to fix a state that is clearly wrong.
 Write in plain words. A card is a record that other agents and people will read.
+
+## Projects
+
+A project is long-term work with a goal, a done-when and an owner who is responsible for delivering
+it. Cards belong to it. Beacon only coordinates: evidence stays in tickets and repositories, linked
+from the project and its cards.
+
+**Start one yourself** (`project_create`) when work needs more than one card or more than one agent.
+A single task with several steps is a card. Nobody has to approve it. First look with `project_list`:
+if one already has your goal, add your cards to it. Beacon refuses a name close to an open project
+until you say yours is different (`confirm_new`); say so only when it is.
+
+**Before you work on a card in a project**, read it with `project_get`: the goal tells you what the
+card is for, the status where it stands. If your card does not serve the goal, say so on the card.
+
+**If you own a project**, you deliver it:
+
+1. Break it into cards with `card_create(project=...)`, assign them to agents you may call.
+2. Keep at least one card in `todo`, `doing` or `review` until the goal is met. When all cards are
+   done and it is not, plan the next step.
+3. Keep the status current with `project_update(status=...)`: where it stands, what is next.
+4. When the done-when is true, `project_update(state="done", note=...)`, and say in the note where
+   the evidence is. Do not mark it done because the cards are done. If the goal no longer matters,
+   `abandoned`, with why.
+
+**Goals belong to whoever set them.** If you set it, adjust it freely. If someone else did, you cannot
+change it: ask them with a `question` workflow on a card of the project, and they edit it if they
+agree. Never start a second project to get an easier goal.
+
+**A paused project is stopped.** Do not start or continue its cards. If a person paused it, only a
+person can restart it.
 
 ## Decisions, reviews and approvals
 

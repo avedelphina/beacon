@@ -14,7 +14,7 @@ from pydantic import AliasChoices, BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import app_devices, audit, auth, availability, board, bus, clients, cron_store, fleet, gitea_intake, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow, workhours
+from . import app_devices, audit, auth, availability, board, bus, clients, cron_store, fleet, gitea_intake, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, projects, push, scheduler, store, templates, workflow, workhours
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, AgentClient, CronJob, Host
@@ -228,6 +228,7 @@ app.add_exception_handler(workflow.UnauthorizedWorkflowAccess, _error_handler(40
 app.add_exception_handler(workflow.HumanApprovalRequired, _error_handler(403))
 app.add_exception_handler(workflow.StalePlan, _error_handler(409))
 app.add_exception_handler(NoSSH, _error_handler(409))
+app.add_exception_handler(projects.NotAllowed, _error_handler(403))
 app.add_exception_handler(store.HostInUse, _error_handler(409))
 
 
@@ -720,6 +721,65 @@ def _member_may_assign(request: Request, assignee: str | None, current: str | No
                                  "and to the agents the policy opens to members")
 
 
+class ProjectCreate(BaseModel):
+    name: str
+    goal: str
+    done_when: str
+    owner: str | None = None  # left out: the caller
+    links: list[dict] | None = None
+    confirm_new: bool = False  # create it although a similar one is open
+
+
+class ProjectUpdate(BaseModel):
+    name: str | None = None
+    goal: str | None = None
+    done_when: str | None = None
+    owner: str | None = None  # "" hands it to the operators
+    state: str | None = None  # active | paused | done | abandoned
+    status: str | None = None
+    links: list[dict] | None = None
+    note: str | None = None
+
+
+@app.get("/api/projects")
+def project_list(request: Request, include_closed: bool = False) -> list[dict]:
+    return projects.list_projects(_board_author(request), include_closed)
+
+
+@app.post("/api/projects")
+def project_create(body: ProjectCreate, request: Request) -> dict:
+    given = body.model_dump()
+    if "owner" not in body.model_fields_set:
+        given["owner"] = projects.DEFAULT
+    return _project_for_viewer(request, projects.create(_board_author(request), **given))
+
+
+@app.get("/api/projects/{project_id}")
+def project_get(project_id: int, request: Request) -> dict:
+    return _project_for_viewer(request, projects.get(_board_author(request), project_id))
+
+
+@app.patch("/api/projects/{project_id}")
+def project_update(project_id: int, body: ProjectUpdate, request: Request) -> dict:
+    given = body.model_dump()
+    if "owner" not in body.model_fields_set:
+        given["owner"] = projects.DEFAULT
+    return _project_for_viewer(request, projects.update(_board_author(request), project_id, **given))
+
+
+@app.post("/api/projects/{project_id}/comments")
+def project_comment(project_id: int, body: CardComment, request: Request) -> dict:
+    return _project_for_viewer(request, projects.comment(_board_author(request), project_id, body.text))
+
+
+def _project_for_viewer(request: Request, project: dict) -> dict:
+    """A member sees every card of a project they take part in, except intake cards the
+    operators keep from members."""
+    if member := _member(request):
+        return {**project, "card_list": list(filter(members.card_filter(member), project["card_list"]))}
+    return project
+
+
 @app.get("/api/board/assignees")
 def board_assignees(request: Request) -> list[str]:
     """The agents the viewer may give a card to: for the assignee dropdowns."""
@@ -732,7 +792,7 @@ def board_list(request: Request, project: str | None = None, assignee: str | Non
                include_done: bool = False) -> list[dict]:
     cards = board.list_cards(project, assignee, state, include_done)
     if member := _member(request):
-        return [c for c in cards if members.card_visible(member, c)]
+        return list(filter(members.card_filter(member), cards))
     return cards
 
 

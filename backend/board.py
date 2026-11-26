@@ -38,7 +38,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from . import mailbox, mesh, opstore, store
+from . import mailbox, mesh, opstore, projects, store
 
 STATES = ("todo", "doing", "blocked", "review", "done")
 # Why a card is blocked. Each needs different handling, so each is reminded differently (remind()):
@@ -121,15 +121,15 @@ def get_card(card_id: int) -> dict:
         events = db.execute("SELECT * FROM card_events WHERE card_id = ? ORDER BY id", (card_id,)).fetchall()
         references = [dict(r) for r in db.execute(
             "SELECT * FROM card_references WHERE card_id = ? ORDER BY id", (card_id,))]
-        parent = db.execute("SELECT id, title, state, assignee, created_by FROM cards WHERE id = ?",
+        parent = db.execute("SELECT id, title, state, assignee, created_by, project FROM cards WHERE id = ?",
                             (card["parent_id"],)).fetchone() if card["parent_id"] else None
         children = [dict(r) for r in db.execute(
-            "SELECT id, title, state, assignee, created_by FROM cards WHERE parent_id = ? ORDER BY id", (card_id,))]
+            "SELECT id, title, state, assignee, created_by, project FROM cards WHERE parent_id = ? ORDER BY id", (card_id,))]
         depends_on = [dict(r) for r in db.execute(
-            "SELECT c.id, c.title, c.state, c.assignee, c.created_by FROM card_dependencies d"
+            "SELECT c.id, c.title, c.state, c.assignee, c.created_by, c.project FROM card_dependencies d"
             " JOIN cards c ON c.id = d.depends_on_id WHERE d.card_id = ? ORDER BY c.id", (card_id,))]
         blocks = [dict(r) for r in db.execute(
-            "SELECT c.id, c.title, c.state, c.assignee, c.created_by FROM card_dependencies d"
+            "SELECT c.id, c.title, c.state, c.assignee, c.created_by, c.project FROM card_dependencies d"
             " JOIN cards c ON c.id = d.card_id WHERE d.depends_on_id = ? ORDER BY c.id", (card_id,))]
         notice_ids = [e["notice_id"] for e in events if e["notice_id"] is not None]
         notices = {}
@@ -160,12 +160,13 @@ def create_card(author: str, title: str, body: str = "", project: str | None = N
     links = _links(links or [])
     if assignee:
         _check_may_assign(author, assignee)
+    project = projects.resolve(author, project) if project and project.strip() else None
     now = time.time()
     with opstore.connect() as db:
         card_id = db.execute(
             "INSERT INTO cards (title, body, project, assignee, state, next_action, done_when, links,"
             " created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (title, body or "", project or None, assignee or None, state, _text(next_action), _text(done_when),
+            (title, body or "", project, assignee or None, state, _text(next_action), _text(done_when),
              json.dumps(links), author, now, now)).lastrowid
         _event(db, card_id, author, "created", title)
     if assignee:
@@ -198,7 +199,12 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
         if assignee:
             _check_may_assign(author, assignee)
         changes.append(("assignee", "assign", assignee or None, f"{card['assignee'] or '-'} -> {assignee or '-'}"))
-    for column, value in (("title", title), ("body", body), ("project", project)):
+    if project is not None:
+        project = project.strip()
+        if project.casefold() != (card["project"] or "").casefold():
+            name = projects.resolve(author, project) if project else None
+            changes.append(("project", "edit", name, f"project: {card['project'] or '-'} -> {name or '-'}"))
+    for column, value in (("title", title), ("body", body)):
         if value is not None and value != (card[column] or ""):
             changes.append((column, "edit", value if column != "title" else _required(value, "title"),
                             f"{column} changed"))
@@ -647,11 +653,25 @@ def _notify_assignee(card_id: int, author: str, assignee: str) -> None:
     update with the same assignee and no other change never re-enqueues."""
     card = get_card(card_id)
     text = (f"You were assigned card #{card_id} on the Beacon board by {author}.\n"
-            f"Title: {card['title']}\nProject: {card['project'] or '-'}\nState: {card['state']}\n"
+            f"Title: {card['title']}\n{_project_lines(card)}State: {card['state']}\n"
             + "".join(f"{label}: {card[column][:NOTICE_BODY]}\n" for column, label in
                       (("next_action", "Next action"), ("done_when", "Done when")) if card[column])
             + f"\n{card['body'][:NOTICE_BODY]}")
     _send_notice(card_id, author, assignee, "assign_notice", text)
+
+
+def _project_lines(card: dict) -> str:
+    """The project and its goal, so an agent that gets a card knows what the work is for."""
+    project = projects.for_card(card["project"])
+    if project is None:
+        return f"Project: {card['project'] or '-'}\n"
+    lines = f"Project: {project['name']} (#{project['id']}"
+    lines += ", PAUSED: do not start this yet)\n" if project["state"] == "paused" else ")\n"
+    if project["goal"]:
+        lines += f"Project goal: {project['goal'][:NOTICE_BODY]}\n"
+    if project["done_when"]:
+        lines += f"Project done when: {project['done_when'][:NOTICE_BODY]}\n"
+    return lines
 
 
 def _notify_comment(card_id: int, author: str, text: str) -> None:
@@ -863,7 +883,10 @@ def remind(puller: str | None = None, now: float | None = None) -> None:
     now = time.time() if now is None else now
     rules, fleet, exposure = policy.load(), {a.id: a for a in store.list_agents()}, mesh.open_chats()
     with opstore.connect() as db:
-        cards = [dict(row) for row in db.execute("SELECT * FROM cards WHERE state != 'done' ORDER BY id")]
+        # A project that is paused or closed is not chased: nobody is meant to move its cards.
+        cards = [dict(row) for row in db.execute(
+            "SELECT * FROM cards WHERE state != 'done' AND NOT EXISTS (SELECT 1 FROM projects p WHERE"
+            " p.name = cards.project AND p.state != 'active') ORDER BY id")]
         open_requests = {row["id"] for row in db.execute(
             "SELECT id FROM workflow_requests WHERE state IN ('pending', 'changes_requested', 'approved')")}
     mine, stuck = {}, []  # agent id -> its cards

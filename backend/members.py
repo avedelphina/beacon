@@ -22,14 +22,17 @@ What a member may do, and why those:
 - answer approvals and decisions that concern their agents: what the agent asks
   of "a human" is asked of its owner.
 - turn on notifications in their own browser (backend/push.py);
-- use the native app, and see and log out their own devices (backend/app_devices.py).
+- use the native app, and see and log out their own devices (backend/app_devices.py);
+- use projects freely (backend/projects.py): start them for themselves or their agents,
+  steer the ones on their side (other agents' cards in them included), and read and
+  comment on the ones they or their agents take part in.
 Nothing else: no hosts, templates, policy, cron, config, deploy, enrollment,
 or any other person's agent.
 """
 
 import re
 
-from . import store, workflow
+from . import projects, store, workflow
 
 # (method, path, what the path names: an agent, a card, a workflow request, or nothing)
 _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject in (
@@ -45,6 +48,12 @@ _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject i
     ("GET", r"/api/board/assignees", None),
     ("POST", r"/api/board/cards", None),
     ("GET", r"/api/board/cards/(?P<id>\d+)", "card"),
+    # Projects they or their agents take part in; projects.py decides what they may change.
+    ("GET", r"/api/projects", None),
+    ("POST", r"/api/projects", None),
+    ("GET", r"/api/projects/(?P<id>\d+)", "project"),
+    ("PATCH", r"/api/projects/(?P<id>\d+)", "project"),
+    ("POST", r"/api/projects/(?P<id>\d+)/comments", "project"),
     ("PATCH", r"/api/board/cards/(?P<id>\d+)", "card"),
     ("POST", r"/api/board/cards/(?P<id>\d+)/comments", "card"),
     ("PUT", r"/api/board/cards/(?P<id>\d+)/parent", "card"),
@@ -98,11 +107,35 @@ def _owned_agent(email: str, agent_id: str):
     return agent if owns(email, agent) else None
 
 
-def card_visible(email: str, card: dict) -> bool:
+def card_manageable(email: str, card: dict) -> bool:
+    """Theirs to change: they made it, their agent holds it, it is an intake card the operators
+    opened to members, or it is in a project they or their agent steer."""
     from . import intake  # not at import: intake imports board, which imports this package's store
-    return card["created_by"].casefold() == email.casefold() or (
-        card["assignee"] is not None and card["assignee"] in owned_ids(email)) or (
-        intake.is_intake(card) and intake.visibility()["members"])
+    if intake.is_intake(card):
+        return intake.visibility()["members"]
+    if card["created_by"].casefold() == email.casefold() or (
+            card["assignee"] is not None and card["assignee"] in owned_ids(email)):
+        return True
+    project = projects.for_card(card.get("project"))
+    return project is not None and projects.owner_side(email, project)
+
+
+def card_filter(email: str):
+    """card_visible for a list: what they take part in is looked up once, not per card."""
+    from . import intake
+    mine, seen = owned_ids(email), projects.visible_to(email)
+
+    def visible(card: dict) -> bool:
+        if intake.is_intake(card):
+            return card["assignee"] in mine or intake.visibility()["members"]
+        return (card["created_by"].casefold() == email.casefold() or card["assignee"] in mine
+                or card.get("project") in seen)
+    return visible
+
+
+def card_visible(email: str, card: dict) -> bool:
+    """Theirs, or in a project they take part in: they see the whole of it."""
+    return card_filter(email)(card)
 
 
 def _target_agent(request: dict) -> str | None:
@@ -138,11 +171,23 @@ def check(method: str, path: str, email: str) -> tuple[int, str] | None:
         elif subject == "card":
             try:
                 from . import board
-                visible = card_visible(email, board.get_card(int(match["id"])))
+                card = board.get_card(int(match["id"]))
+                visible = card_visible(email, card)
             except store.NotFound:
                 visible = False
             if not visible:
                 return 404, "no such card"
+            # Taking part in a project lets them read and comment; changing a card is for
+            # the card's side or the project's.
+            if method != "GET" and not path.endswith("/comments") and not card_manageable(email, card):
+                return 403, "only comments here: this card is someone else's, in a project you do not steer"
+        elif subject == "project":
+            try:
+                visible = projects.find(int(match["id"]))["name"] in projects.visible_to(email)
+            except store.NotFound:
+                visible = False
+            if not visible:
+                return 404, "no such project"
         elif subject == "workflow":
             try:
                 visible = workflow_visible(email, workflow.get(int(match["id"])))

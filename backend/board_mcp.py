@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from mcp.server.mcpserver import Context, MCPServer
 from starlette.responses import JSONResponse
 
-from . import auth, board, clients, intake, mesh, onboarding, store, workflow
+from . import auth, board, clients, intake, mesh, onboarding, projects, store, workflow
 
 INSTRUCTIONS = """The Beacon fleet board: shared cards for work that spans agents, hosts, or days.
 Use it to hand work to another agent, to record progress where others can see it, and to find
@@ -29,6 +29,13 @@ what is assigned to you. States: todo, doing, blocked, review, done. When you wo
 over A2A, pass the thread's context_id to card_comment or card_update so the card links to it.
 Assigning a card to an agent also sends that agent a notice, and so does a comment on a card
 assigned to it.
+
+A project is long-term work with a goal and an owner who is responsible for delivering it. Start one
+(project_create) when work will take more than one card or more than one agent; a single task with
+several steps is a card. Look first (project_list): add to a project that already has your goal. Before
+working on a card in a project, read its goal with project_get. If you own one, keep its status current,
+and keep at least one card open until the goal is met. Beacon only coordinates: evidence stays in
+tickets and repositories, linked from the project and its cards. Never work on a paused project.
 
 If you are an operator's own AI client (an agent bound to a person, `acts_for`), you also read what
 that person reads and may answer, for them, the workflow requests addressed to them or to "human" up to
@@ -82,6 +89,12 @@ def _visible_after(ctx: Context, card: dict) -> dict:
     return board.restrict(card, lambda c: intake.agent_may_see(author, c))
 
 
+def _for_agent(ctx: Context, project: dict) -> dict:
+    """A project with only the cards this caller may see (intake cards can be kept from agents)."""
+    author = _author(ctx)
+    return {**project, "card_list": [c for c in project["card_list"] if intake.agent_may_see(author, c)]}
+
+
 def _author(ctx: Context) -> str:
     author = author_for((ctx.headers or {}).get("authorization"))
     if author is None:  # the HTTP gate already checked; this only guards misuse
@@ -121,6 +134,46 @@ def build() -> MCPServer:
     def board_card(ctx: Context, card_id: int) -> dict:
         """One card with its full history: who created, moved, assigned, or commented, and when."""
         return _visible_card(ctx, card_id)
+
+    @server.tool()
+    def project_list(ctx: Context, include_closed: bool = False) -> list[dict]:
+        """Projects with their goal, owner, state, status and card counts. Look here before you
+        create one. Done and abandoned ones are left out unless include_closed."""
+        return projects.list_projects(_author(ctx), include_closed)
+
+    @server.tool()
+    def project_get(ctx: Context, project: str) -> dict:
+        """One project (by name or number): goal, done-when, owner, status, history, its cards, and
+        `can`, what you may change."""
+        return _for_agent(ctx, projects.get(_author(ctx), project))
+
+    @server.tool()
+    def project_create(ctx: Context, name: str, goal: str, done_when: str, owner: str | None = None,
+                       links: list[dict] | None = None, confirm_new: bool = False) -> dict:
+        """Start a project for work that needs more than one card or more than one agent. goal is
+        what it is for, done_when what has to be true to call it finished. You own it unless you
+        name another agent you may call, or the person you work for. links is a list of {url, label}
+        to the ticket or repository. Then add cards with card_create(project=<name>). If similar
+        projects are open you are told which: use one of them, or pass confirm_new."""
+        return _for_agent(ctx, projects.create(_author(ctx), name, goal, done_when,
+                                               projects.DEFAULT if owner is None else owner, links, confirm_new))
+
+    @server.tool()
+    def project_update(ctx: Context, project: str, status: str | None = None, state: str | None = None,
+                       goal: str | None = None, done_when: str | None = None, owner: str | None = None,
+                       name: str | None = None, links: list[dict] | None = None, note: str | None = None) -> dict:
+        """Change a project you steer. status is your current summary: where it stands and what is
+        next, replaced each time. state: active, paused, done (every card must be done; say in note
+        where the evidence is) or abandoned. You can change goal and done_when only if you set them;
+        otherwise propose the change to whoever did. note says why and is kept in the history."""
+        return _for_agent(ctx, projects.update(_author(ctx), project, name=name, goal=goal, done_when=done_when,
+                                               owner=projects.DEFAULT if owner is None else owner, state=state,
+                                               status=status, links=links, note=note))
+
+    @server.tool()
+    def project_comment(ctx: Context, project: str, text: str) -> dict:
+        """Add to a project's history; its owner is told."""
+        return _for_agent(ctx, projects.comment(_author(ctx), project, text))
 
     @server.tool()
     def card_create(ctx: Context, title: str, body: str = "", project: str | None = None,

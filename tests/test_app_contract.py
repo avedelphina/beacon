@@ -51,6 +51,7 @@ def answers(fleet, monkeypatch):
     payload = base64.b64encode(json.dumps({"user": {"email": "tom@example.com"}}).encode()).decode()
     client.cookies.set("session", TimestampSigner(auth.SESSION_SECRET).sign(payload.encode()).decode())
     client.headers["Origin"] = "http://testserver"
+    client.post("/api/projects", json={"name": "infra", "goal": "Keys stay fresh", "done_when": "none expires"})
     card = client.post("/api/board/cards", json={"title": "Rotate the DNS key", "body": "Old key expires Friday.",
                                                  "assignee": "alpha", "project": "infra"}).json()
     client.post(f"/api/board/cards/{card['id']}/references", json={

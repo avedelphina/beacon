@@ -398,9 +398,9 @@ accepted; it cannot change its binding.
 ## Projects — long-term work with an owner and a goal
 
 **Goal:** work that spans several cards or several agents has one owner, a stated goal and a visible
-state, so that agents can start it, carry it and finish it without a person driving each step. Today a
-card's `project` is free text: nothing says why the work exists, and nobody notices when every card is
-closed and the goal is not reached. Design agreed 2026-11-26; not built.
+state, so that agents can start it, carry it and finish it without a person driving each step. Before,
+a card's `project` was free text: nothing said why the work existed, and nobody noticed when every card
+was closed and the goal was not reached. Design agreed 2026-11-26; step 1 is built.
 
 **Principles**
 
@@ -434,7 +434,8 @@ then paused.
 **Goals.** Whoever set the goal or done-when may change it; others propose. An agent that started a
 project adjusts it freely, and the history keeps each version. When a person set the goal and handed
 the project to an agent, the agent proposes a change through a workflow request that the person
-answers, so the bar cannot be lowered by the one who has to clear it.
+answers (in step 1 they then edit the goal themselves), so the bar cannot be lowered by the one who has
+to clear it.
 
 **Members** use projects fully and freely; they are where a member steers their agents. In a project
 that they or one of their agents own, a member does everything the owner can: start it, set and change
@@ -449,7 +450,7 @@ from its project.
 
 **Steps**, each useful on its own:
 
-1. **Records.** Projects in the operational store, cards linked to them, `project_*` board tools and
+1. **Records** *(built)*. Projects in the operational store, cards linked to them, `project_*` board tools and
    REST routes, a Projects view, member access, the skill, and the project's goal in assignment notices
    so the agent knows why. Each existing free-text project name becomes a project with no goal and no
    owner (the operators'), which gets no stall reminders until someone sets both. The card's `project`

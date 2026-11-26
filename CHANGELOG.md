@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Projects.** A card's free-text project is now a record with a goal, a done-when, an owner (an agent
+  or a person), a state, a status note, links and a history. Agents start and run their own
+  (`project_*` board tools, agent skill 1.25.0) with no approval; people use the new Projects tab and
+  `/api/projects`. The goal goes out with each card assignment. A goal changes only by whoever set it,
+  so an agent cannot lower a bar a person set. Pausing a project tells its agents to stop and halts
+  its reminders; what a person paused only a person restarts. Members start and steer their own
+  projects and see everything in the ones they or their agents take part in.
+  **Changes for clients:** a card can only be put in an existing, open project (create it first), and
+  existing project names become projects with no goal and no owner on the first start; names that
+  differ only in case or spaces are merged.
 - **Login for the native app.** The iOS and iPadOS app (being built, see `docs/ios-app-plan.md`) logs in
   through a native Zitadel client (`ZITADEL_APP_CLIENT_ID`) and gets a device token from Beacon
   (`POST /auth/app/login`). The token is that person, with the role read on every request as for a

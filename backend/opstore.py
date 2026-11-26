@@ -11,6 +11,7 @@ locking for no gain. WAL lets readers and the one writer overlap.
 
 import os
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -66,6 +67,35 @@ CREATE TABLE IF NOT EXISTS card_events (
     created_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS card_events_by_card ON card_events (card_id);
+
+-- Long-term work with an owner and a goal (backend/projects.py). A card belongs to one by name
+-- (cards.project), which is how it was before projects were records.
+CREATE TABLE IF NOT EXISTS projects (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    goal        TEXT NOT NULL DEFAULT '',
+    done_when   TEXT,
+    owner       TEXT,                        -- agent id or email; NULL = the operators
+    goal_by     TEXT,                        -- who set goal and done_when: only they change them (projects.may_set_goal)
+    state       TEXT NOT NULL,               -- active | paused | done | abandoned
+    paused_by   TEXT,
+    status      TEXT,                        -- the owner's current summary
+    status_at   REAL,
+    links       TEXT NOT NULL DEFAULT '[]',  -- JSON [{url, label}]: tickets, repositories
+    created_by  TEXT NOT NULL,
+    created_at  REAL NOT NULL,
+    updated_at  REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS project_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL REFERENCES projects (id),
+    author      TEXT NOT NULL,
+    kind        TEXT NOT NULL,     -- created | comment | goal | owner | status | state | edit
+    body        TEXT NOT NULL,
+    created_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS project_events_by_project ON project_events (project_id);
 
 -- "card_id cannot finish until depends_on_id is done". A card's blocked_by is computed from these
 -- edges and the other card's state, never stored (board.get_card). No cycles (board.add_dependency).
@@ -361,6 +391,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                          ("urgent_reason", "TEXT")):
         if column not in request_columns:
             conn.execute(f"ALTER TABLE workflow_requests ADD COLUMN {column} {decl}")
+    _migrate_projects(conn)
     columns = {row[1] for row in conn.execute("PRAGMA table_info(card_events)")}
     if "notice_id" not in columns:
         conn.execute("ALTER TABLE card_events ADD COLUMN notice_id INTEGER REFERENCES mailbox (id)")
@@ -374,3 +405,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
     claim_columns = {row[1] for row in conn.execute("PRAGMA table_info(card_reference_claims)")}
     if claim_columns and "last_event_at" not in claim_columns:
         conn.execute("ALTER TABLE card_reference_claims ADD COLUMN last_event_at REAL")
+
+
+def _migrate_projects(conn: sqlite3.Connection) -> None:
+    """Once: every free-text project name on a card becomes a project with no goal and no owner
+    (the operators'). Names that differ only in case or outer spaces become one."""
+    if conn.execute("SELECT 1 FROM settings WHERE key = 'projects_migrated'").fetchone():
+        return
+    now = time.time()
+    with conn:
+        conn.execute("UPDATE cards SET project = NULLIF(trim(project), '') WHERE project IS NOT NULL")
+        conn.execute("INSERT OR IGNORE INTO projects (name, state, created_by, created_at, updated_at)"
+                     " SELECT project, 'active', 'beacon', ?, ? FROM cards WHERE project IS NOT NULL ORDER BY id",
+                     (now, now))
+        conn.execute("UPDATE cards SET project = (SELECT name FROM projects WHERE projects.name = cards.project)"
+                     " WHERE project IS NOT NULL")
+        conn.execute("INSERT OR IGNORE INTO settings (key, value, updated_by, updated_at)"
+                     " VALUES ('projects_migrated', '1', 'beacon', ?)", (now,))
