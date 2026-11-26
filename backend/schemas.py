@@ -167,7 +167,7 @@ class AgentClient(BaseModel):
     @classmethod
     def _clearance_below_four(cls, v: int) -> int:
         if v < 0 or v > 3:
-            raise ValueError("max_clearance is 0 to 3: CL4 and above are for a person in the web page")
+            raise ValueError("max_clearance is 0 to 3: CL4 and above are for a person in the web page or the app")
         return v
 
     @field_validator("acts_for")

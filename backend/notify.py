@@ -292,7 +292,7 @@ def _created_body(request: dict) -> str:
         + "\n".join("  > " + line for line in request["summary"][:SUMMARY_CHARS].splitlines())
         + ("\n  > [cut]" if len(request["summary"]) > SUMMARY_CHARS else "")
         + _consult_line(request)
-        + ("\n\nThis is CL4 or above: only you, in the web page, can answer it. Your AI clients cannot."
+        + ("\n\nThis is CL4 or above: only you, in the web page or the app, can answer it. Your AI clients cannot."
            if request["clearance"] >= 4 else "")
         + f"\n\nOpen the Workflows tab to read it in full and answer: {link or 'your Beacon page'}\n"
     )
