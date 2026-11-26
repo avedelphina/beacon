@@ -106,23 +106,17 @@ struct CardView: View {
                     if let done = card.doneWhen { LabeledContent("Done when", value: done) }
                 }
                 if let body = card.body, !body.isEmpty {
-                    Section("Description") { Text(RequestDetailView.markdown(body)).textSelection(.enabled) }
+                    Section("Description") { Text(AgentText.render(body)).textSelection(.enabled) }
                 }
-                let sources = (card.references ?? []).map { ("\($0.provider) \($0.kind.replacingOccurrences(of: "_", with: " ")) \($0.externalId)", $0.url) }
-                    + (card.links ?? []).map { ($0.label ?? $0.url, $0.url) }
-                if !sources.isEmpty {
-                    Section("Links") {
-                        ForEach(sources, id: \.1) { label, url in
-                            if let link = URL(string: url), link.scheme == "https" || link.scheme == "http" { Link(label, destination: link) }
-                        }
-                    }
+                if !card.sources.isEmpty {
+                    Section("Links") { SourceLinks(card: card) }
                 }
                 Section("History") {
                     ForEach(card.events ?? []) { event in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("\(event.author) · \(Date(timeIntervalSince1970: event.createdAt).formatted(date: .abbreviated, time: .shortened))")
+                            Text(verbatim: "\(event.author) · \(Date(timeIntervalSince1970: event.createdAt).formatted(date: .abbreviated, time: .shortened))")
                                 .font(.caption).foregroundStyle(.secondary)
-                            Text(RequestDetailView.markdown(event.body ?? event.kind)).textSelection(.enabled)
+                            Text(AgentText.render(event.body ?? event.kind)).textSelection(.enabled)
                         }
                     }
                 }

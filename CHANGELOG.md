@@ -53,6 +53,16 @@
   address and your usual account, see the workflow requests you can see, and answer them as on the
   web page; CL4/CL5 answers ask for Face ID. `apps/contract/` now also holds the API answers the app
   decodes, which `tests/test_app_contract.py` keeps current.
+- **The app is ready for TestFlight**: an app icon, a privacy manifest and the export-compliance
+  declaration, and [`apps/apple/TESTFLIGHT.md`](apps/apple/TESTFLIGHT.md) with the one-time setup, the
+  upload commands and a checklist for a real device. Not uploaded yet.
+- **App fixes before the first release.** Links in text that agents write are no longer tappable (their
+  address is written out, as the web page links nothing), and card links show the host they go to.
+  Requests waiting on you come first, and the badge counts those. An operator can send a pending request
+  to a person. Settings says whether notifications are on and opens the system's settings when they are
+  off; logging out also stops notices on that phone. A "Request changes" note that was cancelled is no
+  longer sent with a later Reject. Touch ID devices are told "Touch ID", a failed signature says what to
+  do, and login asks for biometry to be set up first. The agent list shows owners and searches them.
 - **Agents and board in the app.** Agents with their availability, searchable by name, host or tag; an
   agent's service state, health events and logs, and restarting its gateway behind the same confirm step
   (Beacon's own words are shown first). The board by column: read a card and its history, comment, and

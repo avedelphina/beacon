@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import Testing
+import UserNotifications
 @testable import Beacon
 
 /// apps/contract/ is what Beacon's own tests produce and check (tests/test_app_contract.py,
@@ -196,5 +197,51 @@ struct FleetDecodingTests {
         let agents = try decode([Agent].self, "agents.json")
         #expect(AgentsView.matching(agents, "FAMILY").count == 1 && AgentsView.matching(agents, "h1").count == 1)
         #expect(AgentsView.matching(agents, "nothing").isEmpty && AgentsView.matching(agents, "  ").count == 1)
+    }
+}
+
+struct AgentTextTests {
+    @Test func anAgentsLinkIsNeverTappableAndItsAddressIsShown() {
+        let shown = AgentText.render("Please check [the **PR**](https://evil.example/x) and <https://ok.example> now")
+        #expect(shown.runs.allSatisfy { $0.link == nil })
+        #expect(String(shown.characters) == "Please check the PR (https://evil.example/x) and https://ok.example now")
+    }
+
+    @Test func otherMarkdownStillRenders() {
+        let shown = AgentText.render("1. Publish the **new** key")
+        #expect(String(shown.characters) == "1. Publish the new key")
+        #expect(shown.runs.contains { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true })
+    }
+
+    @Test func onlyWebAddressesBecomeLinksAndEachOnce() throws {
+        var fields = try JSONSerialization.jsonObject(with: contract("card.json")) as! [String: Any]
+        fields["links"] = [["url": "tel:123"], ["url": "file:///etc/passwd"],
+                           ["url": "https://git.example.com/infra/pulls/42", "label": "again"], ["url": "https://b.example"]]
+        let card = try Client.decoder.decode(Card.self, from: JSONSerialization.data(withJSONObject: fields))
+        #expect(card.sources.map(\.url.absoluteString) == ["https://git.example.com/infra/pulls/42", "https://b.example"])
+    }
+}
+
+struct MineTests {
+    private func make(_ id: Int, to: String, from: String = "alpha", state: String = "pending", sent: Bool = false) throws -> WorkflowRequest {
+        var fields = try JSONSerialization.jsonObject(with: contract("workflow.json")) as! [String: Any]
+        fields["id"] = id; fields["eligible_responder"] = to; fields["requester"] = from; fields["state"] = state
+        fields["require_human"] = sent; fields["urgent_reason"] = NSNull()
+        return try Client.decoder.decode(WorkflowRequest.self, from: JSONSerialization.data(withJSONObject: fields))
+    }
+
+    @Test func whatWaitsOnMeComesApart() throws {
+        let items = [try make(1, to: "human"), try make(2, to: "Tom@Example.com"), try make(3, to: "beta"),
+                     try make(4, to: "beta", sent: true), try make(5, to: "ann@example.com"),
+                     try make(6, to: "human", from: "tom@example.com"), try make(7, to: "human", state: "approved")]
+        let split = RequestsSplitView.split(items, me: "tom@example.com")
+        #expect(split.mine.map(\.id).sorted() == [1, 2, 4])
+        #expect(split.others.map(\.id).sorted() == [3, 5, 6, 7])
+        #expect(RequestsSplitView.split(items, me: nil).mine.isEmpty)
+    }
+
+    @Test func notificationStateIsSaidInWords() {
+        #expect(SettingsView.describe(.denied) == "Off" && SettingsView.describe(.authorized) == "On")
+        #expect(SettingsView.describe(.notDetermined) == "Not asked yet" && SettingsView.describe(nil) == "-")
     }
 }

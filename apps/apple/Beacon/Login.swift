@@ -22,7 +22,7 @@ struct LoginView: View {
                 } header: {
                     Text("Beacon address")
                 } footer: {
-                    Text("You log in with the same account as on the web page. Answers that need clearance CL4 or CL5 also ask for Face ID.")
+                    Text("You log in with the same account as on the web page. Answers that need clearance CL4 or CL5 also ask for \(Biometry.name).")
                 }
                 Section {
                     Button(action: login) {
@@ -79,6 +79,12 @@ struct LoginView: View {
             throw APIError.unreadable("This Beacon speaks app API \(config.api); this app speaks \(supportedAPI). Update the older one.")
         }
 
+        #if !targetEnvironment(simulator)
+        guard Biometry.isSetUp else {
+            throw APIError.unreadable("Set up Face ID or Touch ID on this device and allow Beacon to use it: it proves that "
+                                      + "CL4 and CL5 answers are yours.")
+        }
+        #endif
         let key = try DeviceKey.create()
         let verifier = PKCE.verifier(), state = PKCE.base64url(PKCE.random(16))
         let scheme = (Bundle.main.bundleIdentifier ?? "org.example.beacon").lowercased()

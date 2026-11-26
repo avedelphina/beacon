@@ -21,8 +21,8 @@ nonisolated enum Notices {
                                            icon: UNNotificationActionIcon(systemImageName: "checkmark"))
         let reject = UNNotificationAction(identifier: rejectAction, title: "Reject", options: [.authenticationRequired, .destructive],
                                           icon: UNNotificationActionIcon(systemImageName: "xmark"))
-        let review = UNNotificationAction(identifier: openAction, title: "Review with Face ID…", options: [.foreground],
-                                          icon: UNNotificationActionIcon(systemImageName: "faceid"))
+        let review = UNNotificationAction(identifier: openAction, title: "Review with \(Biometry.name)…", options: [.foreground],
+                                          icon: UNNotificationActionIcon(systemImageName: Biometry.name == "Touch ID" ? "touchid" : "faceid"))
         return [
             UNNotificationCategory(identifier: approveCategory, actions: [approve, reject, open], intentIdentifiers: []),
             UNNotificationCategory(identifier: humanCategory, actions: [review], intentIdentifiers: []),
@@ -96,6 +96,12 @@ extension Session {
         let center = UNUserNotificationCenter.current()
         let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
         if granted { UIApplication.shared.registerForRemoteNotifications() }
+    }
+
+    /// Allowed in the system's Settings after the first launch: register without asking again.
+    func resumeNotifications() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        if settings.authorizationStatus == .authorized { UIApplication.shared.registerForRemoteNotifications() }
     }
 
     func registerPush(_ token: Data) async {

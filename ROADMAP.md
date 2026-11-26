@@ -254,7 +254,8 @@ Related foundation work, in Horizon 0:
 
 1. **PWA with notifications (delivered in 0.29.0).** The page installs as an
    app, and the notices that people get by email also come as Web Push.
-2. **Native iOS, iPadOS and macOS app.** It adds actions on the notification
+2. **Native iOS, iPadOS and macOS app.** *(iOS and iPadOS built, not yet
+   released: `apps/apple/`. macOS later.)* It adds actions on the notification
    itself (Approve on the lock screen, which Safari's Web Push cannot do) and
    Face ID before an approval. Prerequisites:
    - an Apple Developer Program membership, for APNs and TestFlight;

@@ -15,8 +15,12 @@ struct RequestsSplitView: View {
                 if let problem {
                     Text(problem).foregroundStyle(.red)
                 }
-                ForEach(Self.sorted(requests)) { request in
-                    RequestRow(request: request).tag(request.id)
+                let split = Self.split(requests, me: session.email)
+                if !split.mine.isEmpty {
+                    Section("Waiting on you") { ForEach(split.mine) { RequestRow(request: $0).tag($0.id) } }
+                }
+                if !split.others.isEmpty {
+                    Section(split.mine.isEmpty ? "Requests" : "Others") { ForEach(split.others) { RequestRow(request: $0).tag($0.id) } }
                 }
             }
             .overlay {
@@ -33,6 +37,10 @@ struct RequestsSplitView: View {
         } detail: {
             if let request = requests.first(where: { $0.id == selected }) {
                 RequestDetailView(request: request, onAnswered: { Task { await load() } }).id(request.id)
+            } else if selected != nil && !requests.isEmpty {
+                // A notification about a request that is gone, or not this person's to see.
+                ContentUnavailableView("Request not available", systemImage: "tray",
+                                       description: Text("It may have been withdrawn, or it is not yours to see."))
             } else {
                 ContentUnavailableView("No request selected", systemImage: "tray")
             }
@@ -54,12 +62,25 @@ struct RequestsSplitView: View {
         do {
             requests = try await client.get("/api/workflows")
             problem = nil
-            try? await UNUserNotificationCenter.current().setBadgeCount(requests.filter(\.isOpen).count)
+            try? await UNUserNotificationCenter.current().setBadgeCount(Self.split(requests, me: session.email).mine.count)
         } catch APIError.loggedOut {
             session.forget()
         } catch {
             problem = error.localizedDescription
         }
+    }
+
+    /// Whether a pending request is this person's to answer: asked of "a person" or of them by name,
+    /// or sent to a person by a reviewer. Never their own.
+    static func waitsOn(_ request: WorkflowRequest, me: String?) -> Bool {
+        guard request.isOpen, let me = me?.lowercased(), request.requester.lowercased() != me else { return false }
+        return request.eligibleResponder == "human" || request.eligibleResponder.lowercased() == me || request.requireHuman == true
+    }
+
+    /// What waits on this person, then everything else they can see; each in the page's order.
+    static func split(_ items: [WorkflowRequest], me: String?) -> (mine: [WorkflowRequest], others: [WorkflowRequest]) {
+        let ordered = sorted(items)
+        return (ordered.filter { waitsOn($0, me: me) }, ordered.filter { !waitsOn($0, me: me) })
     }
 
     /// As in the web page: what waits for an answer first (urgent, then soonest to expire), then what
@@ -110,7 +131,9 @@ struct RequestDetailView: View {
     @State private var answer = ""
     @State private var note = ""
     @State private var asking: Action?
-    @State private var noteFor: Action?
+    @State private var askingChanges = false
+    @State private var escalating = false
+    @State private var reason = ""
     @State private var working = false
     @State private var problem: String?
 
@@ -127,11 +150,11 @@ struct RequestDetailView: View {
                 LabeledContent("To", value: request.eligibleResponder == "human" ? "a person" : request.eligibleResponder)
                 LabeledContent("Expires", value: Date(timeIntervalSince1970: request.expiresAt).formatted(date: .abbreviated, time: .shortened))
                 LabeledContent("State", value: request.state.replacingOccurrences(of: "_", with: " "))
-                if let urgent = request.urgentReason { Text("Urgent: \(urgent)").foregroundStyle(.red) }
-                if request.requireHuman == true { Text("Sent to a person: \(request.escalatedReason ?? "")").foregroundStyle(.orange) }
+                if let urgent = request.urgentReason { Text(verbatim: "Urgent: \(urgent)").foregroundStyle(.red) }
+                if request.requireHuman == true { Text(verbatim: "Sent to a person: \(request.escalatedReason ?? "")").foregroundStyle(.orange) }
             }
             Section("Plan") {
-                Text(Self.markdown(request.summary)).textSelection(.enabled)
+                Text(AgentText.render(request.summary)).textSelection(.enabled)
             }
             cardSection
             consultedSection
@@ -148,11 +171,17 @@ struct RequestDetailView: View {
                             titleVisibility: .visible, presenting: asking) { action in
             Button(confirmButton(action), role: action == .rejected ? .destructive : nil) { send(action) }
         }
-        .alert(noteFor == .changes_requested ? "What needs to change?" : "Why?",
-               isPresented: Binding(get: { noteFor != nil }, set: { if !$0 { noteFor = nil } }), presenting: noteFor) { action in
+        .alert("What needs to change?", isPresented: $askingChanges) {
             TextField("Note for \(request.requester)", text: $note)
-            Button("Send") { send(action) }
-            Button("Cancel", role: .cancel) {}
+            Button("Send") { send(.changes_requested) }
+            Button("Cancel", role: .cancel) { note = "" }
+        }
+        .alert("Send to a person", isPresented: $escalating) {
+            TextField("Why should a person look?", text: $reason)
+            Button("Send") { sendToPerson() }
+            Button("Cancel", role: .cancel) { reason = "" }
+        } message: {
+            Text("Then only a person can answer it: no AI client may. This cannot be undone.")
         }
     }
 
@@ -162,17 +191,13 @@ struct RequestDetailView: View {
                 LabeledContent(card.title, value: card.state)
                 if let next = card.nextAction { LabeledContent("Next action", value: next) }
                 if let done = card.doneWhen { LabeledContent("Done when", value: done) }
-                let sources = (card.references ?? []).map { ("\($0.provider) \($0.kind.replacingOccurrences(of: "_", with: " ")) \($0.externalId)", $0.url) }
-                    + (card.links ?? []).map { ($0.label ?? $0.url, $0.url) }
-                ForEach(sources, id: \.1) { label, url in
-                    if let link = URL(string: url), link.scheme == "https" || link.scheme == "http" { Link(label, destination: link) }
-                }
-                if sources.isEmpty {
+                SourceLinks(card: card)
+                if card.sources.isEmpty {
                     Text("The card links to nothing outside Beacon. Ask the requester to add the PR or ticket to it.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 if let body = card.body, !body.isEmpty {
-                    DisclosureGroup("About this card") { Text(Self.markdown(body)) }
+                    DisclosureGroup("About this card") { Text(AgentText.render(body)) }
                 }
             } else {
                 Text("Loading…").foregroundStyle(.secondary)
@@ -188,7 +213,7 @@ struct RequestDetailView: View {
                 }
             }
         } else if let skipped = request.consultSkipped {
-            Section { Text("No peer consulted: \(skipped)").foregroundStyle(.secondary) }
+            Section { Text(verbatim: "No peer consulted: \(skipped)").foregroundStyle(.secondary) }
         } else if request.consultFlag != nil {
             Section { Text("No peer was consulted before asking.").foregroundStyle(.orange) }
         }
@@ -196,7 +221,7 @@ struct RequestDetailView: View {
 
     @ViewBuilder private var answerSection: some View {
         if let answered = request.response?.text ?? request.response?.note {
-            Section(request.state == "changes_requested" ? "Changes requested" : "Answer") { Text(Self.markdown(answered)) }
+            Section(request.state == "changes_requested" ? "Changes requested" : "Answer") { Text(AgentText.render(answered)) }
         }
         if let by = request.answeredBy {
             Section { Text("Answered by \(by), an AI client, for \(request.onBehalfOf ?? "its operator").").foregroundStyle(.secondary) }
@@ -212,22 +237,50 @@ struct RequestDetailView: View {
                     Picker("Option", selection: $option) { ForEach(request.options, id: \.self) { Text($0).tag($0) } }
                         .pickerStyle(.inline)
                     Button(faceID("Choose this option")) { asking = .choose_option }
-                    Button("Request changes") { noteFor = .changes_requested }
+                    Button("Request changes") { note = ""; askingChanges = true }
                     Button("Reject", role: .destructive) { asking = .rejected }
                 default:
                     Button(faceID(request.kind == "handoff" ? "Accept handoff" : "Approve")) { asking = .approved }
                         .keyboardShortcut(.return, modifiers: .command)  // still asks to confirm
-                    Button("Request changes") { noteFor = .changes_requested }
+                    Button("Request changes") { note = ""; askingChanges = true }
                     Button(request.kind == "handoff" ? "Decline" : "Reject", role: .destructive) { asking = .rejected }
                 }
             } footer: {
-                if request.needsFaceID { Text("CL\(request.clearance): Face ID confirms that it is you.") }
+                if request.needsFaceID { Text("CL\(request.clearance): \(Biometry.name) confirms that it is you.") }
             }
             .disabled(working)
+            // An operator's way to say "no AI client may answer this one". CL4/CL5 need a person already.
+            if session.role == "operator", !request.needsFaceID, request.requireHuman != true {
+                Section {
+                    Button("Send to a person…") { reason = ""; escalating = true }.disabled(working)
+                }
+            }
         }
     }
 
-    private func faceID(_ label: String) -> String { request.needsFaceID ? "\(label) with Face ID" : label }
+    private func sendToPerson() {
+        let why = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let client = session.client, !why.isEmpty else {
+            problem = "Say why a person should look at it."
+            return
+        }
+        working = true
+        problem = nil
+        Task {
+            defer { working = false }
+            do {
+                let _: Empty = try await client.send("POST", "/api/workflows/\(request.id)/require-human", json: ["reason": why])
+                reason = ""
+                onAnswered()
+            } catch APIError.loggedOut {
+                session.forget()
+            } catch {
+                problem = error.localizedDescription
+            }
+        }
+    }
+
+    private func faceID(_ label: String) -> String { request.needsFaceID ? "\(label) with \(Biometry.name)" : label }
 
     private var confirmTitle: String { "“\(request.title)”" }
 
@@ -249,13 +302,13 @@ struct RequestDetailView: View {
         switch action {
         case .choose_option: response["option"] = option
         case .answered: response["text"] = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-        case .changes_requested, .rejected: if !note.isEmpty { response["note"] = note }
-        case .approved: break
+        case .changes_requested: if !note.isEmpty { response["note"] = note }
+        case .approved, .rejected: break
         }
         let body = WorkflowAnswer(action.rawValue, response, to: request)
         let key = request.needsFaceID ? DeviceKey.load() : nil
         if request.needsFaceID && key == nil {
-            problem = "This device has no key for Face ID any more (a face or finger was added). Log out and log in again."
+            problem = "This device has no signing key any more. Log out and log in again."
             return
         }
         working = true
@@ -273,11 +326,5 @@ struct RequestDetailView: View {
                 problem = error.localizedDescription
             }
         }
-    }
-
-    /// Agents write Markdown; links in it are shown, not followed automatically, as on the page.
-    static func markdown(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(text)
     }
 }
