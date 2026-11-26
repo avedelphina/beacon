@@ -89,7 +89,9 @@ struct RequestRow: View {
                 Text("\(request.kind.capitalized) · CL\(request.clearance)").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Text(request.state.replacingOccurrences(of: "_", with: " ")).font(.caption)
-                    .foregroundStyle(request.isOpen ? Color.accentColor : .secondary)
+                    .fontWeight(request.isOpen ? .semibold : .regular)
+                    // Not the accent colour: it disappears on the selected row of the iPad list.
+                    .foregroundStyle(request.isOpen ? .primary : .secondary)
             }
             Text(request.title).font(.headline).lineLimit(2)
             Text("From \(request.requester)").font(.subheadline).foregroundStyle(.secondary)
