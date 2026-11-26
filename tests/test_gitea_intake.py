@@ -352,6 +352,8 @@ def test_mapped_pr_participants_are_stored_and_receive_only_new_members(client, 
         ("contributor", "reviewer"), ("maintainer", "assignee")}
     assert board.agent_may_see_pr("reviewer", card)
     assert not board.agent_may_see_pr("unmapped", card)
+    [listed] = board.list_cards()
+    assert listed["participants"] == card["participants"]
 
     second = _post(client, _body(action="synchronize", assignees=["maintainer"], requested_reviewers=[]))
     assert second.status_code == 202

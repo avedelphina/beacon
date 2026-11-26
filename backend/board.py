@@ -76,8 +76,10 @@ def list_cards(project: str | None = None, assignee: str | None = None, state: s
         for r in db.execute("SELECT * FROM card_references ORDER BY id"):
             refs.setdefault(r["card_id"], []).append(dict(r))
         participants: dict[int, list[dict]] = {}
-        for r in db.execute("SELECT agent, gitea_login, created_at, updated_at FROM card_participants ORDER BY card_id, agent"):
-            participants.setdefault(r["card_id"], []).append(dict(r))
+        for r in db.execute("SELECT card_id, agent, gitea_login, created_at, updated_at FROM card_participants "
+                            "ORDER BY card_id, agent"):
+            row = dict(r)
+            participants.setdefault(row.pop("card_id"), []).append(row)
     return [_card(row) | {"delivery": delivery.get(row["id"]), "blocked_by_count": open_deps.get(row["id"], 0),
                           "references": refs.get(row["id"], []), "participants": participants.get(row["id"], [])}
             for row in rows]
