@@ -1059,10 +1059,11 @@ function boardCardHtml(c) {
   return `<button type="button" class="board-card" data-card="${esc(c.id)}">
         <span>#${esc(c.id)} ${esc(c.title)}</span>
         <span class="board-card-meta">${esc(c.assignee ?? "unassigned")}${c.project ? ` · ${esc(c.project)}` : ""}${
+          c.help_by ? ' <span class="chip chip-warn">help wanted</span>' : ""}${
           boardWaiting[c.id] ? ` <span class="chip chip-warn">${boardWaiting[c.id]} open request${boardWaiting[c.id] > 1 ? "s" : ""}</span>` : ""}${
           c.blocked_by_count ? ` <span class="chip chip-warn" title="unfinished dependencies">blocked by ${esc(c.blocked_by_count)}</span>` : ""}${
           c.state === "blocked" ? ` <span class="chip${c.blocked_reason === "cannot" ? " chip-warn" : ""}"${c.waiting_on ? ` title="${esc(c.waiting_on)}"` : ""}>${esc(c.blocked_reason ?? "no reason")}</span>` : ""}${
-          c.state !== "done" ? deliveryChip(c.delivery) : ""}</span>
+          c.state !== "done" ? c.help_by ? "" : deliveryChip(c.delivery) : ""}</span>
       </button>`;
 }
 
@@ -1221,6 +1222,22 @@ async function openCard(id) {
   showBlockedFields(form);
   form.links.value = c.links.map((l) => `${l.url} ${l.label}`.trim()).join("\n");
   form.note.value = "";
+  // Milestones come from the card's project; help is asked for an unassigned open card in one.
+  const projectRef = c.project ? (await json("/api/projects?include_closed=true").catch(() => [])).find((p) => p.name === c.project) : null;
+  const milestones = projectRef ? (await json(`/api/projects/${projectRef.id}`).catch(() => ({ milestones: [] }))).milestones : [];
+  const open = milestones.filter((m) => m.state === "open" || m.id === c.milestone_id);
+  document.getElementById("card-milestone").hidden = !open.length;
+  form.milestone.innerHTML = `<option value="0">no milestone</option>${open.map((m) => `<option value="${esc(m.id)}">${esc(m.title)}</option>`).join("")}`;
+  form.milestone.value = String(c.milestone_id ?? 0);
+  document.getElementById("card-help").hidden = !(c.help_by || (projectRef?.state === "active" && !c.assignee && c.state !== "done"));
+  form.help_wanted.checked = !!c.help_by;
+  const roles = document.getElementById("card-help").hidden ? [] : await json("/api/roles").catch(() => []);
+  form.help_roles.innerHTML = roles.map((r) => `<option value="${esc(r.role)}"${c.help_roles.includes(r.role) ? " selected" : ""}${
+    r.agents.length ? "" : " disabled"}>${esc(r.role)}: ${esc(r.description)}${r.agents.length ? "" : " (nobody you may ask)"}</option>`).join("");
+  form.help_roles.disabled = !!c.help_by;  // an open call keeps the classes it was made with
+  document.getElementById("card-help-roles").hidden = !roles.length;
+  form.dataset.milestone = String(c.milestone_id ?? 0);
+  form.dataset.help = c.help_by ? "1" : "";
   openModal("card-modal");
   // Where the history scrolls on its own (wide screens), start at the newest entry.
   const history = document.querySelector("#card-detail .card-history");
@@ -1278,7 +1295,11 @@ document.getElementById("card-update-form").addEventListener("submit", async (e)
         done_when: f.done_when.value, links: parseLinks(f.links.value), note: f.note.value.trim() || null,
         // Only a blocked card has a reason; the server refuses a move to blocked without one.
         blocked_reason: f.state.value === "blocked" ? f.blocked_reason.value || null : null,
-        waiting_on: f.state.value === "blocked" ? f.waiting_on.value.trim() || null : null });
+        waiting_on: f.state.value === "blocked" ? f.waiting_on.value.trim() || null : null,
+        // Only when changed: asking for help again, or re-pointing, is an action of its own.
+        milestone: f.milestone.value !== f.dataset.milestone ? Number(f.milestone.value) : null,
+        help_wanted: f.help_wanted.checked !== !!f.dataset.help ? f.help_wanted.checked : null,
+        help_roles: f.help_wanted.checked && !f.dataset.help ? [...f.help_roles.selectedOptions].map((o) => o.value) : null });
     closeModal("card-modal");
     renderBoard();
   } catch (err) {
@@ -1287,8 +1308,11 @@ document.getElementById("card-update-form").addEventListener("submit", async (e)
 });
 
 document.getElementById("refresh-board").addEventListener("click", renderBoard);
-document.getElementById("add-card").addEventListener("click", () => {
+document.getElementById("add-card").addEventListener("click", async () => {
   document.getElementById("card-create-form").reset();
+  const open = await json("/api/projects").catch(() => []);
+  document.querySelector("[data-projects]").innerHTML = `<option value="">no project</option>${
+    open.map((p) => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("")}`;
   openModal("card-create-modal");
 });
 
@@ -1298,11 +1322,222 @@ document.getElementById("card-create-form").addEventListener("submit", async (e)
   try {
     await json("/api/board/cards", "POST", {
       title: f.title.value, body: f.body.value,
-      project: f.project.value.trim() || null, assignee: f.assignee.value.trim() || null,
+      project: f.project.value || null, assignee: f.assignee.value.trim() || null,
       next_action: f.next_action.value || null, done_when: f.done_when.value || null,
     });
     closeModal("card-create-modal");
     renderBoard();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+// ---- projects ----
+// The server says what the viewer may do with each (`can`); the page only offers that, and the
+// server refuses the rest anyway (backend/projects.py).
+let openedProject = null;
+
+const projectOwner = (p) => p.owner ?? "the operators";
+
+async function renderProjects() {
+  const el = document.getElementById("project-list");
+  let items;
+  try {
+    items = await json(`/api/projects?include_closed=${document.getElementById("projects-closed").checked}`);
+  } catch (err) {
+    el.innerHTML = `<p class="empty">Could not load projects: ${esc(err.message)}</p>`;
+    return;
+  }
+  document.getElementById("projects-empty").hidden = items.length > 0;
+  el.innerHTML = items.map((p) => {
+    const total = Object.values(p.cards).reduce((a, b) => a + b, 0);
+    const counts = BOARD_STATES.filter((s) => p.cards[s]).map((s) => `${p.cards[s]} ${s}`).join(", ");
+    return `<article class="workflow-item">
+      <header class="wf-head">
+        <div><div class="wf-kind">#${esc(p.id)} · ${esc(projectOwner(p))}</div>
+          <h3 class="wf-title"><a href="#" data-open-project="${esc(p.id)}">${esc(p.name)}</a></h3></div>
+        <span class="chip${p.state === "paused" ? " chip-warn" : ""}">${esc(p.state)}</span>
+      </header>
+      <p>${p.goal ? esc(p.goal) : '<span class="hint">No goal set.</span>'}</p>
+      ${p.status ? `<p class="hint">${esc(p.status)}</p>` : ""}
+      <p class="wf-from">${total ? `Cards: ${esc(counts)}` : "No cards."}</p>
+    </article>`;
+  }).join("");
+  el.querySelectorAll("[data-open-project]").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    openProject(a.dataset.openProject);
+  }));
+}
+
+async function openProject(id) {
+  let p;
+  try {
+    p = await json(`/api/projects/${encodeURIComponent(id)}`);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  openedProject = p;
+  const when = (t) => new Date(t * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  const links = p.links.map((l) => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label || l.url)}</a></li>`).join("");
+  const cards = p.card_list.map((c) => `<li><a href="#" data-open-card="${esc(c.id)}">#${esc(c.id)} ${esc(c.title)}</a>
+    <span class="chip">${esc(c.state)}</span> <span class="hint">${esc(c.assignee ?? "unassigned")}</span></li>`).join("");
+  document.getElementById("project-detail").innerHTML = `
+    <h2>${esc(p.name)}</h2>
+    <p class="hint">#${esc(p.id)} · ${esc(p.state)} · owner ${esc(projectOwner(p))} · started by ${esc(p.created_by)} · ${when(p.created_at)}</p>
+    <dl class="card-plan">
+      <dt>Goal</dt><dd>${p.goal ? esc(p.goal) : '<span class="hint">not set</span>'}${p.goal_by ? ` <span class="hint">(set by ${esc(p.goal_by)})</span>` : ""}</dd>
+      <dt>Done when</dt><dd>${p.done_when ? esc(p.done_when) : '<span class="hint">not set</span>'}</dd>
+      <dt>Status</dt><dd>${p.status ? `${esc(p.status)} <span class="hint">(${when(p.status_at)})</span>` : '<span class="hint">none yet</span>'}</dd>
+      ${links ? `<dt>Links</dt><dd><ul class="card-list">${links}</ul></dd>` : ""}
+      <dt>Milestones</dt><dd>${milestoneList(p, when)}</dd>
+      <dt>Cards</dt><dd>${cards ? `<ul class="card-list">${cards}</ul>` : '<span class="hint">none</span>'}</dd>
+      ${p.evidence ? `<dt>Evidence</dt><dd>${evidenceHtml(p.evidence)} <span class="hint">(claimed; Beacon has not checked it)</span></dd>` : ""}
+    </dl>
+    <h3 class="card-section">History <span class="hint">${p.events.length}</span></h3>
+    <ol class="card-history">${p.events.map((e) => cardEvent(e, when)).join("")}</ol>`;
+  document.querySelectorAll("#project-detail [data-open-card]").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    openCard(a.dataset.openCard);
+  }));
+  document.querySelectorAll("#project-detail [data-ms]").forEach((b) => b.addEventListener("click", () =>
+    changeMilestone(Number(b.dataset.id), b.dataset.ms)));
+  const form = document.getElementById("project-form");
+  document.getElementById("milestone-add").hidden = !p.can.steer || p.state === "done" || p.state === "abandoned";
+  form.ms_title.value = form.ms_done_when.value = form.ms_due.value = "";
+  form.status.value = p.status ?? "";
+  form.goal.value = p.goal;
+  form.done_when.value = p.done_when ?? "";
+  form.owner.value = p.owner ?? "";
+  form.note.value = "";
+  form.status.disabled = form.owner.disabled = !p.can.steer;
+  form.goal.disabled = form.done_when.disabled = !p.can.goal;
+  document.getElementById("project-edit").hidden = !p.can.steer && !p.can.goal;
+  form.querySelector('[type="submit"]').hidden = !p.can.steer && !p.can.goal;
+  const closed = p.state === "done" || p.state === "abandoned";
+  const offered = { paused: p.state === "active", active: p.state !== "active", done: !closed, abandoned: !closed };
+  form.querySelectorAll("[data-project-state]").forEach((b) => {
+    b.hidden = !p.can.steer || !offered[b.dataset.projectState];
+    if (b.dataset.projectState === "active") b.textContent = closed ? "Reopen" : "Resume";
+  });
+  openModal("project-modal");
+}
+
+function evidenceHtml(e) {
+  if (!e.links.length) return `none: ${esc(e.none_because ?? "")}`;
+  return e.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label || l.url)}</a>`).join(", ");
+}
+
+function milestoneList(p, when) {
+  if (!p.milestones.length) return '<span class="hint">none</span>';
+  const closed = p.state === "done" || p.state === "abandoned";
+  const button = (m, action, label) => `<button type="button" class="link-btn" data-ms="${action}" data-id="${esc(m.id)}">${label}</button>`;
+  return `<ul class="card-list">${p.milestones.map((m) => {
+    const n = p.card_list.filter((c) => c.milestone_id === m.id).length;
+    return `<li><span class="chip">${esc(m.state)}</span> ${esc(m.title)} <span class="hint">done when: ${esc(m.done_when)}${
+      m.due ? ` · ${esc(m.due)}` : ""} · ${n} card${n === 1 ? "" : "s"} · set by ${esc(m.set_by)}</span>${
+      m.evidence ? `<br><span class="hint">closed by ${esc(m.closed_by)}, ${when(m.closed_at)}:</span> ${evidenceHtml(m.evidence)}` : ""}${
+      closed || !p.can.steer ? "" : ` ${m.state === "open" ? button(m, "done", "Close") : button(m, "open", "Reopen")}`}${
+      !closed && m.can_change ? ` ${button(m, "remove", "Remove")}` : ""}</li>`;
+  }).join("")}</ul>`;
+}
+
+// Closing something takes a link to follow, or the reason there is none. One question for both.
+function askEvidence(what) {
+  const text = prompt(`Evidence that ${what} is done: link(s) to the ticket, pull request or commit.\nIf there is none, say why.`);
+  if (!text?.trim()) return null;
+  const words = text.trim().split(/\s+/);
+  return words.every((w) => /^https?:\/\//.test(w))
+    ? { evidence_links: words.map((url) => ({ url, label: "" })) } : { no_evidence_because: text.trim() };
+}
+
+async function changeMilestone(id, action) {
+  const p = openedProject;
+  let body = action === "remove" ? { remove: true } : { state: action };
+  if (action === "remove" && !confirm("Remove this milestone? Its cards stay in the project.")) return;
+  if (action === "done") {
+    const evidence = askEvidence("this milestone");
+    if (!evidence) return;
+    body = { ...body, ...evidence };
+  }
+  try {
+    await json(`/api/projects/${p.id}/milestones/${id}`, "PATCH", body);
+    await openProject(p.id);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+document.getElementById("milestone-add-button").addEventListener("click", async () => {
+  const f = document.getElementById("project-form");
+  try {
+    await json(`/api/projects/${openedProject.id}/milestones`, "POST",
+      { title: f.ms_title.value, done_when: f.ms_done_when.value, due: f.ms_due.value || null });
+    await openProject(openedProject.id);
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+// Only what changed is sent: sending an untouched goal would read as an attempt to set it.
+async function changeProject(extra) {
+  const f = document.getElementById("project-form"), p = openedProject;
+  const body = { ...extra };
+  if (p.can.steer && f.status.value.trim() !== (p.status ?? "")) body.status = f.status.value;
+  if (p.can.steer && f.owner.value.trim() !== (p.owner ?? "")) body.owner = f.owner.value.trim();
+  if (p.can.goal && f.goal.value.trim() !== p.goal) body.goal = f.goal.value;
+  if (p.can.goal && f.done_when.value.trim() !== (p.done_when ?? "")) body.done_when = f.done_when.value;
+  if (f.note.value.trim()) body.note = f.note.value.trim();
+  try {
+    await json(`/api/projects/${p.id}`, "PATCH", body);
+    await openProject(p.id);
+    renderProjects();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+document.getElementById("project-form").addEventListener("submit", (e) => { e.preventDefault(); changeProject({}); });
+document.querySelectorAll("[data-project-state]").forEach((b) => b.addEventListener("click", () => {
+  const state = b.dataset.projectState;
+  if (state === "abandoned" && !confirm(`Abandon ${openedProject.name}? Agents on it are told to stop.`)) return;
+  const evidence = state === "done" ? askEvidence(openedProject.name) : {};
+  if (evidence) changeProject({ state, ...evidence });
+}));
+document.querySelector("[data-project-comment]").addEventListener("click", async () => {
+  const note = document.getElementById("project-form").note.value.trim();
+  if (!note) return;
+  try {
+    await json(`/api/projects/${openedProject.id}/comments`, "POST", { text: note });
+    await openProject(openedProject.id);
+  } catch (err) {
+    alert(err.message);
+  }
+});
+document.getElementById("refresh-projects").addEventListener("click", renderProjects);
+document.getElementById("projects-closed").addEventListener("change", renderProjects);
+document.querySelector('[data-tab="projects"]').addEventListener("click", renderProjects);
+document.getElementById("add-project").addEventListener("click", async () => {
+  document.getElementById("project-create-form").reset();
+  const ids = await json("/api/board/assignees").catch(() => []);
+  document.getElementById("project-owners").innerHTML = ids.map((id) => `<option value="${esc(id)}">`).join("");
+  openModal("project-create-modal");
+});
+document.getElementById("project-create-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const body = { name: f.name.value, goal: f.goal.value, done_when: f.done_when.value, links: parseLinks(f.links.value) };
+  if (f.owner.value.trim()) body.owner = f.owner.value.trim();
+  try {
+    try {
+      await json("/api/projects", "POST", body);
+    } catch (err) {
+      // A person decides whether a similar project is the same one.
+      if (!err.message.includes("similar open projects") || !confirm(`${err.message}\n\nCreate it anyway?`)) throw err;
+      await json("/api/projects", "POST", { ...body, confirm_new: true });
+    }
+    closeModal("project-create-modal");
+    renderProjects();
   } catch (err) {
     alert(err.message);
   }
@@ -1431,7 +1666,8 @@ function renderWorkflowItems(items) {
       ? `<div class="wf-note"><strong>Changes requested</strong>${renderMarkdown(w.response.note)}</div>` : "";
     const waiting = w.state === "changes_requested"
       ? '<p class="hint">Waiting for the requester to send a changed plan.</p>' : "";
-    const responder = w.eligible_responder === "human" ? "any operator" : w.eligible_responder;
+    const responder = w.eligible_responder === "human" ? "any operator"
+      : w.eligible_responder.startsWith("role:") ? `any ${w.eligible_responder.slice(5)} agent (or an operator)` : w.eligible_responder;
     // Whether the requester asked a peer before asking a person: its own account, shown so the
     // person can judge the question. A request that did neither is flagged.
     const consulted = (w.consulted || []).length
@@ -1442,7 +1678,7 @@ function renderWorkflowItems(items) {
     return `<article class="workflow-item">
       <header class="wf-head">
         <div>
-          <div class="wf-kind">${esc(WORKFLOW_KIND_LABEL[w.kind] || w.kind)} · CL${esc(w.clearance)}${w.urgent_reason ? ' · <strong class="wf-urgent">URGENT</strong>' : ""}</div>
+          <div class="wf-kind">#${esc(w.id)} · ${esc(WORKFLOW_KIND_LABEL[w.kind] || w.kind)} · CL${esc(w.clearance)}${w.urgent_reason ? ' · <strong class="wf-urgent">URGENT</strong>' : ""}</div>
           <h3 class="wf-title">${esc(w.title)}</h3>
         </div>
         <span class="chip">${esc(w.state)}</span>

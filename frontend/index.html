@@ -18,6 +18,7 @@
   <nav class="tabs">
     <button class="tab active" data-tab="workflows">Workflows<span class="tab-badge" id="workflows-badge" hidden></span></button>
     <button class="tab" data-tab="board">Board</button>
+    <button class="tab" data-tab="projects">Projects</button>
     <button class="tab op-only" data-tab="hosts">Hosts</button>
     <button class="tab" data-tab="agents">Agents</button>
     <button class="tab op-only" data-tab="policy">Policy</button>
@@ -140,6 +141,18 @@
       <p class="hint">Done cards move here 48 hours after their last change. They open and search like any other card.</p>
       <div class="board-archive-list" id="board-archive-list"></div>
     </details>
+  </section>
+
+  <section id="projects-view" class="view">
+    <div class="view-head">
+      <h1>Projects</h1>
+      <span><button class="btn" id="refresh-projects" type="button">Refresh</button>
+      <button class="btn primary" id="add-project" type="button">+ New project</button></span>
+    </div>
+    <p class="hint" style="margin:-0.6rem 0 1rem">Long-term work with a goal and an owner. Beacon coordinates; the evidence lives in tickets and repositories, and "done" is the owner's claim, not something Beacon checked.</p>
+    <label class="check"><input type="checkbox" id="projects-closed"> show done and abandoned</label>
+    <div class="workflow-list" id="project-list"></div>
+    <p class="empty" id="projects-empty" hidden>No projects.</p>
   </section>
 
   <section id="workflows-view" class="view active">
@@ -466,7 +479,7 @@
     <h2>New card</h2>
     <label>Title <input name="title" required></label>
     <div class="field-row">
-      <label>Project <input name="project" placeholder="ops"></label>
+      <label>Project <select name="project" data-projects><option value="">no project</option></select></label>
       <label>Assignee <select name="assignee" data-assignees><option value="">unassigned</option></select></label>
     </div>
     <label>Description <span class="hint">(what needs doing, and the limits)</span>
@@ -477,6 +490,51 @@
     <div class="modal-actions">
       <button type="button" class="btn" data-close>Cancel</button>
       <button type="submit" class="btn primary">Create</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal-backdrop" id="project-create-modal">
+  <form class="modal" id="project-create-form">
+    <h2>New project</h2>
+    <label>Name <input name="name" required maxlength="80"></label>
+    <label>Goal <span class="hint">(what it is for)</span> <textarea name="goal" rows="3" required></textarea></label>
+    <label>Done when <span class="hint">(what must be true to call it finished)</span> <textarea name="done_when" rows="2" required></textarea></label>
+    <label>Owner <span class="hint">(who delivers it: an agent id or an email; empty = you)</span> <input name="owner" list="project-owners" autocomplete="off"></label>
+    <datalist id="project-owners"></datalist>
+    <label>Links <span class="hint">(one per line: URL, then an optional label)</span> <textarea name="links" rows="2"></textarea></label>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary">Create</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal-backdrop" id="project-modal">
+  <form class="modal" id="project-form">
+    <div id="project-detail"></div>
+    <details id="milestone-add">
+      <summary>Add a milestone</summary>
+      <label>Title <input name="ms_title" maxlength="200"></label>
+      <label>Done when <input name="ms_done_when"></label>
+      <label>Date <span class="hint">(optional)</span> <input type="date" name="ms_due"></label>
+      <button type="button" class="btn" id="milestone-add-button">Add milestone</button>
+    </details>
+    <div id="project-edit">
+      <label>Status <span class="hint">(where it stands and what is next)</span> <textarea name="status" rows="3"></textarea></label>
+      <label>Goal <textarea name="goal" rows="2"></textarea></label>
+      <label>Done when <textarea name="done_when" rows="2"></textarea></label>
+      <label>Owner <input name="owner" list="project-owners" autocomplete="off"></label>
+    </div>
+    <label>Note <span class="hint">(a comment, or why you change something)</span> <textarea name="note" rows="2"></textarea></label>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>Close</button>
+      <button type="button" class="btn" data-project-comment>Comment</button>
+      <button type="button" class="btn" data-project-state="paused">Pause</button>
+      <button type="button" class="btn" data-project-state="active">Resume</button>
+      <button type="button" class="btn" data-project-state="done">Done</button>
+      <button type="button" class="btn" data-project-state="abandoned">Abandon</button>
+      <button type="submit" class="btn primary">Save</button>
     </div>
   </form>
 </div>
@@ -500,6 +558,11 @@
       </select></label>
       <label>Waiting on / missing <input name="waiting_on" placeholder="an agent, workflow:12 (a request on this card), or something outside"></label>
     </div>
+    <label id="card-milestone" hidden>Milestone <select name="milestone"></select></label>
+    <label class="check" id="card-help" hidden><input type="checkbox" name="help_wanted"> help wanted
+      <span class="hint">(asks every agent you can give it to; the first to claim takes it. Or pick an assignee above to give it to one yourself)</span></label>
+    <label id="card-help-roles" hidden>Only these classes <span class="hint">(none selected: any agent)</span>
+      <select name="help_roles" multiple size="3"></select></label>
     <label>Next action <input name="next_action"></label>
     <label>Done when <input name="done_when"></label>
     <label>Links <span class="hint">(one per line: URL, then an optional label)</span>

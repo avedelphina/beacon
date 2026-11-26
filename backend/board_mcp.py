@@ -23,7 +23,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 
-from . import auth, board, clients, intake, mesh, onboarding, secret_pipe, store, workflow
+from . import auth, board, clients, intake, mesh, onboarding, projects, secret_pipe, store, workflow
 
 INSTRUCTIONS = """The Beacon fleet board: shared cards for work that spans agents, hosts, or days.
 Use it to hand work to another agent, to record progress where others can see it, and to find
@@ -31,6 +31,13 @@ what is assigned to you. States: todo, doing, blocked, review, done. When you wo
 over A2A, pass the thread's context_id to card_comment or card_update so the card links to it.
 Assigning a card to an agent also sends that agent a notice, and so does a comment on a card
 assigned to it.
+
+A project is long-term work with a goal and an owner who is responsible for delivering it. Start one
+(project_create) when work will take more than one card or more than one agent; a single task with
+several steps is a card. Look first (project_list): add to a project that already has your goal. Before
+working on a card in a project, read its goal with project_get. If you own one, keep its status current,
+and keep at least one card open until the goal is met. Beacon only coordinates: evidence stays in
+tickets and repositories, linked from the project and its cards. Never work on a paused project.
 
 If you are an operator's own AI client (an agent bound to a person, `acts_for`), you also read what
 that person reads and may answer, for them, the workflow requests addressed to them or to "human" up to
@@ -82,6 +89,12 @@ def _visible_after(ctx: Context, card: dict) -> dict:
     """A card an agent just changed, as that agent may see it."""
     author = _author(ctx)
     return board.restrict(card, lambda c: intake.agent_may_see(author, c))
+
+
+def _for_agent(ctx: Context, project: dict) -> dict:
+    """A project with only the cards this caller may see (intake cards can be kept from agents)."""
+    author = _author(ctx)
+    return {**project, "card_list": [c for c in project["card_list"] if intake.agent_may_see(author, c)]}
 
 
 def _author(ctx: Context) -> str:
@@ -145,15 +158,92 @@ def build() -> MCPServer:
         return _visible_card(ctx, card_id)
 
     @server.tool()
+    def project_list(ctx: Context, include_closed: bool = False) -> list[dict]:
+        """Projects with their goal, owner, state, status and card counts. Look here before you
+        create one. Done and abandoned ones are left out unless include_closed."""
+        return projects.list_projects(_author(ctx), include_closed)
+
+    @server.tool()
+    def project_get(ctx: Context, project: str) -> dict:
+        """One project (by name or number): goal, done-when, owner, status, history, its cards, and
+        `can`, what you may change."""
+        return _for_agent(ctx, projects.get(_author(ctx), project))
+
+    @server.tool()
+    def project_create(ctx: Context, name: str, goal: str, done_when: str, owner: str | None = None,
+                       links: list[dict] | None = None, confirm_new: bool = False) -> dict:
+        """Start a project for work that needs more than one card or more than one agent. goal is
+        what it is for, done_when what has to be true to call it finished. You own it unless you
+        name another agent you may call, or the person you work for. links is a list of {url, label}
+        to the ticket or repository. Then add cards with card_create(project=<name>). If similar
+        projects are open you are told which: use one of them, or pass confirm_new."""
+        return _for_agent(ctx, projects.create(_author(ctx), name, goal, done_when,
+                                               projects.DEFAULT if owner is None else owner, links, confirm_new))
+
+    @server.tool()
+    def project_update(ctx: Context, project: str, status: str | None = None, state: str | None = None,
+                       goal: str | None = None, done_when: str | None = None, owner: str | None = None,
+                       name: str | None = None, links: list[dict] | None = None, note: str | None = None,
+                       evidence_links: list[dict] | None = None, no_evidence_because: str | None = None) -> dict:
+        """Change a project you steer. status is your current summary: where it stands and what is
+        next, replaced each time. state: active, paused, done (every card and milestone must be done; give
+        evidence_links [{url, label}] to the ticket, pull request or commit, or no_evidence_because) or
+        abandoned. You can change goal and done_when only if you set them;
+        otherwise propose the change to whoever did. note says why and is kept in the history."""
+        return _for_agent(ctx, projects.update(_author(ctx), project, name=name, goal=goal, done_when=done_when,
+                                               owner=projects.DEFAULT if owner is None else owner, state=state,
+                                               status=status, links=links, note=note, evidence_links=evidence_links,
+                                               no_evidence_because=no_evidence_because))
+
+    @server.tool()
+    def project_comment(ctx: Context, project: str, text: str) -> dict:
+        """Add to a project's history; its owner is told."""
+        return _for_agent(ctx, projects.comment(_author(ctx), project, text))
+
+    @server.tool()
+    def milestone_add(ctx: Context, project: str, title: str, done_when: str, due: str | None = None) -> dict:
+        """Add a milestone to a project you steer: a step towards the goal, with what must be true to
+        call it met. due is YYYY-MM-DD, only for readers. Point cards at it with card_create or
+        card_update (milestone=<id>)."""
+        return _for_agent(ctx, projects.add_milestone(_author(ctx), project, title, done_when, due))
+
+    @server.tool()
+    def milestone_update(ctx: Context, project: str, milestone: int, state: str | None = None,
+                         title: str | None = None, done_when: str | None = None, due: str | None = None,
+                         remove: bool = False, evidence_links: list[dict] | None = None,
+                         no_evidence_because: str | None = None) -> dict:
+        """Close a milestone (state="done": its cards must be done; give evidence_links [{url, label}]
+        or no_evidence_because), reopen it ("open"), or edit or remove it. You can change what it
+        requires only if you set it; otherwise ask whoever did."""
+        return _for_agent(ctx, projects.change_milestone(
+            _author(ctx), project, milestone, title=title, done_when=done_when, due=due, state=state, remove=remove,
+            evidence_links=evidence_links, no_evidence_because=no_evidence_because))
+
+    @server.tool()
+    def role_list(ctx: Context) -> list[dict]:
+        """The classes of agent you can ask: what each is for, and which agents of it you may ask.
+        Use a class in card_update(help_roles=[...]) or as a workflow's eligible_responder
+        "role:<name>" when you need that kind of agent rather than one in particular."""
+        return board.role_directory(_author(ctx))
+
+    @server.tool()
+    def card_claim(ctx: Context, card_id: int) -> dict:
+        """Take a card that asks for help (help_by set, nobody assigned). Only claim what you can
+        finish; then work on it like any card assigned to you. The first claim wins."""
+        _discussion_only(ctx, _visible_card(ctx, card_id))
+        return _visible_after(ctx, board.claim(_author(ctx), card_id))
+
+    @server.tool()
     def card_create(ctx: Context, title: str, body: str = "", project: str | None = None,
                     assignee: str | None = None, next_action: str | None = None,
-                    done_when: str | None = None, links: list[dict] | None = None) -> dict:
+                    done_when: str | None = None, links: list[dict] | None = None,
+                    milestone: int | None = None) -> dict:
         """Create a card in state "todo". Put what needs doing in body, the first step in
         next_action, and what must be true to close it in done_when. links is a list of
         {url, label} pointing to PRs or issues elsewhere. assignee is an agent id (see
         board_list or the fleet); that agent gets a notice."""
         return board.create_card(_author(ctx), title, body, project, assignee,
-                                 next_action=next_action, done_when=done_when, links=links)
+                                 next_action=next_action, done_when=done_when, links=links, milestone=milestone)
 
     @server.tool()
     def card_update(ctx: Context, card_id: int, state: str | None = None, assignee: str | None = None,
@@ -161,7 +251,8 @@ def build() -> MCPServer:
                     next_action: str | None = None, done_when: str | None = None,
                     links: list[dict] | None = None, note: str | None = None,
                     context_id: str | None = None, blocked_reason: str | None = None,
-                    waiting_on: str | None = None) -> dict:
+                    waiting_on: str | None = None, milestone: int | None = None,
+                    help_wanted: bool | None = None, help_roles: list[str] | None = None) -> dict:
         """Change a card: move its state (todo, doing, blocked, review, done), reassign it
         (assignee="" unassigns), or edit it. Keep next_action current as the work moves;
         "" clears it or done_when. links replaces the whole list of {url, label}, so send
@@ -173,13 +264,19 @@ def build() -> MCPServer:
         card, or something outside Beacon; waiting on a person means making a workflow request
         first) or "cannot" (you lack a capability or access: make a workflow request to a person for
         exactly what is missing, then set waiting_on to "workflow:<id>"; you are told when it ends).
-        Do not use blocked for work you could still do."""
+        Do not use blocked for work you could still do.
+
+        milestone points the card at a milestone of its project (0 clears). help_wanted=true on an
+        unassigned card of an active project asks every agent you could assign it to, once; the
+        first to claim it takes it. Use it when you do not know whom to ask. help_roles narrows
+        the call to agents of those classes (role_list)."""
         card = _visible_card(ctx, card_id)
         _discussion_only(ctx, card)
         return board.update_card(_author(ctx), card_id, state=state, assignee=assignee, title=title,
                                  body=body, project=project, next_action=next_action,
                                  done_when=done_when, links=links, note=note, context_id=context_id,
-                                 blocked_reason=blocked_reason, waiting_on=waiting_on)
+                                 blocked_reason=blocked_reason, waiting_on=waiting_on,
+                                 milestone=milestone, help_wanted=help_wanted, help_roles=help_roles)
 
     @server.tool()
     def card_comment(ctx: Context, card_id: int, text: str, context_id: str | None = None) -> dict:
@@ -371,7 +468,9 @@ def build() -> MCPServer:
                         plan_hash: str | None = None, context_id: str | None = None,
                         consulted: list[dict] | None = None, consult_skipped: str | None = None,
                         urgent_reason: str | None = None, tier: int | None = None) -> dict:
-        """Create a pending typed workflow request attached to a board card. When you ask a person
+        """Create a pending typed workflow request attached to a board card. eligible_responder may
+        be "role:<name>" (see role_list) for CL0 to CL3: every agent of that class you may call is
+        told, and the first answer counts. When you ask a person
         (eligible_responder "human" or an email), first consult at least one peer you may call about
         the problem and your plan, and pass what you learned as consulted: [{"agent": "<peer>",
         "said": "<what they answered>", "context_id": "<thread, optional>"}]. If a peer cannot help

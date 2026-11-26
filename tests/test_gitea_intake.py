@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend import board, board_mcp, gitea_intake, intake, members, opstore, policy, store
+from backend import board, board_mcp, gitea_intake, intake, members, opstore, policy, projects, store
 from backend.schemas import Agent, Host
 
 SECRET = "gitea-webhook-test-secret"
@@ -482,6 +482,24 @@ def test_without_a_mapping_pr_cards_follow_the_intake_visibility_switches(client
     monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, "not-json")
     assert not intake.agent_may_see("worker", card)
     assert not members.card_visible("tom@example.com", card)
+
+
+def test_a_project_does_not_widen_or_offer_a_pr_conversation(client, gitea, monkeypatch):
+    monkeypatch.setenv("BEACON_A2A_SECRET", "test-secret")
+    _add_board_agent("reviewer", owner="tom@example.com")
+    _add_board_agent("outsider", owner="ann@example.com")
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, json.dumps({"contributor": "reviewer"}))
+    card_id = _post(client, _body()).json()["card_id"]
+    projects.create("operator", "infra", goal="g", done_when="d", owner="outsider")
+    board.update_card("operator", card_id, project="infra")
+
+    listed = projects.get("operator", projects.find("infra")["id"])["card_list"]
+    assert not members.card_filter("ann@example.com")(listed[0])
+    assert not members.card_manageable("ann@example.com", listed[0])
+    assert members.card_manageable("tom@example.com", listed[0])
+    assert not intake.agent_may_see("outsider", listed[0])
+    with pytest.raises(ValueError, match="participants"):
+        board.update_card("beacon", card_id, help_wanted=True)
 
 
 def test_oversized_stream_is_rejected(client, gitea):
