@@ -1,0 +1,61 @@
+{
+  "approve": {
+    "aps": {
+      "alert": {
+        "title": "alpha needs your answer"
+      },
+      "category": "WF_APPROVE",
+      "interruption-level": "active",
+      "sound": "default",
+      "thread-id": "card-4"
+    },
+    "beacon": {
+      "card": 4,
+      "clearance": 3,
+      "kind": "approval",
+      "workflow": 17
+    }
+  },
+  "human": {
+    "aps": {
+      "alert": {
+        "title": "URGENT: alpha needs your answer"
+      },
+      "category": "WF_HUMAN",
+      "interruption-level": "time-sensitive",
+      "sound": "default",
+      "thread-id": "card-4"
+    },
+    "beacon": {
+      "card": 4,
+      "clearance": 4,
+      "kind": "approval",
+      "workflow": 18
+    }
+  },
+  "open": {
+    "aps": {
+      "alert": {
+        "title": "alpha needs your answer"
+      },
+      "category": "WF_OPEN",
+      "interruption-level": "active",
+      "sound": "default",
+      "thread-id": "card-5"
+    },
+    "beacon": {
+      "card": 5,
+      "clearance": 2,
+      "kind": "decision",
+      "workflow": 19
+    }
+  },
+  "plain": {
+    "aps": {
+      "alert": {
+        "title": "alpha has not synced for 2 hours"
+      },
+      "sound": "default"
+    }
+  }
+}

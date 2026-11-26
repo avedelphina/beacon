@@ -74,6 +74,25 @@ nonisolated struct WorkflowRequest: Decodable, Identifiable, Sendable, Hashable 
     var needsFaceID: Bool { clearance >= 4 }
 }
 
+/// An answer to a workflow request. It names the plan revision and hash of the request it answers:
+/// if the requester changed the plan since, Beacon marks the request stale instead of approving
+/// something else.
+nonisolated struct WorkflowAnswer: Encodable, Sendable {
+    let action: String         // approved, rejected, changes_requested, choose_option, answered
+    let response: [String: String]
+    let planRevision: String
+    let planHash: String
+
+    init(_ action: String, _ response: [String: String] = [:], to request: WorkflowRequest) {
+        self.action = action
+        self.response = response
+        planRevision = request.planRevision
+        planHash = request.planHash
+    }
+
+    enum CodingKeys: String, CodingKey { case action, response, planRevision = "plan_revision", planHash = "plan_hash" }
+}
+
 nonisolated struct Card: Decodable, Sendable {
     let id: Int
     let title: String

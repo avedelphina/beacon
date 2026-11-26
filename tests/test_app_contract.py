@@ -73,6 +73,24 @@ def answers(fleet, monkeypatch):
     return {k: r.json() for k, r in answers.items()}
 
 
+def test_the_notification_payloads_match_what_beacon_sends():
+    """What APNs delivers to the app (backend/apns.py): the app picks the category's actions and the
+    request to open from these. Values matter here, not only shapes: the category names must be the
+    ones the app registers."""
+    from backend import apns
+    sent = {
+        "approve": apns.payload("alpha needs your answer", about={"workflow": 17, "clearance": 3, "kind": "approval", "card": 4}),
+        "human": apns.payload("URGENT: alpha needs your answer", urgent=True,
+                              about={"workflow": 18, "clearance": 4, "kind": "approval", "card": 4}),
+        "open": apns.payload("alpha needs your answer", about={"workflow": 19, "clearance": 2, "kind": "decision", "card": 5}),
+        "plain": apns.payload("alpha has not synced for 2 hours"),
+    }
+    path = CONTRACT / "apns.json"
+    if os.environ.get("BEACON_UPDATE_CONTRACT"):
+        path.write_text(json.dumps(sent, indent=2, sort_keys=True) + "\n")
+    assert json.loads(path.read_text()) == sent, "Beacon's APNs payloads changed: regenerate apps/contract"
+
+
 @pytest.mark.parametrize("name", ["workflow.json", "workflows.json", "card.json", "version.json"])
 def test_the_apps_contract_files_match_the_api(answers, name):
     path = CONTRACT / name

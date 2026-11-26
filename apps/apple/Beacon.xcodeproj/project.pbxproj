@@ -231,6 +231,7 @@
 		A10000000000000000000018 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/Beacon.entitlements;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Beacon;
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Beacon asks for Face ID before you answer a CL4 or CL5 request.";
@@ -247,6 +248,7 @@
 		A10000000000000000000019 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/Beacon.entitlements;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Beacon;
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Beacon asks for Face ID before you answer a CL4 or CL5 request.";

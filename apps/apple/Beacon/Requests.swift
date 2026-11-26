@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 /// Requests on the left (or as the whole screen on iPhone), the open one on the right.
 struct RequestsSplitView: View {
@@ -41,6 +42,14 @@ struct RequestsSplitView: View {
         .sheet(isPresented: $showSettings) { SettingsView() }
         .task { await load() }
         .onChange(of: phase) { if phase == .active { Task { await load() } } }
+        .onChange(of: session.refreshes) { Task { await load() } }
+        .task(id: session.openRequest) {
+            // A tapped notification: show that request, fresh.
+            guard let id = session.openRequest else { return }
+            await load()
+            selected = id
+            session.openRequest = nil
+        }
     }
 
     private func load() async {
@@ -48,6 +57,7 @@ struct RequestsSplitView: View {
         do {
             requests = try await client.get("/api/workflows")
             problem = nil
+            try? await UNUserNotificationCenter.current().setBadgeCount(requests.filter(\.isOpen).count)
         } catch APIError.loggedOut {
             session.forget()
         } catch {
@@ -242,7 +252,7 @@ struct RequestDetailView: View {
         case .changes_requested, .rejected: if !note.isEmpty { response["note"] = note }
         case .approved: break
         }
-        let body = Response(action: action.rawValue, response: response, planRevision: request.planRevision, planHash: request.planHash)
+        let body = WorkflowAnswer(action.rawValue, response, to: request)
         let key = request.needsFaceID ? DeviceKey.load() : nil
         if request.needsFaceID && key == nil {
             problem = "This device has no key for Face ID any more (a face or finger was added). Log out and log in again."
@@ -263,14 +273,6 @@ struct RequestDetailView: View {
                 problem = error.localizedDescription
             }
         }
-    }
-
-    private struct Response: Encodable {
-        let action: String
-        let response: [String: String]
-        let planRevision: String
-        let planHash: String
-        enum CodingKeys: String, CodingKey { case action, response, planRevision = "plan_revision", planHash = "plan_hash" }
     }
 
     /// Agents write Markdown; links in it are shown, not followed automatically, as on the page.

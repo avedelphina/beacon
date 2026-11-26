@@ -113,3 +113,37 @@ struct OrderTests {
         #expect(RequestsSplitView.sorted(items).map(\.id) == [4, 5, 2, 3, 1])
     }
 }
+
+struct NotificationTests {
+    private func sent() throws -> [String: [AnyHashable: Any]] {
+        try JSONSerialization.jsonObject(with: contract("apns.json")) as! [String: [AnyHashable: Any]]
+    }
+
+    @Test func everyCategoryBeaconSendsIsOneTheAppRegisters() throws {
+        let registered = Set(Notices.categories().map(\.identifier))
+        let used = try sent().values.compactMap { ($0["aps"] as? [String: Any])?["category"] as? String }
+        #expect(Set(used) == registered)
+    }
+
+    @Test func onlyCL3ApprovalsGetLockScreenActions() throws {
+        let actions = Dictionary(uniqueKeysWithValues: Notices.categories().map { ($0.identifier, Set($0.actions.map(\.identifier))) })
+        let category = { (name: String) in try (self.sent()[name]?["aps"] as? [String: Any])?["category"] as? String }
+        #expect(actions[try category("approve")!] == [Notices.approveAction, Notices.rejectAction, Notices.openAction])
+        #expect(actions[try category("human")!] == [Notices.openAction])  // CL4: the app, for Face ID
+        #expect(actions[try category("open")!] == [Notices.openAction])
+        for action in Notices.categories().flatMap(\.actions) where action.identifier != Notices.openAction {
+            #expect(action.options.contains(.authenticationRequired))  // a locked phone cannot approve
+        }
+    }
+
+    @Test func theRequestToOpenComesFromThePayload() throws {
+        let sent = try sent()
+        #expect(Notices.workflowID(sent["approve"]!) == 17)
+        #expect(Notices.workflowID(sent["human"]!) == 18)
+        #expect(Notices.workflowID(sent["plain"]!) == nil)
+    }
+
+    @Test func theDeviceTokenIsSentAsLowercaseHex() {
+        #expect(Notices.tokenHex(Data([0x0A, 0xFF, 0x00])) == "0aff00")
+    }
+}
