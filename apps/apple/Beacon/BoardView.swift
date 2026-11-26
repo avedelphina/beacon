@@ -94,7 +94,8 @@ struct CardView: View {
                     LabeledContent("Assignee", value: card.assignee ?? "unassigned")
                     if let project = card.project { LabeledContent("Project", value: project) }
                     LabeledContent("Made by", value: card.createdBy)
-                    Picker("State", selection: Binding(get: { card.state }, set: move)) {
+                    // A closure, not `set: move`: Swift 6.3 (Xcode 26, as on CI) crashes on the method reference.
+                    Picker("State", selection: Binding(get: { card.state }, set: { move(to: $0) })) {
                         ForEach(Board.states, id: \.self) { Text($0).tag($0) }
                     }
                     .disabled(working)
