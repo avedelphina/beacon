@@ -37,6 +37,10 @@ struct RequestsSplitView: View {
         } detail: {
             if let request = requests.first(where: { $0.id == selected }) {
                 RequestDetailView(request: request, onAnswered: { Task { await load() } }).id(request.id)
+            } else if selected != nil && !requests.isEmpty {
+                // A notification about a request that is gone, or not this person's to see.
+                ContentUnavailableView("Request not available", systemImage: "tray",
+                                       description: Text("It may have been withdrawn, or it is not yours to see."))
             } else {
                 ContentUnavailableView("No request selected", systemImage: "tray")
             }
