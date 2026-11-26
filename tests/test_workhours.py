@@ -25,7 +25,7 @@ def office(monkeypatch):
 @pytest.fixture
 def told(monkeypatch):
     sent = []
-    monkeypatch.setattr(notify, "_tell", lambda to, subject, body, urgent=False: sent.append((sorted(to), subject, body, urgent)))
+    monkeypatch.setattr(notify, "_tell", lambda to, subject, body, urgent=False, **_: sent.append((sorted(to), subject, body, urgent)))
     return sent
 
 

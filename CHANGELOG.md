@@ -14,6 +14,13 @@
   operator anyone's. What the app does is recorded under the person, `via` = `app`. `GET /api/version`
   now also answers `api`, which changes only when a change breaks the app. `apps/contract/` holds the
   signature test vector the app is tested against.
+- **Notifications to the native app.** With `BEACON_APNS_KEY_FILE`, `_KEY_ID`, `_TEAM_ID` and `_TOPIC`
+  set (an APNs key from the Apple Developer account), Beacon sends the app the notices that browsers
+  get, through Apple's push service: the subject line only, plus, for a workflow request, its ids and a
+  category that decides the notification's actions (Approve/Reject on the lock screen up to CL3; CL4 and
+  CL5 open the app for Face ID). CL4/CL5 and urgent requests are Time Sensitive. Browsers and the app
+  share one hourly limit per person. The app registers its token with `PUT /api/app/devices/self/apns`.
+  New dependency: `httpx[http2]` (adds `h2`), since APNs speaks only HTTP/2. `*.p8` is gitignored.
 
 ## [0.40.0] — 2026-11-26
 

@@ -10,7 +10,8 @@ failure is logged and never stops the request):
 - People hear by email, when an operator configured a mail server
   (BEACON_SMTP_HOST). It is off otherwise.
 - People also get the subject line as a push to every browser they turned
-  notifications on in (backend/push.py), mail server or not.
+  notifications on in (backend/push.py), and to the native app on their
+  devices (backend/apns.py), mail server or not.
 
 Email is where an agent's words reach a person's inbox, so it is kept narrow:
 plain text; a subject and body that Beacon writes, with the agent's own text
@@ -28,7 +29,7 @@ import threading
 import time
 from email.message import EmailMessage
 
-from . import mailbox, mesh, push, store
+from . import apns, app_devices, mailbox, mesh, push, store
 
 logger = logging.getLogger("beacon")
 
@@ -50,7 +51,7 @@ def workflow_created(request: dict, revised: bool = False) -> None:
             f"with workflow_respond. It expires {_when(request['expires_at'])}."), skip=request["requester"])
         _tell(_people_to_ask(request),
               f"Beacon: {_urgent_mark(request)}{request['requester']} {'changed a plan and ' if revised else ''}needs your answer",
-              _created_body(request), **_urgency(request))
+              _created_body(request), **_urgency(request), **_about(request))
     except Exception:
         logger.exception("workflow notice for request %s failed", request.get("id"))
 
@@ -78,7 +79,8 @@ def workflow_escalated(request: dict, actor: str) -> None:
         reason = request.get("escalated_reason") or ""
         _tell(_people_to_ask(request) - {actor.casefold()}, f"Beacon: {request['title'][:80]} needs a person",
               f"{actor} sent {_what(request)} to a person: workflow request #{request['id']}, \"{request['title'][:200]}\".\n\n"
-              f"Why: {reason}\n\nOpen the Workflows tab to read it and answer: {mesh.public_url() or 'your Beacon page'}\n")
+              f"Why: {reason}\n\nOpen the Workflows tab to read it and answer: {mesh.public_url() or 'your Beacon page'}\n",
+              **_about(request))
         _agent_notice(request["requester"], request,
                       f"Your workflow request #{request['id']} ({request['title']}) was sent to a person by {actor}"
                       f": {reason}\n\nIt stays pending. Only a person can answer it now.", skip=actor)
@@ -109,8 +111,8 @@ def client_needs_person(request: dict, client: str, person: str) -> None:
         _tell({person.casefold()}, f"Beacon: clearance {request['clearance']} needs you: {request['title'][:80]}",
               f"{request['requester']} asked for {_what(request)} at CL{request['clearance']}: workflow request "
               f"#{request['id']}, \"{request['title'][:200]}\". Your client {client} saw it and cannot answer it: "
-              "CL4 and above are for you in the web page.\n\n"
-              f"Open the Workflows tab: {mesh.public_url() or 'your Beacon page'}\n")
+              "CL4 and above are for you, in the web page or the app.\n\n"
+              f"Open the Workflows tab: {mesh.public_url() or 'your Beacon page'}\n", **_about(request))
     except Exception:
         logger.exception("clearance-4 notice for request %s failed", request.get("id"))
 
@@ -126,7 +128,7 @@ def workflow_waiting_on_owner(request: dict) -> None:
               f"workflow request #{request['id']}, \"{request['title'][:200]}\". It has waited {waited}.\n\n"
               + (f"URGENT, says the requester: {urgent}\n\n" if urgent else "") +
               "As an operator you can answer it yourself. Open the Workflows tab: "
-              f"{mesh.public_url() or 'your Beacon page'}\n", **_urgency(request))
+              f"{mesh.public_url() or 'your Beacon page'}\n", **_urgency(request), **_about(request))
     except Exception:
         logger.exception("owner-silent notice for request %s failed", request.get("id"))
 
@@ -137,6 +139,12 @@ def _urgent_mark(request: dict) -> str:
 
 def _urgency(request: dict) -> dict:
     return {"urgent": True} if request.get("urgent_reason") else {}
+
+
+def _about(request: dict) -> dict:
+    """What the app needs to choose a notification's actions and open the request: ids only, never text."""
+    return {"about": {"workflow": request["id"], "clearance": request["clearance"], "kind": request["kind"],
+                      "card": request.get("card_id")}}
 
 
 def _operators() -> set[str]:
@@ -299,17 +307,23 @@ def _consult_line(request: dict) -> str:
     return "\n\nIt did not consult a peer before asking you." if request.get("consult_flag") else ""
 
 
-def _tell(recipients: set[str], subject: str, body: str, urgent: bool = False) -> None:
-    """Push the subject to every browser these people subscribed, and email the
-    whole message when a mail server is configured; both in the background, each
-    channel within its own MAX_PER_HOUR per person. Urgent notices count apart,
-    so ordinary ones cannot use up their room."""
+def _tell(recipients: set[str], subject: str, body: str, urgent: bool = False, about: dict | None = None) -> None:
+    """Push the subject to every browser and app device these people have, and email
+    the whole message when a mail server is configured; all in the background. Push
+    (browsers and the app together, so having both does not double the room) and email
+    each stay within MAX_PER_HOUR per person. Urgent notices count apart, so ordinary
+    ones cannot use up their room. `about` (a workflow request's ids) lets the app show
+    the right actions; browsers get the subject only."""
     if not recipients:
         return
-    subscribed = {s["email"] for s in push.subscriptions(recipients)}  # the limit counts only notices someone gets
+    reachable = {s["email"] for s in push.subscriptions(recipients)}  # the limit counts only notices someone gets
+    if apns.configured():
+        reachable |= {d["email"] for d in app_devices.apns_targets(recipients)}
     kind = "urgent " if urgent else ""
-    push.send({r for r in subscribed if _within_limit(kind + "push " + r)}, subject.removeprefix("Beacon: "),
-              **({"urgent": True} if urgent else {}))
+    pushed = {r for r in reachable if _within_limit(kind + "push " + r)}
+    title = subject.removeprefix("Beacon: ")
+    push.send(pushed, title, **({"urgent": True} if urgent else {}))
+    apns.send(pushed, title, urgent=urgent, about=about)
     if not configured():
         return
     allowed = [r for r in sorted(recipients) if _within_limit(kind + r)]

@@ -18,7 +18,7 @@ def _agent(id_, owner=None):
 @pytest.fixture
 def told(monkeypatch):
     sent = []
-    monkeypatch.setattr(notify, "_tell", lambda to, subject, body: sent.append((sorted(to), subject, body)))
+    monkeypatch.setattr(notify, "_tell", lambda to, subject, body, **_: sent.append((sorted(to), subject, body)))
     return sent
 
 

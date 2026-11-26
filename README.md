@@ -1508,6 +1508,23 @@ browser session. It logs in once and Beacon gives the device a token of its own.
   vector for both sides.
 - **What is recorded.** Actions from the app are recorded under the person,
   with `via` = `app` in the audit log.
+- **Notifications (APNs).** The app sends its APNs token to
+  `PUT /api/app/devices/self/apns` at each launch. Beacon then sends the app
+  the same notices as the browsers get, through Apple's push service, holding
+  only the subject line. Browsers and the app share one limit of 10 per hour to
+  a person. A workflow request also carries its ids and a category, which
+  chooses the actions the notification shows:
+
+  | Category | When | Actions |
+  |---|---|---|
+  | `WF_APPROVE` | approval or review, CL3 and below | Approve, Reject (on the lock screen, after unlocking), Open |
+  | `WF_HUMAN` | any request at CL4 or CL5 | opens the app, where Face ID signs the answer |
+  | `WF_OPEN` | decision, question, handoff | opens the app |
+
+  CL4/CL5 and urgent requests are Time Sensitive (they break through Focus).
+  To turn it on, set the four `BEACON_APNS_*` settings in `.env` (see
+  `.env.example`) from your Apple Developer account, and let Beacon reach
+  `api.push.apple.com:443`. Without them the app works, without notifications.
 
 ## MCP server
 
@@ -1565,6 +1582,7 @@ this one credential.
 | `GET` | `/auth/app/config` | No login needed. What the native app needs to log in: `issuer`, `client_id`, `api`. 404 without `ZITADEL_APP_CLIENT_ID` |
 | `POST` | `/auth/app/login` | No login needed. `{id_token, public_key, name, signature}` from the app; answers `{token, device_id, email, name, role, idle_days}`. See [Native app login](#native-app-login) |
 | `GET` | `/api/app/devices` | Devices logged in through the app: your own, or everyone's for an operator. `current` marks the one asking |
+| `PUT` | `/api/app/devices/self/apns` | The app's APNs token: `{token, env}`, `env` being `sandbox` (a build from Xcode) or `production` (TestFlight). App devices only |
 | `DELETE` | `/api/app/devices/{id}` | Log a device out: your own (the app's logout), or anyone's for an operator |
 | `GET` | `/api/clearances` | Clearance registry — every gated capability, its clearance, and why |
 | `POST` | `/api/agents/{id}/deploy?confirm=true` | Install/bring up (streamed) — CL3 |
@@ -1759,6 +1777,7 @@ backend/
   templates.py    config templates: load, validate, deep-merge under `desired`
   push.py         Web Push to people's browsers (encryption, VAPID, subscriptions)
   app_devices.py  native app login: device tokens, Face ID signatures for CL4/CL5
+  apns.py         notifications to the native app through Apple's push service
   drivers/
     hermes.py     the only driver so far
 fleet/            the YAML form of the fleet, for import and export (real files gitignored)
