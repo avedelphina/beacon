@@ -101,7 +101,10 @@ def test_the_member_list_holds_only_what_the_design_names():
 
     assert sorted((m, p.pattern) for m, p, _ in members._ROUTES if "agents" in p.pattern) == [
         ("GET", "/api/agents"), ("GET", "/api/agents/(?P<id>[^/]+)"), ("GET", "/api/agents/(?P<id>[^/]+)/logs"),
+        ("GET", "/api/agents/(?P<id>[^/]+)/secrets"),
         ("GET", "/api/agents/(?P<id>[^/]+)/status"), ("POST", "/api/agents/(?P<id>[^/]+)/restart"),
+        ("POST", "/api/agents/(?P<id>[^/]+)/secrets"),
+        ("POST", "/api/agents/(?P<id>[^/]+)/secrets/[^/]+/reveal"),
     ]
 
 

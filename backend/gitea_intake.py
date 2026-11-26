@@ -15,10 +15,11 @@ import time
 from datetime import datetime
 from urllib.parse import urlsplit
 
-from . import board, intake
+from . import board, intake, mesh, store
 
 SECRET_ENV = "BEACON_INTAKE_SECRET_GITEA"
 REPOSITORY_IDS_ENV = "BEACON_GITEA_REPOSITORY_IDS"
+AGENT_MAP_ENV = "BEACON_GITEA_AGENT_MAP"
 BASE_URL_ENV = "BEACON_GITEA_BASE_URL"
 DEFAULT_BASE_URL = "https://git.ocean"
 EVENT = "pull_request"
@@ -81,6 +82,119 @@ def verify(body: bytes, signature: str | None) -> None:
     expected = hmac.new(configured.encode(), body, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, signature):
         raise intake.IntakeRefused("Gitea signature does not match")
+
+
+def _agent_mapping_config() -> tuple[dict[str, str], bool]:
+    """Return the configured login map and whether its complete contract is valid.
+
+    The mapping is configuration, not data supplied by the forge. Invalid JSON,
+    duplicate case-folded logins, or unknown/non-agent targets fail closed and
+    leave existing PR memberships untouched. An omitted map is inactive; an
+    explicitly empty JSON object is valid and removes mapped participants on the
+    next complete snapshot.
+    """
+    raw = os.environ.get(AGENT_MAP_ENV, "")
+    if not raw.strip():
+        return {}, False
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}, False
+    if not isinstance(value, dict):
+        return {}, False
+    mapped: dict[str, str] = {}
+    for login, agent_id in value.items():
+        if (not isinstance(login, str) or not isinstance(agent_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}", login)
+                or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", agent_id)):
+            return {}, False
+        key = login.casefold()
+        if key in mapped:
+            return {}, False
+        try:
+            agent = store.get_agent(agent_id)
+        except (store.NotFound, store.InvalidId):
+            return {}, False
+        if agent.reach is None or agent.client is not None or not mesh.board_allowed(agent):
+            return {}, False
+        mapped[key] = agent_id
+    return mapped, True
+
+
+def conversations_on() -> bool:
+    """The map is set, validly or not. Unset, a PR card is an ordinary intake card; set but
+    broken stays closed, so a typo cannot widen who sees a conversation."""
+    return bool(os.environ.get(AGENT_MAP_ENV, "").strip())
+
+
+def agent_mapping() -> dict[str, str]:
+    return _agent_mapping_config()[0]
+
+
+def _gitea_login(value) -> str:
+    if not isinstance(value, dict):
+        return ""
+    login = _text(value.get("login"), 120)
+    return login if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}", login) else ""
+
+
+def _participant_logins(pull_request: dict) -> list[str]:
+    """Extract only Gitea identities that the event explicitly names."""
+    values = [_gitea_login(pull_request.get("user"))]
+    assignee = pull_request.get("assignee")
+    values.append(_gitea_login(assignee))
+    for item in pull_request.get("assignees", []) if isinstance(pull_request.get("assignees"), list) else []:
+        values.append(_gitea_login(item))
+    for item in pull_request.get("requested_reviewers", []) if isinstance(pull_request.get("requested_reviewers"), list) else []:
+        values.append(_gitea_login(item))
+    return sorted({value for value in values if value}, key=str.casefold)
+
+
+def _participant_snapshot(pull_request: dict) -> tuple[list[tuple[str, str]], bool]:
+    """Return mapped participants and whether the PR's membership fields are complete.
+
+    An omitted or malformed list is not an authoritative empty roster: the
+    conversation keeps its existing members. A present-but-empty list is
+    complete, so a removed reviewer can lose access on the next event.
+    """
+    values: list[str] = []
+    complete = True
+    user = pull_request.get("user")
+    if "user" not in pull_request or not isinstance(user, dict):
+        complete = False
+    for field in ("assignee", "assignees", "requested_reviewers"):
+        if field not in pull_request:
+            complete = False
+        value = pull_request.get(field)
+        if field == "assignee":
+            if value is not None and not isinstance(value, dict):
+                complete = False
+        elif not isinstance(value, list):
+            if value is not None:
+                complete = False
+    mapping, valid = _agent_mapping_config()
+    if not complete or not valid:
+        return [], False
+    author_login = _gitea_login(pull_request.get("user"))
+    if author_login:
+        values.append(author_login)
+    assignee = pull_request.get("assignee")
+    if isinstance(assignee, dict) and (login := _gitea_login(assignee)):
+        values.append(login)
+    for item in pull_request.get("assignees", []) if isinstance(pull_request.get("assignees"), list) else []:
+        if (login := _gitea_login(item)):
+            values.append(login)
+    for item in pull_request.get("requested_reviewers", []) if isinstance(pull_request.get("requested_reviewers"), list) else []:
+        if (login := _gitea_login(item)):
+            values.append(login)
+    return [(login, mapping[login.casefold()]) for login in sorted(set(values), key=str.casefold)
+            if login.casefold() in mapping], True
+
+
+def mapping_status() -> dict:
+    """Operator-facing summary without exposing any secret or remote payload."""
+    mapping, valid = _agent_mapping_config()
+    return {"configured": conversations_on(), "valid": valid, "entries": len(mapping)}
 
 
 def _text(value, limit: int) -> str:
@@ -200,11 +314,27 @@ def record(source: str, event: str | None, body: bytes) -> dict:
         f"```json\n{_safe_event_data(repository, pull_request, repository_id, full_name, number, action)}\n```")
     label = f"{full_name}#{number}: {title}"[:200]
 
-    card, _, _ = board.create_card_with_reference(
+    card, _, created, accepted = board.create_card_with_reference(
         _AUTHOR, card_title, card_body,
-        next_action="Triage: decide whether this pull request is eligible for the approved merge workflow.",
+        next_action=("Use this Beacon PR conversation to coordinate review; Beacon will not change Gitea."
+                     if conversations_on() else
+                     "Triage: decide whether this pull request is eligible for the approved merge workflow."),
         provider="gitea", kind="pull_request", external_id=external_id,
         url=url, label=label, last_seen_state=f"{state} ({action})",
         last_seen_at=time.time(), external_event_at=event_time,
     )
-    return card
+    participants, complete = _participant_snapshot(pull_request)
+    added: set[str] = set()
+    if accepted:
+        card, added_rows = board.sync_participants(
+            _AUTHOR, card["id"], participants, external_event_at=event_time,
+            complete=complete)
+        added = {agent_id for _, agent_id in added_rows}
+    event_text = (
+        f"Gitea pull_request event ({action}); external context only. Beacon has taken no action on Gitea.\n"
+        f"```json\n{_safe_event_data(repository, pull_request, repository_id, full_name, number, action)}\n```"
+    )
+    board.record_gitea_event(_AUTHOR, card["id"], event_text)
+    if not created and accepted:
+        board.notify_participants(card["id"], exclude=added)
+    return board.get_card(card["id"])

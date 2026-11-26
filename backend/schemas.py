@@ -26,6 +26,10 @@ def _reject_ssh_option_injection(value: str, field: str) -> str:
     return value
 
 
+class SecretError(Exception):
+    """A secret could not be moved. The message never carries the value."""
+
+
 class SSHConfig(BaseModel):
     user: str
     key: str | None = None
@@ -167,7 +171,7 @@ class AgentClient(BaseModel):
     @classmethod
     def _clearance_below_four(cls, v: int) -> int:
         if v < 0 or v > 3:
-            raise ValueError("max_clearance is 0 to 3: CL4 and above are for a person in the web page")
+            raise ValueError("max_clearance is 0 to 3: CL4 and above are for a person in the web page or the app")
         return v
 
     @field_validator("acts_for")

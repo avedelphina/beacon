@@ -4,17 +4,19 @@ import hashlib
 import hmac
 import json
 import time
+from types import SimpleNamespace
 
 import pytest
 
-from backend import board, gitea_intake, intake, opstore
+from backend import board, board_mcp, gitea_intake, intake, members, opstore, policy, projects, store
+from backend.schemas import Agent, Host
 
 SECRET = "gitea-webhook-test-secret"
 REPOSITORY_ID = 42
 
 
 def _event(*, repository_id=REPOSITORY_ID, number=15, action="opened", title="Review me", url=None,
-           updated_at=None):
+           updated_at=None, author="contributor", assignees=None, requested_reviewers=None):
     return {
         "action": action,
         "number": number,
@@ -29,7 +31,10 @@ def _event(*, repository_id=REPOSITORY_ID, number=15, action="opened", title="Re
             "state": "open",
             "merged": False,
             "draft": False,
-            "user": {"login": "contributor"},
+            "user": {"login": author},
+            "assignee": None,
+            "assignees": [{"login": login} for login in (assignees or [])],
+            "requested_reviewers": [{"login": login} for login in (requested_reviewers or [])],
             "head": {"ref": "feature/review"},
             "base": {"ref": "main"},
             **({"updated_at": updated_at} if updated_at is not None else {}),
@@ -56,6 +61,21 @@ def _post(client, body: bytes, **headers):
 def _cards():
     with opstore.connect() as db:
         return [dict(row) for row in db.execute("SELECT * FROM cards ORDER BY id")]
+
+
+def _add_board_agent(agent_id: str, *, board: bool = True, owner: str | None = None):
+    store.upsert_host(Host.model_validate({"id": f"host-{agent_id}", "address": "10.0.0.8",
+                                           "ssh": {"user": "u", "key": "/k"}}))
+    fields = {"id": agent_id, "type": "hermes", "host": f"host-{agent_id}",
+              "reach": {"endpoint": f"http://{agent_id}.test:9900",
+                        "network": "tailnet", "board": board}}
+    if owner:
+        fields["owner"] = owner
+    store.upsert_agent(Agent.model_validate(fields))
+
+
+def _tool(name):
+    return board_mcp.build()._tool_manager.get_tool(name).fn
 
 
 @pytest.fixture
@@ -320,6 +340,69 @@ def test_out_of_order_event_does_not_regress_the_reference(client, gitea):
     assert reference["last_seen_state"] == "closed (closed)"
 
 
+def test_mapped_pr_participants_are_stored_and_receive_only_new_members(client, gitea, monkeypatch):
+    _add_board_agent("reviewer")
+    _add_board_agent("assignee")
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, json.dumps({"contributor": "reviewer", "maintainer": "assignee"}))
+
+    first = _post(client, _body(assignees=["maintainer"], requested_reviewers=[]))
+    assert first.status_code == 202
+    card = board.get_card(first.json()["card_id"])
+    assert {(p["gitea_login"], p["agent"]) for p in card["participants"]} == {
+        ("contributor", "reviewer"), ("maintainer", "assignee")}
+    assert board.agent_may_see_pr("reviewer", card)
+    assert not board.agent_may_see_pr("unmapped", card)
+    [listed] = board.list_cards()
+    assert listed["participants"] == card["participants"]
+
+    second = _post(client, _body(action="synchronize", assignees=["maintainer"], requested_reviewers=[]))
+    assert second.status_code == 202
+    with opstore.connect() as db:
+        notices = [dict(row) for row in db.execute(
+            "SELECT recipient, body FROM mailbox WHERE kind = 'notice' ORDER BY id")]
+    added_notices = [n["recipient"] for n in notices if "You were added" in n["body"]]
+    event_notices = [n["recipient"] for n in notices if "new external Gitea event" in n["body"]]
+    # One discovery notice each on the first event; on the second event the roster
+    # notice reaches every current participant (the snapshot adds no one).
+    assert sorted(added_notices) == ["assignee", "reviewer"]
+    assert sorted(event_notices) == ["assignee", "reviewer"]
+
+
+def test_mapping_config_change_revokes_access_but_keeps_durable_history(client, gitea, monkeypatch):
+    _add_board_agent("reviewer")
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, json.dumps({"contributor": "reviewer"}))
+    first = _post(client, _body())
+    card_id = first.json()["card_id"]
+    assert "reviewer" in board.participant_ids(board.get_card(card_id))
+
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, "{}")
+    assert _post(client, _body(action="synchronize", updated_at="2026-11-22T13:00:00Z")).status_code == 202
+    assert "reviewer" not in board.participant_ids(board.get_card(card_id))
+
+
+def test_invalid_mapping_fails_closed_and_existing_participants_lose_access(client, gitea, monkeypatch):
+    _add_board_agent("reviewer")
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, json.dumps({"contributor": "reviewer"}))
+    first = _post(client, _body())
+    card_id = first.json()["card_id"]
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, "not-json")
+    assert _post(client, _body(action="synchronize", updated_at="2026-11-22T13:00:00Z")).status_code == 202
+    assert "reviewer" not in board.participant_ids(board.get_card(card_id))
+    assert gitea_intake.mapping_status() == {"configured": True, "valid": False, "entries": 0}
+
+
+def test_stale_event_cannot_add_new_participant(client, gitea, monkeypatch):
+    _add_board_agent("reviewer")
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, json.dumps({"contributor": "reviewer"}))
+    newer = _event(updated_at="2026-11-22T12:00:00Z")
+    assert _post(client, json.dumps(newer, separators=(",", ":")).encode()).status_code == 202
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, json.dumps({"contributor": "reviewer", "maintainer": "reviewer"}))
+    older = _event(updated_at="2026-11-22T11:00:00Z", assignees=["maintainer"])
+    assert _post(client, json.dumps(older, separators=(",", ":")).encode()).status_code == 202
+    [card] = _cards()
+    assert {p["gitea_login"] for p in board.get_card(card["id"])["participants"]} == {"contributor"}
+
+
 def test_malformed_nested_user_data_is_kept_as_empty_text(client, gitea):
     event = _event()
     event["pull_request"]["user"] = "not-an-object"
@@ -329,6 +412,94 @@ def test_malformed_nested_user_data_is_kept_as_empty_text(client, gitea):
     response = _post(client, body)
     assert response.status_code == 202
     assert len(_cards()) == 1
+
+
+def test_event_missing_participant_fields_keeps_the_existing_roster(client, gitea, monkeypatch):
+    _add_board_agent("reviewer")
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, json.dumps({"contributor": "reviewer"}))
+    card_id = _post(client, _body()).json()["card_id"]
+
+    partial = _event(action="synchronize", updated_at="2026-11-22T13:00:00Z")
+    del partial["pull_request"]["requested_reviewers"]
+    assert _post(client, json.dumps(partial, separators=(",", ":")).encode()).status_code == 202
+    assert "reviewer" in board.participant_ids(board.get_card(card_id))
+
+
+def test_pr_card_agents_may_comment_but_not_mutate(client, gitea, monkeypatch):
+    _add_board_agent("reviewer")
+    _add_board_agent("outsider")
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, json.dumps({"contributor": "reviewer"}))
+    card_id = _post(client, _body()).json()["card_id"]
+    ctx = SimpleNamespace(headers={"authorization": "Bearer agent-token"})
+
+    monkeypatch.setattr(board_mcp, "author_for", lambda token: "reviewer")
+    assert _tool("board_card")(ctx=ctx, card_id=card_id)["id"] == card_id
+    assert _tool("card_comment")(ctx=ctx, card_id=card_id, text="Looking at it now.")["id"] == card_id
+    with pytest.raises(PermissionError):
+        _tool("card_update")(ctx=ctx, card_id=card_id, state="doing")
+    with pytest.raises(PermissionError):
+        _tool("workflow_create")(ctx=ctx, card_id=card_id, kind="question", eligible_responder="human",
+                                 capability="test", title="t", summary="s", clearance=0)
+
+    monkeypatch.setattr(board_mcp, "author_for", lambda token: "outsider")
+    with pytest.raises(store.NotFound):
+        _tool("board_card")(ctx=ctx, card_id=card_id)
+
+
+def test_participant_comment_nudges_the_other_participants(client, gitea, monkeypatch):
+    _add_board_agent("reviewer")
+    _add_board_agent("assignee")
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, json.dumps({"contributor": "reviewer", "maintainer": "assignee"}))
+    card_id = _post(client, _body(assignees=["maintainer"], requested_reviewers=[])).json()["card_id"]
+
+    board.comment("reviewer", card_id, "Can you look at the new head?")
+    board.comment("operator", card_id, "Operator note for the thread.")
+    with opstore.connect() as db:
+        rows = [dict(r)["recipient"] for r in db.execute(
+            "SELECT recipient FROM mailbox WHERE kind = 'notice' AND body LIKE '%commented%' ORDER BY id")]
+    # The reviewer nudges assignee (policy allows it); an operator's comment nudges both participants.
+    assert rows == ["assignee", "assignee", "reviewer"]
+
+
+def test_member_sees_a_pr_card_only_through_an_agent_they_own(client, gitea, monkeypatch):
+    _add_board_agent("reviewer", owner="tom@example.com")
+    _add_board_agent("assignee")
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, json.dumps({"contributor": "reviewer", "maintainer": "assignee"}))
+    card = board.get_card(_post(client, _body(assignees=["maintainer"], requested_reviewers=[])).json()["card_id"])
+    assert members.card_visible("tom@example.com", card)
+    assert not members.card_visible("other@example.com", card)
+
+
+def test_without_a_mapping_pr_cards_follow_the_intake_visibility_switches(client, gitea, monkeypatch):
+    monkeypatch.delenv(gitea_intake.AGENT_MAP_ENV, raising=False)
+    _add_board_agent("worker", owner="tom@example.com")
+    intake.set_visibility("operator", members=True, agents=True)
+    card = board.get_card(_post(client, _body()).json()["card_id"])
+    assert intake.agent_may_see("worker", card)
+    assert members.card_visible("tom@example.com", card)
+    assert card["next_action"].startswith("Triage:")
+
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, "not-json")
+    assert not intake.agent_may_see("worker", card)
+    assert not members.card_visible("tom@example.com", card)
+
+
+def test_a_project_does_not_widen_or_offer_a_pr_conversation(client, gitea, monkeypatch):
+    monkeypatch.setenv("BEACON_A2A_SECRET", "test-secret")
+    _add_board_agent("reviewer", owner="tom@example.com")
+    _add_board_agent("outsider", owner="ann@example.com")
+    monkeypatch.setenv(gitea_intake.AGENT_MAP_ENV, json.dumps({"contributor": "reviewer"}))
+    card_id = _post(client, _body()).json()["card_id"]
+    projects.create("operator", "infra", goal="g", done_when="d", owner="outsider")
+    board.update_card("operator", card_id, project="infra")
+
+    listed = projects.get("operator", projects.find("infra")["id"])["card_list"]
+    assert not members.card_filter("ann@example.com")(listed[0])
+    assert not members.card_manageable("ann@example.com", listed[0])
+    assert members.card_manageable("tom@example.com", listed[0])
+    assert not intake.agent_may_see("outsider", listed[0])
+    with pytest.raises(ValueError, match="participants"):
+        board.update_card("beacon", card_id, help_wanted=True)
 
 
 def test_oversized_stream_is_rejected(client, gitea):

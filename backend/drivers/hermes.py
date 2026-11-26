@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 from .. import ssh
-from ..schemas import Agent, Host
+from ..schemas import Agent, Host, SecretError
 
 INSTALL_URL = "https://raw.githubusercontent.com/NousResearch/hermes-agent/a55c972e09177e4db3934915e329993858b247d6/scripts/install.sh"
 INSTALL_SHA256 = "38547c22f4dd2224ba68a13bc3479309abb17e295b2a2ef79c2d1b8293bd822e"
@@ -855,3 +855,77 @@ def mesh_install_docker_script(agent: Agent, beacon_url: str, pull_token: str, c
         '"$py" "$dir/sync.py" "$dir" | tee -a "$dir/sync.log"',
         *_schedule_lines(agent.id, "as root on this host"),
     ]) + "\n"
+
+
+# --- secret files (backend/secret_pipe.py) -----------------------------------
+
+SECRET_EXITS = {3: "something other than a file is at that name", 4: "no such secret",
+                5: "the secret is too large"}
+
+
+def _secret_shell(agent: Agent, host: Host, box: str, script: str, stdin: str | None = None) -> list[str]:
+    """Run `script` inside the agent's beacon-secrets/<box>, as the agent's user (in its
+    container, if it has one), and return what it marked with `BEACON:`. Neither the command
+    nor any error carries a value: values travel only on stdin and marked stdout.
+
+    Not _wrap_for_user: its `sudo -i` expands `$var` in the outer login shell, and a
+    profile's output would mix with the answer.
+    """
+    _validate_agent(agent)
+    container = agent.desired.get("container")
+    home = profile_home(agent)
+    if container:
+        profile = named_profile(agent)
+        home = "${HERMES_HOME:-/opt/data}" + (f"/profiles/{profile}" if profile else "")
+    root = f"{home}/beacon-secrets"
+    inner = (f'set -e; umask 077; mkdir -p "{root}/inbox" "{root}/outbox"; '
+             f'chmod 700 "{root}" "{root}/inbox" "{root}/outbox"; cd "{root}/{box}"; {script}')
+    if container:
+        user = str(agent.desired.get("container_user") or "hermes")
+        if not CONTAINER_RE.fullmatch(user):
+            raise ValueError(f"desired.container_user {user!r} must match {CONTAINER_RE.pattern}")
+        inner = ('d=docker; docker version >/dev/null 2>&1 || d="sudo -n docker"; '
+                 f"$d exec -i -u {user} {container} sh -c {shlex.quote(inner)}")
+    command = f"bash -c {shlex.quote(inner)}"
+    if not container and (os_user := target_user(agent)) and os_user != host.ssh.user:
+        command = f"sudo -n -u {shlex.quote(os_user)} -H {command}"
+    result = ssh.run(host, command, timeout=30, input=stdin)
+    if err := result.transport_error:
+        raise SecretError(err)
+    if not result.ok:
+        raise SecretError(SECRET_EXITS.get(result.returncode) or result.stderr.strip() or "the host command failed")
+    return [line.removeprefix("BEACON:") for line in result.stdout.splitlines() if line.startswith("BEACON:")]
+
+
+# `name` is checked by secret_pipe before it gets here.
+def secret_put(agent: Agent, host: Host, name: str, encoded: str) -> str:
+    """Write the base64 value to inbox/<name>, mode 0600, whole or not at all; returns the path."""
+    quoted = shlex.quote(name)
+    marked = _secret_shell(agent, host, "inbox", (
+        f"if [ -L {quoted} ] || [ -d {quoted} ]; then exit 3; fi; t=$(mktemp .tmp.XXXXXX); "
+        f'base64 -d > "$t" || {{ rm -f "$t"; exit 1; }}; mv -f "$t" {quoted}; echo "BEACON:$(pwd)"/{quoted}'), encoded)
+    if not marked:
+        raise SecretError("the host did not confirm the write")
+    return marked[0]
+
+
+def secret_get(agent: Agent, host: Host, name: str, max_bytes: int) -> str:
+    """outbox/<name> as base64. Leaves the file: secret_remove it once it has arrived."""
+    quoted = shlex.quote(name)
+    marked = _secret_shell(agent, host, "outbox", (
+        f"if [ -L {quoted} ] || [ ! -f {quoted} ]; then exit 4; fi; "
+        f"if [ $(wc -c < {quoted}) -gt {max_bytes} ]; then exit 5; fi; "
+        f"printf BEACON:; base64 < {quoted} | tr -d '\\n'; echo"))
+    if not marked:
+        raise SecretError("the host did not return the secret")
+    return marked[0]
+
+
+def secret_remove(agent: Agent, host: Host, name: str) -> None:
+    _secret_shell(agent, host, "outbox", f"rm -f -- {shlex.quote(name)}")
+
+
+def secret_names(agent: Agent, host: Host) -> list[str]:
+    """What waits in the outbox."""
+    return _secret_shell(agent, host, "outbox",
+                         'for f in *; do if [ -f "$f" ] && [ ! -L "$f" ]; then echo "BEACON:$f"; fi; done')

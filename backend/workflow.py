@@ -90,6 +90,22 @@ def _is_responder(actor: str, eligible_responder: str) -> bool:
     return eligible_responder != "human" and actor.casefold() == eligible_responder.casefold()
 
 
+ROLE_PREFIX = "role:"  # addressed to a class of agent (policy `roles`): any holder may answer
+
+
+def _role(eligible_responder: str) -> str | None:
+    return eligible_responder[len(ROLE_PREFIX):] if eligible_responder.startswith(ROLE_PREFIX) else None
+
+
+def role_holders(requester: str, role: str) -> list[str]:
+    """Who may answer a request to a class: agents of it that the requester may call, never itself.
+    Looked up on every use, so a change of tags or policy takes effect at once."""
+    from . import board, policy  # not at import: board's helpers, and it is loaded after this module
+    if role not in (policy.load() or policy.Policy()).roles:
+        return []
+    return board.eligible_helpers(requester, [role])
+
+
 def _delegate(actor: str) -> tuple[str, int] | None:
     """(the operator's email, the highest clearance it may answer) when `actor` is a client agent acting for an
     operator who still is one, and is switched on. A client reads what its operator reads and answers what
@@ -116,9 +132,9 @@ def _delegate_note(request: dict, actor: str, delegate: tuple[str, int]) -> dict
     if request["state"] != "pending":
         why = f"it is {request['state']}"
     elif request["require_human"]:
-        why = "it was sent to a person: only a person in the web page can answer it"
+        why = "it was sent to a person: only a person in the web page or the app can answer it"
     elif request["clearance"] >= 4:
-        why = "CL4 and above need your operator in the web page: tell them, do not wait for it"
+        why = "CL4 and above need your operator in the web page or the app: tell them, do not wait for it"
     elif request["clearance"] > ceiling:
         why = f"it is above this client's ceiling (CL{ceiling})"
     elif request["requester"].casefold() in (actor.casefold(), email):
@@ -137,6 +153,9 @@ def _annotate(request: dict, actor: str | None) -> dict:
 
 def _visible(request: dict, actor: str, human: bool = False) -> bool:
     eligible_responder = request["eligible_responder"]
+    if (role := _role(eligible_responder)) is not None and (
+            (human and _is_operator(actor)) or (not human and actor in role_holders(request["requester"], role))):
+        return True
     if (
         actor == request["requester"]
         or _is_responder(actor, eligible_responder)
@@ -310,6 +329,10 @@ def _eligible(request: dict, actor: str, human: bool) -> bool:
     # session is required even if an untrusted caller uses the same string.
     if eligible_responder == "human":
         return human and not (request["clearance"] >= 3 and actor == request["requester"])
+    if (role := _role(eligible_responder)) is not None:
+        if human:  # a person who runs the fleet may stand in for a class
+            return _is_operator(actor) and not (request["clearance"] >= 3 and actor == request["requester"])
+        return actor in role_holders(request["requester"], role)
     if _is_responder(actor, eligible_responder):
         return not (request["clearance"] >= 3 and actor.casefold() == request["requester"].casefold())
     return False
@@ -348,6 +371,11 @@ def validate_participants(requester: str, eligible_responder: str) -> None:
     if source is not None and not mesh.has_board(source):
         raise UnauthorizedWorkflowAccess(f"{requester} is not authorized for workflow board access")
     if eligible_responder in {"human", requester}:
+        return
+    if (role := _role(eligible_responder)) is not None:
+        if not role_holders(requester, role):
+            raise WorkflowError(f"no agent of class {role!r} can be asked by {requester}: see role_list for the classes "
+                                "and who in them you may ask")
         return
     if "@" in eligible_responder:
         if eligible_responder.casefold() not in known_people():
@@ -445,6 +473,8 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
     if not isinstance(clearance, int) or clearance < 0 or clearance > 5:
         raise WorkflowError("clearance must be an integer from 0 to 5")
     validate_kind_for_clearance(kind, clearance)
+    if _role(eligible_responder) is not None and kind == "handoff":
+        raise WorkflowError("a handoff names one agent; to let any agent of a class take a card, ask for help with it")
     _validate_requester_responder(requester, eligible_responder, clearance)
     validate_participants(requester, eligible_responder)
     eligible_responder = _route_clearance(requester, eligible_responder, clearance)
@@ -522,14 +552,19 @@ def list_requests(*, card_id: int | None = None, state: str | None = None,
             for name, as_person in viewers:
                 if as_person:
                     alternatives.append("(requester = ? OR lower(eligible_responder) = lower(?) OR eligible_responder = 'human'"
-                                        " OR require_human = 1" + (" OR clearance >= 4)" if _is_operator(name) else ")"))
-                else:
-                    alternatives.append("(requester = ? OR (eligible_responder != 'human' AND lower(eligible_responder) = lower(?)))")
+                                        " OR require_human = 1" + (" OR clearance >= 4 OR eligible_responder LIKE 'role:%')"
+                                                                  if _is_operator(name) else ")"))
+                else:  # requests to a class are filtered below: who holds it is not in this table
+                    alternatives.append("(requester = ? OR (eligible_responder != 'human' AND lower(eligible_responder) = lower(?))"
+                                        " OR eligible_responder LIKE 'role:%')")
                 params.extend((name, name))
             clauses.append("(" + " OR ".join(alternatives) + ")")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = db.execute(f"SELECT * FROM workflow_requests {where} ORDER BY updated_at DESC, id DESC", params).fetchall()
-    return [_annotate(_decode(row), actor) for row in rows]
+    found = [_decode(row) for row in rows]
+    if actor is not None:
+        found = [r for r in found if _role(r["eligible_responder"]) is None or _visible(r, actor, human)]
+    return [_annotate(r, actor) for r in found]
 
 
 def get(request_id: int, actor: str | None = None, human: bool = False) -> dict:
@@ -569,12 +604,12 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
             raise WorkflowError(f"workflow request {request_id} is {request['state']}")
         if request["require_human"] and not human:
             raise HumanApprovalRequired(f"workflow request {request_id} was sent to a person: only a person in the "
-                                        f"web page may answer it ({request['escalated_reason']})")
+                                        f"web page or the app may answer it ({request['escalated_reason']})")
         if delegate is not None and request["clearance"] >= 4 and _visible(request, actor, False):
             # Not for a client to answer, and not for it to leave unmentioned: the operator is told now.
             _tell(notify.client_needs_person, request, actor, delegate[0])
             raise HumanApprovalRequired(f"workflow request {request_id} is clearance {request['clearance']}: only a person in the "
-                                        f"web page may answer it. {delegate[0]} has been told")
+                                        f"web page or the app may answer it. {delegate[0]} has been told")
         if not _eligible(request, actor, human):
             why = f": {_delegate_note(request, actor, delegate)['why_not']}" if delegate is not None else ""
             raise UnauthorizedResponder(f"{actor} is not eligible to respond to workflow request {request_id}{why}")
@@ -666,7 +701,7 @@ def escalate(request_id: int, *, actor: str, human: bool, reason: str, context_i
     """Send a pending request to a person. A clearance belongs to the capability (a CL3 action stays CL3 when
     Beacon runs it), so a request cannot become a CL4 one; this is the one-way step instead. Whoever may
     answer it, an agent reviewing it included, can say "I am not sure, a person should look at this".
-    The request keeps its plan binding and clearance, and from then on only a person in the browser may
+    The request keeps its plan binding and clearance, and from then on only a person (web page or app) may
     answer it. Nothing clears the flag but that person's answer. CL4 and CL5 requests already need one."""
     actor = _validate_actor(actor)
     if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 300:
@@ -681,7 +716,7 @@ def escalate(request_id: int, *, actor: str, human: bool, reason: str, context_i
         if request["state"] != "pending":
             raise WorkflowError(f"workflow request {request_id} is {request['state']}")
         if request["clearance"] >= 4:
-            raise WorkflowError("CL4 and CL5 requests already need a person in the web page")
+            raise WorkflowError("CL4 and CL5 requests already need a person in the web page or the app")
         if request["require_human"]:
             return get(request_id)  # already sent to a person: nothing to add, nothing to record
         if not _eligible(request, actor, human):

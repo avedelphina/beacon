@@ -42,10 +42,11 @@ class SSHResult:
         return None
 
 
-def run(host: Host, command: str, timeout: int = 10) -> SSHResult:
+def run(host: Host, command: str, timeout: int = 10, input: str | None = None) -> SSHResult:
+    """`input` goes to the remote command's stdin: what must not show in `ps` goes there."""
     cmd = _base_cmd(host) + [command]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, input=input)
         return SSHResult(ok=proc.returncode == 0, stdout=proc.stdout, stderr=proc.stderr, returncode=proc.returncode)
     except subprocess.TimeoutExpired:
         return SSHResult(ok=False, stdout="", stderr="ssh timed out", returncode=None)
