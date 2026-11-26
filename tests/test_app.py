@@ -119,7 +119,8 @@ def test_restart_with_confirm_runs(client, host_and_agent, fake_ssh):
 
 def test_version_endpoint(client):
     from backend.app import VERSION
-    assert client.get("/api/version").json() == {"version": VERSION}
+    from backend.app_devices import API
+    assert client.get("/api/version").json() == {"version": VERSION, "api": API}
 
 
 def test_restart_agent_gate_and_run(client, host_and_agent, fake_ssh):

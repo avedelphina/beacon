@@ -14,7 +14,7 @@ from pydantic import AliasChoices, BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import audit, auth, availability, board, bus, clients, cron_store, fleet, gitea_intake, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow, workhours
+from . import app_devices, audit, auth, availability, board, bus, clients, cron_store, fleet, gitea_intake, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow, workhours
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, AgentClient, CronJob, Host
@@ -89,15 +89,38 @@ VERSION = "0.40.0"
 async def _record_actor(request: Request) -> None:
     """Who changes the fleet in this request, for its history. Async so that it
     runs in the request's own context, which the route function then inherits."""
-    user = request.session.get("user") if "session" in request.scope else None
+    user = auth.current_user(request)
     store.ACTOR.set((user or {}).get("email") or mesh.BEACON_PEER)
     audit.VIA.set(
         "mcp" if getattr(request.state, "auth_via_mcp", False)
         else "agent" if getattr(request.state, "workflow_agent", None)
+        else "app" if getattr(request.state, "app_device", None)
         else "session" if user else "open")
 
 
-app = FastAPI(title="Beacon", version=VERSION, lifespan=lifespan, dependencies=[Depends(_record_actor)])
+async def _check_app_signature(request: Request) -> None:
+    """A device logged in through the app signs a request that needs a person at CL4/CL5, after Face ID
+    (backend/app_devices.py). Checked here, where the body can be read, for any request that carries a
+    signature; the gates (_require_human_session, _respond_workflow) then ask for `app_verified`.
+    A signature that does not check out is refused outright rather than ignored: the app meant it."""
+    device = getattr(request.state, "app_device", None)
+    signature = request.headers.get("x-beacon-signature")
+    if device is None or signature is None:
+        return
+    path = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    problem = app_devices.verify_request(device, request.method, path, request.headers.get("x-beacon-signed-at", ""),
+                                         await request.body(), signature)
+    if problem:
+        raise HTTPException(403, problem)
+    request.state.app_verified = True
+
+
+def _app_unverified(request: Request) -> bool:
+    """An app device's request without its Face ID signature: a person up to CL3, not at CL4/CL5."""
+    return bool(getattr(request.state, "app_device", None)) and not getattr(request.state, "app_verified", False)
+
+
+app = FastAPI(title="Beacon", version=VERSION, lifespan=lifespan, dependencies=[Depends(_record_actor), Depends(_check_app_signature)])
 
 
 def _confirm_gate(capability: str, confirm: bool, description: str, target: str | None = None,
@@ -135,8 +158,11 @@ def _require_human_session(request: Request, capability: str, **clearance_params
     clearance, _ = clearance_for(capability, **clearance_params)
     if clearance >= 4 and getattr(request.state, "auth_via_mcp", False):
         raise HTTPException(403, f"{clearance.name} action requires a human browser session; MCP callers cannot execute it")
+    if clearance >= 4 and _app_unverified(request):
+        raise HTTPException(403, f"{clearance.name} action needs Face ID: confirm it in the app")
 
 app.include_router(auth.router)
+app.include_router(app_devices.router)
 app.add_middleware(auth.CSRFMiddleware)
 app.add_middleware(auth.AuthMiddleware)
 # Outermost — added last, so it runs first, request.session exists by
@@ -171,7 +197,8 @@ async def _csp(request, call_next):
 
 @app.get("/api/version")
 def get_version() -> dict:
-    return {"version": VERSION}
+    """`api` changes only when a change breaks the app (backend/app_devices.py), which checks it."""
+    return {"version": VERSION, "api": app_devices.API}
 
 
 @app.get("/api/clearances")
@@ -582,11 +609,12 @@ class WorkflowReviseRequest(BaseModel):
 
 
 def _workflow_human(request: Request) -> bool:
-    """Only an authenticated browser session counts as a human approver."""
+    """A person: a browser session, or a device logged in through the app. Never the MCP token or an
+    agent's. An app device's CL4/CL5 answers also need its Face ID signature (_respond_workflow)."""
     return (
         not getattr(request.state, "auth_via_mcp", False)
         and not getattr(request.state, "workflow_agent", None)
-        and bool(request.session.get("user"))
+        and bool(auth.current_user(request))
     )
 
 
@@ -599,14 +627,14 @@ def _workflow_view_actor(request: Request) -> str:
         return request.state.workflow_agent
     if getattr(request.state, "auth_via_mcp", False):
         return mesh.BEACON_PEER
-    user = request.session.get("user") if "session" in request.scope else None
+    user = auth.current_user(request)
     return (user or {}).get("email") or mesh.BEACON_PEER
 
 
 def _workflow_response_actor(request: Request) -> str:
     if getattr(request.state, "workflow_agent", None):
         return request.state.workflow_agent
-    user = request.session.get("user") if "session" in request.scope else None
+    user = auth.current_user(request)
     return (user or {}).get("email") or mesh.BEACON_PEER
 def _ssh_config_binding(config_file: str | None) -> dict[str, str | None]:
     """Bind config-file contents when SSH delegates routing/auth to that file."""
@@ -665,6 +693,8 @@ def _create_workflow(card_id: int, body: WorkflowCreateRequest, request: Request
 
 
 def _respond_workflow(request_id: int, body: WorkflowResponseRequest, request: Request) -> dict:
+    if _app_unverified(request) and workflow.get(request_id, actor=_workflow_view_actor(request), human=True)["clearance"] >= 4:
+        raise HTTPException(403, f"workflow request {request_id} is CL4 or CL5: confirm the answer with Face ID in the app")
     return workflow.respond(
         request_id, actor=_workflow_response_actor(request), human=_workflow_human(request),
         action=body.action, response=body.response,
@@ -675,7 +705,7 @@ def _respond_workflow(request_id: int, body: WorkflowResponseRequest, request: R
 def _board_author(request: Request) -> str:
     """Who is changing the board from the UI or REST: the logged-in person,
     else "beacon" (MCP bearer, or open mode). Agents use /board/mcp."""
-    user = request.session.get("user") if "session" in request.scope else None
+    user = auth.current_user(request)
     return (user or {}).get("email") or mesh.BEACON_PEER
 
 
@@ -1198,7 +1228,7 @@ class ClientUpdate(BaseModel):
 def _client_person(request: Request) -> str:
     """The signed-in operator a client is made for or changed by: it is bound to a person, so it
     needs one, and open mode (no sign-in) has none."""
-    user = request.session.get("user") if "session" in request.scope else None
+    user = auth.current_user(request)
     email = (user or {}).get("email")
     if not email:
         raise HTTPException(400, "a client is bound to the person who makes it: sign in first")
@@ -1599,7 +1629,7 @@ class PushEndpoint(BaseModel):
 def _push_person(request: Request) -> str:
     """Notifications belong to a person's browser: a logged-in session, not the
     MCP token and not open mode (there is nobody for notify to tell)."""
-    user = request.session.get("user") if "session" in request.scope else None
+    user = auth.current_user(request)
     if getattr(request.state, "auth_via_mcp", False) or not (user or {}).get("email"):
         raise HTTPException(409, "notifications need a person logged in to Beacon")
     return user["email"]

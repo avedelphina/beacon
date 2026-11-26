@@ -199,9 +199,27 @@ def logout(request: Request):
     return RedirectResponse("/", status_code=303)
 
 
+def current_user(request: Request) -> dict | None:
+    """The person behind this request: a device logged in through the app (set by AuthMiddleware,
+    backend/app_devices.py), else the browser session's. Every "who is this" goes through here,
+    so an answer from the app is recorded under the person, not as Beacon."""
+    app_user = getattr(request.state, "app_user", None)
+    if app_user:
+        return app_user
+    return request.session.get("user") if "session" in request.scope else None
+
+
+def _app_user(device: dict) -> dict:
+    return {"email": device["email"], "name": device["name"], "device": device["id"]}
+
+
 @router.get("/auth/me")
 def me(request: Request) -> dict:
-    user = request.session.get("user")
+    # /auth/* passes the middleware untouched, so the app's bearer is resolved here.
+    from . import app_devices
+    authorization = request.headers.get("authorization") or ""
+    device = app_devices.resolve(authorization.removeprefix("Bearer ")) if AUTH_ENABLED else None
+    user = _app_user(device) if device else request.session.get("user")
     if not user:
         raise HTTPException(401, "not logged in")
     return user | {"role": role_for_email(user.get("email"))}
@@ -241,7 +259,8 @@ PWA_FILES = frozenset({"/manifest.json", "/sw.js", "/icon-192.png", "/icon-512.p
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Gates every request except /auth/*, /mesh/*, /a2a/*, /board/*, /enroll/* and /intake/* behind a logged-in session.
+    """Gates every request except /auth/*, /mesh/*, /a2a/*, /board/*, /enroll/* and /intake/* behind a logged-in
+    session, or a device logged in through the app (`Bearer bk_app_…`, backend/app_devices.py).
     A member's session reaches only the few routes in backend/members.py.
     JSON API paths get a 401; anything else (the GUI) gets redirected to
     /auth/login — a plain GET to `/` shouldn't have to know it needs auth,
@@ -263,7 +282,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # operator so CL4/CL5 endpoints can require a real human session.
             request.state.auth_via_mcp = True
             return await call_next(request)
-        agent = agent_for_authorization(request.headers.get("authorization"))
+        from . import app_devices
+        authorization = request.headers.get("authorization")
+        if AUTH_ENABLED and isinstance(authorization, str) and authorization.startswith("Bearer " + app_devices.PREFIX):
+            # A device logged in through the app. Checked before agent tokens, which cost an
+            # HMAC per agent; the prefix tells them apart.
+            device = app_devices.resolve(authorization.removeprefix("Bearer "))
+            if device is None:
+                return JSONResponse({"detail": "this device is logged out: log in again in the app"}, status_code=401)
+            request.state.app_device = device
+            request.state.app_user = user = _app_user(device)
+            return await self._as_person(request, call_next, user, app=True)
+        agent = agent_for_authorization(authorization)
         if agent and (
             request.url.path.startswith("/api/workflows")
             or (request.url.path.startswith("/api/board/cards/") and request.url.path.endswith("/workflows"))
@@ -278,17 +308,28 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         user = request.session.get("user")
         if user:
-            role = role_for_email(user.get("email"))
-            if role == "operator":
-                return await call_next(request)
-            if role == "member":
-                from . import members
-                denied = members.check(request.method, request.url.path, user["email"])
-                if denied is not None:
-                    return JSONResponse({"detail": denied[1]}, status_code=denied[0])
-                request.state.member = user["email"].casefold()
-                return await call_next(request)
+            return await self._as_person(request, call_next, user, app=False)
+        return self._refuse(request)
+
+    async def _as_person(self, request: Request, call_next, user: dict, app: bool):
+        """The same rules for a browser session and an app device: the role read now, from the email."""
+        role = role_for_email(user.get("email"))
+        if role == "operator":
+            return await call_next(request)
+        if role == "member":
+            from . import members
+            denied = members.check(request.method, request.url.path, user["email"])
+            if denied is not None:
+                return JSONResponse({"detail": denied[1]}, status_code=denied[0])
+            request.state.member = user["email"].casefold()
+            return await call_next(request)
+        if not app:
             request.session.clear()  # taken off the lists since it logged in
+        # An app device stays registered: if the person is named again, it works again (until idle expiry).
+        return self._refuse(request)
+
+    @staticmethod
+    def _refuse(request: Request):
         if request.url.path.startswith("/api/"):
             return JSONResponse({"detail": "not authenticated"}, status_code=401)
         return RedirectResponse("/auth/login")

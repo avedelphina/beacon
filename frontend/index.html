@@ -83,6 +83,20 @@
       </div>
       <p class="empty" id="clients-empty" hidden>No clients yet.</p>
     </section>
+
+    <section class="clients-panel" id="devices-panel" hidden>
+      <div class="view-head">
+        <h2>App devices</h2>
+      </div>
+      <p class="hint">Phones and tablets logged in through the Beacon app. A device stays logged in until it has not been
+      used for 30 days. Log one out here if it is lost: it stops working at once.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Device</th><th>Person</th><th>Logged in</th><th>Last used</th><th></th></tr></thead>
+          <tbody id="devices-body"></tbody>
+        </table>
+      </div>
+    </section>
   </section>
 
   <section id="templates-view" class="view">

@@ -1,0 +1,19 @@
+{
+  "about": "Test vector for the app's signatures (backend/app_devices.py). The key is a fixed test key (private scalar 0x0102...20), published here on purpose; it is no device's. ECDSA signatures are randomized: an implementation checks that it builds the same message and that the signature verifies.",
+  "public_key": "BFFcPW6545a5BNP+yn9U/c0MwemXvzddylFa0KbDtANfRTa+OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q=",
+  "private_scalar_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "login": {
+    "id_token": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.c2lnbmF0dXJl",
+    "nonce": "QmmIlDHjExlm_K9qRXFBlD7Sw1tbkXrmLLM5VG9SNVE",
+    "message": "beacon-app-v1\nlogin\n9a9683d5d2bceeabc8c8219b8a37eb5644b0bce705fd265898b6a3c1af74f166",
+    "signature": "MEQCIB+sH3+5ZjxbNut8scSYsoDFnsC6rKnl31gWSxE04jCpAiAKaZmmzIqPXzvh7QyxX8nLvQBLE72idGt+gjJVghTg2Q=="
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/workflows/17/respond",
+    "signed_at": "1795000000.25",
+    "body": "{\"action\":\"approved\",\"response\":{},\"plan_revision\":\"r1\",\"plan_hash\":\"h1\"}",
+    "message": "beacon-app-v1\nPOST\n/api/workflows/17/respond\n1795000000.25\nf66f1d14bf2f91eee37efd61650667cc8fa121664c1278ee6c4f9d0353fed41b",
+    "signature": "MEQCIAE4B/99MXEeUihvi2qaT/RF7MEpIkSfKEvCoccNhQfWAiBwvswh8JPNVBatzQOkWS8hYKhlidkFa9u62v9Gqnyy/Q=="
+  }
+}

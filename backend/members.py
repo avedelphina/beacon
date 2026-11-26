@@ -21,7 +21,8 @@ What a member may do, and why those:
   comments, state changes. An agent's owner hears from it, and it from them;
 - answer approvals and decisions that concern their agents: what the agent asks
   of "a human" is asked of its owner.
-- turn on notifications in their own browser (backend/push.py).
+- turn on notifications in their own browser (backend/push.py);
+- use the native app, and see and log out their own devices (backend/app_devices.py).
 Nothing else: no hosts, templates, policy, cron, config, deploy, enrollment,
 or any other person's agent.
 """
@@ -61,6 +62,10 @@ _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject i
     ("GET", r"/api/push", None),
     ("POST", r"/api/push", None),
     ("DELETE", r"/api/push", None),
+    # Their own devices logged in through the app; the routes themselves keep a member to their own
+    # (backend/app_devices.py).
+    ("GET", r"/api/app/devices", None),
+    ("DELETE", r"/api/app/devices/[^/]+", None),
 )]
 
 

@@ -61,6 +61,8 @@ backend/
   notify.py       workflow and health notices: mailbox to agents, email (opt-in SMTP) and push to people
   push.py         Web Push to people's browsers/PWA (RFC 8291 + VAPID, key derived from
                   BEACON_A2A_SECRET); sends only to known push-service hosts
+  app_devices.py  native app login: Beacon-issued device tokens (from a Zitadel native
+                  client's ID token), Secure Enclave signatures required at CL4/CL5
   audit.py        who did what on hosts: a row per action past the confirm gate (host_actions)
   availability.py A2A availability (probe + last pull), health reports from the
                   host sync, quiet-agent detection
@@ -88,6 +90,8 @@ backend/
                   used to validate config paths before push
 fleet/            YAML inventory (see Tech stack)
 frontend/         static page, no build
+apps/contract/    what every native app is tested against (signature test vector);
+                  apps/<platform>/ will hold the apps themselves (docs/ios-app-plan.md)
 mcp/              MCP server service (own Dockerfile + requirements)
 tbot/             Teleport tbot sidecar (own Dockerfile + run.sh)
 scripts/dump_hermes_config_schema.py  regenerates the config-schema snapshot
@@ -221,7 +225,12 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
   so a new route needs a deliberate entry there before a member can use it.
   The role is read on every request, not stored in the cookie.
   Browser mutations require a same-origin `Origin`/`Referer` header (CSRF
-  middleware). `BEACON_MCP_TOKEN` is a static bearer accepted as an
+  middleware). A device logged in through the native app (`Bearer bk_app_…`,
+  `backend/app_devices.py`) is that person, role read per request; it counts as a
+  human up to CL3 on its token alone, and at CL4/CL5 only with a valid
+  signature by its Face ID-gated device key. Who is asking goes through
+  `auth.current_user(request)`, never `request.session` directly.
+  `GET /api/version`'s `api` number goes up only when a change breaks the app. `BEACON_MCP_TOKEN` is a static bearer accepted as an
   alternative credential, scoped to that one token.
 - **The MCP server mirrors the API's confirm gate**: its mutating tools take
   `confirm: bool = False` and describe instead of act without it, on top of
