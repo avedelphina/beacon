@@ -113,3 +113,13 @@ def test_the_policy_flags_a_class_nobody_holds(world):
     assert any("oracle" in p for p in problems)
     with pytest.raises(ValueError, match="needs a description"):
         policy.parse("roles: {oracle: ' '}\n")
+
+
+def test_an_operator_gives_an_open_call_to_the_agent_they_choose(world):
+    board.update_card("a1", world["card"], help_wanted=True, help_roles=["steward"])
+    given = board.update_card(TOM, world["card"], assignee="a2")  # not a steward: the choice is the operator's
+    assert given["assignee"] == "a2" and given["help_by"] is None
+    assert "to a2" in _mail("a1")[-1] and "You were assigned card" in _mail("a2")[-1]
+    assert any("help call closed: given to a2" in e["body"] for e in given["events"])
+    with pytest.raises(ValueError, match="not asking"):
+        board.claim("b1", world["card"])

@@ -1130,7 +1130,8 @@ unfinished: the board already chases those.
 
 **Help wanted.** An unassigned card of an active project can ask for help (`help_wanted`): every agent
 the asker may assign it to gets one notice, and the first `card_claim` takes it. A member's call reaches
-only the agents that member may assign to. One call per card per day.
+only the agents that member may assign to. One call per card per day. Whoever may edit the card can instead give it to an agent of their choosing
+(an operator to any agent, whatever classes the call named), which closes the call and tells who asked.
 
 **Agent classes.** The access policy may declare `roles`, name to what the class is for; an agent
 belongs to every class among its tags, so it can hold several. A call for help may name classes

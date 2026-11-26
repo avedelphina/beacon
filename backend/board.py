@@ -228,7 +228,8 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
     elif card["help_by"] and (help_wanted is False or leaving):
         if help_wanted is False and not leaving:
             _check_may_steer_help(author, card)
-        changes.append(("help_by", "edit", None, "help no longer wanted"))
+        changes.append(("help_by", "edit", None,
+                        f"help call closed: given to {assignee}" if assignee else "help no longer wanted"))
     for column, value in (("title", title), ("body", body)):
         if value is not None and value != (card[column] or ""):
             changes.append((column, "edit", value if column != "title" else _required(value, "title"),
@@ -253,6 +254,12 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
     if any(column == "help_by" and value for column, _, value, _ in changes):
         _ask_for_help(card_id, author)
     new_assignee = next((value for column, _, value, _ in changes if column == "assignee"), None)
+    # Whoever asked for help hears who got the card when someone else chose, before the assignee's own
+    # notice so that the card shows that one as the latest.
+    if card["help_by"] and new_assignee and card["help_by"] != new_assignee:
+        _send_notice(card_id, author, card["help_by"], "comment_notice",
+                     f"{author} gave card #{card_id}, which you asked for help with, to {new_assignee}.\n"
+                     f"Title: {card['title']}")
     if new_assignee:
         _notify_assignee(card_id, author, new_assignee)
     elif note and not changes:
