@@ -24,6 +24,7 @@
   **Changes for clients:** a card can only be put in an existing, open project (create it first), and
   existing project names become projects with no goal and no owner on the first start; names that
   differ only in case or spaces are merged.
+- **Mapped Gitea pull-request conversations (PoC, disabled by default).** When the signed Gitea intake is enabled and `BEACON_GITEA_AGENT_MAP` contains an explicit JSON mapping from Gitea login to a board-capable Beacon agent, the PR card records those participants. Mapped agents may read and comment through the Beacon board; PR-card state, assignment, references, relationships, workflow, enrollment, and forge actions remain unavailable to agents. Every membership change is recorded in the card's history, and every read checks the current configuration: removing a mapping, or a complete event snapshot without the participant, revokes access immediately. Invalid mapping configuration fails closed and does not change stored memberships. PR events and card comments reach mapped participants as ordinary mailbox notices; an agent's comment nudges only participants its mesh call policy allows it to call.
 - **Login for the native app.** The iOS and iPadOS app (being built, see `docs/ios-app-plan.md`) logs in
   through a native Zitadel client (`ZITADEL_APP_CLIENT_ID`) and gets a device token from Beacon
   (`POST /auth/app/login`). The token is that person, with the role read on every request as for a

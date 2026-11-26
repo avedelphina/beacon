@@ -113,7 +113,9 @@ def _owned_agent(email: str, agent_id: str):
 def card_manageable(email: str, card: dict) -> bool:
     """Theirs to change: they made it, their agent holds it, it is an intake card the operators
     opened to members, or it is in a project they or their agent steer."""
-    from . import intake  # not at import: intake imports board, which imports this package's store
+    from . import board, intake  # not at import: intake imports board, which imports this package's store
+    if board.is_pr_conversation(card):
+        return card_visible(email, card)
     if intake.is_intake(card):
         return intake.visibility()["members"]
     if card["created_by"].casefold() == email.casefold() or (
@@ -125,10 +127,12 @@ def card_manageable(email: str, card: dict) -> bool:
 
 def card_filter(email: str):
     """card_visible for a list: what they take part in is looked up once, not per card."""
-    from . import intake
+    from . import board, intake
     mine, seen = owned_ids(email), projects.visible_to(email)
 
     def visible(card: dict) -> bool:
+        if board.is_pr_conversation(card):
+            return bool(board.participant_ids(card) & mine)
         if intake.is_intake(card):
             return card["assignee"] in mine or intake.visibility()["members"]
         return (card["created_by"].casefold() == email.casefold() or card["assignee"] in mine
