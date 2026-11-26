@@ -132,9 +132,9 @@ def _delegate_note(request: dict, actor: str, delegate: tuple[str, int]) -> dict
     if request["state"] != "pending":
         why = f"it is {request['state']}"
     elif request["require_human"]:
-        why = "it was sent to a person: only a person in the web page can answer it"
+        why = "it was sent to a person: only a person in the web page or the app can answer it"
     elif request["clearance"] >= 4:
-        why = "CL4 and above need your operator in the web page: tell them, do not wait for it"
+        why = "CL4 and above need your operator in the web page or the app: tell them, do not wait for it"
     elif request["clearance"] > ceiling:
         why = f"it is above this client's ceiling (CL{ceiling})"
     elif request["requester"].casefold() in (actor.casefold(), email):
@@ -604,12 +604,12 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
             raise WorkflowError(f"workflow request {request_id} is {request['state']}")
         if request["require_human"] and not human:
             raise HumanApprovalRequired(f"workflow request {request_id} was sent to a person: only a person in the "
-                                        f"web page may answer it ({request['escalated_reason']})")
+                                        f"web page or the app may answer it ({request['escalated_reason']})")
         if delegate is not None and request["clearance"] >= 4 and _visible(request, actor, False):
             # Not for a client to answer, and not for it to leave unmentioned: the operator is told now.
             _tell(notify.client_needs_person, request, actor, delegate[0])
             raise HumanApprovalRequired(f"workflow request {request_id} is clearance {request['clearance']}: only a person in the "
-                                        f"web page may answer it. {delegate[0]} has been told")
+                                        f"web page or the app may answer it. {delegate[0]} has been told")
         if not _eligible(request, actor, human):
             why = f": {_delegate_note(request, actor, delegate)['why_not']}" if delegate is not None else ""
             raise UnauthorizedResponder(f"{actor} is not eligible to respond to workflow request {request_id}{why}")
@@ -701,7 +701,7 @@ def escalate(request_id: int, *, actor: str, human: bool, reason: str, context_i
     """Send a pending request to a person. A clearance belongs to the capability (a CL3 action stays CL3 when
     Beacon runs it), so a request cannot become a CL4 one; this is the one-way step instead. Whoever may
     answer it, an agent reviewing it included, can say "I am not sure, a person should look at this".
-    The request keeps its plan binding and clearance, and from then on only a person in the browser may
+    The request keeps its plan binding and clearance, and from then on only a person (web page or app) may
     answer it. Nothing clears the flag but that person's answer. CL4 and CL5 requests already need one."""
     actor = _validate_actor(actor)
     if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 300:
@@ -716,7 +716,7 @@ def escalate(request_id: int, *, actor: str, human: bool, reason: str, context_i
         if request["state"] != "pending":
             raise WorkflowError(f"workflow request {request_id} is {request['state']}")
         if request["clearance"] >= 4:
-            raise WorkflowError("CL4 and CL5 requests already need a person in the web page")
+            raise WorkflowError("CL4 and CL5 requests already need a person in the web page or the app")
         if request["require_human"]:
             return get(request_id)  # already sent to a person: nothing to add, nothing to record
         if not _eligible(request, actor, human):

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Who sees intake cards could be changed with an app token alone.** Since the app login (not yet
+  released), `PUT /api/intake/visibility` accepted a device's token without Face ID, though it was for a
+  person in the web page only. It now needs the Face ID or Touch ID signature, like other access changes.
+- Refusals and notices that said only the web page can answer now name the app too.
+
 ### Added
 
 - **Secret transfer.** Move a password, key or token between a person and an agent, or between two

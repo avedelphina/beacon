@@ -157,9 +157,9 @@ def _require_human_session(request: Request, capability: str, **clearance_params
     """
     clearance, _ = clearance_for(capability, **clearance_params)
     if clearance >= 4 and getattr(request.state, "auth_via_mcp", False):
-        raise HTTPException(403, f"{clearance.name} action requires a human browser session; MCP callers cannot execute it")
+        raise HTTPException(403, f"{clearance.name} action requires a human browser session or the app; MCP callers cannot execute it")
     if clearance >= 4 and _app_unverified(request):
-        raise HTTPException(403, f"{clearance.name} action needs Face ID: confirm it in the app")
+        raise HTTPException(403, f"{clearance.name} action needs Face ID or Touch ID: confirm it in the app")
 
 app.include_router(auth.router)
 app.include_router(app_devices.router)
@@ -700,7 +700,7 @@ def _create_workflow(card_id: int, body: WorkflowCreateRequest, request: Request
 
 def _respond_workflow(request_id: int, body: WorkflowResponseRequest, request: Request) -> dict:
     if _app_unverified(request) and workflow.get(request_id, actor=_workflow_view_actor(request), human=True)["clearance"] >= 4:
-        raise HTTPException(403, f"workflow request {request_id} is CL4 or CL5: confirm the answer with Face ID in the app")
+        raise HTTPException(403, f"workflow request {request_id} is CL4 or CL5: confirm the answer with Face ID or Touch ID in the app")
     return workflow.respond(
         request_id, actor=_workflow_response_actor(request), human=_workflow_human(request),
         action=body.action, response=body.response,
@@ -1007,9 +1007,12 @@ def intake_visibility() -> dict:
 
 @app.put("/api/intake/visibility")
 def set_intake_visibility(body: IntakeVisibilityRequest, request: Request) -> dict:
-    """Who besides operators may see intake cards. Only a person in the web page may change it."""
+    """Who besides operators may see intake cards. Only a person may change it, in the web page or in
+    the app after Face ID or Touch ID: it is an access change, so an app's token alone is not enough."""
     if not _workflow_human(request):
-        raise HTTPException(403, "only a person in the web page may change who sees intake cards")
+        raise HTTPException(403, "only a person in the web page or the app may change who sees intake cards")
+    if _app_unverified(request):
+        raise HTTPException(403, "changing who sees intake cards needs Face ID or Touch ID: confirm it in the app")
     return intake.set_visibility(_board_author(request), members=body.members, agents=body.agents)
 
 

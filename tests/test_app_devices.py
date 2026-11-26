@@ -287,6 +287,25 @@ def test_the_mcp_token_and_agent_tokens_are_still_no_person(secured):
     assert _post(secured, path, body, {"Authorization": "Bearer mcp-secret", "X-Beacon-Signature": "x"}).status_code == 403
 
 
+def test_who_sees_intake_cards_is_not_changed_by_an_app_token_alone(secured):
+    device = logged_in(secured)
+    body = json.dumps({"members": True, "agents": True}).encode()
+    put = lambda headers: secured.put("/api/intake/visibility", content=body,
+                                      headers=headers | {"Content-Type": "application/json"})
+    refused = put(device.headers())
+    assert refused.status_code == 403 and "Face ID" in refused.json()["detail"]
+    assert secured.get("/api/intake/visibility", headers=device.headers()).json() != {"members": True, "agents": True}
+    assert put(device.headers("PUT", "/api/intake/visibility", body)).status_code == 200
+
+
+def test_an_operator_sends_a_request_to_a_person_from_the_app(secured):
+    device = logged_in(secured)
+    path, _ = _request(3, responder="human")
+    sent = secured.post(path.replace("/respond", "/require-human"), json={"reason": "I want to see it"},
+                        headers=device.headers())
+    assert sent.status_code == 200 and sent.json()["require_human"] and sent.json()["escalated_by"] == TOM
+
+
 # --- the format the app implements ---------------------------------------------
 
 def test_the_shared_signature_vector_holds():
