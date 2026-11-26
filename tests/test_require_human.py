@@ -21,7 +21,7 @@ def _agent(id_):
 def told(monkeypatch):
     """The notices people would get: (recipients, subject, body)."""
     sent = []
-    monkeypatch.setattr(notify, "_tell", lambda to, subject, body: sent.append((sorted(to), subject, body)))
+    monkeypatch.setattr(notify, "_tell", lambda to, subject, body, **_: sent.append((sorted(to), subject, body)))
     return sent
 
 

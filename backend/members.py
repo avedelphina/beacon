@@ -65,6 +65,7 @@ _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject i
     # Their own devices logged in through the app; the routes themselves keep a member to their own
     # (backend/app_devices.py).
     ("GET", r"/api/app/devices", None),
+    ("PUT", r"/api/app/devices/self/apns", None),
     ("DELETE", r"/api/app/devices/[^/]+", None),
 )]
 

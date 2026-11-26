@@ -20,6 +20,9 @@ fleet/policy.yaml
 # real Zitadel config + session secret — see .env.example
 .env
 
+# Apple's APNs signing key (BEACON_APNS_KEY_FILE), wherever it is put
+*.p8
+
 # Operational store (mailbox, ...): runtime state, never committed.
 state/
 fleet/policy-history/

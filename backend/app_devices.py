@@ -24,6 +24,7 @@ import math
 import os
 import secrets
 import time
+from typing import Literal
 
 import jwt
 from cryptography.exceptions import InvalidSignature
@@ -169,6 +170,30 @@ def verify_request(device: dict, method: str, path: str, signed_at: str, body: b
     return None if moved else "this signature was already used"
 
 
+def set_apns(device_id: str, token: str, env: str) -> None:
+    """Where Apple delivers this device's notifications. A phone that logged in again keeps its APNs
+    token, so the token moves to the new device row and leaves the old one: one notice, not two."""
+    with opstore.connect() as db:
+        db.execute("UPDATE app_devices SET apns_token = NULL, apns_env = NULL WHERE apns_token = ? AND id != ?",
+                   (token, device_id))
+        db.execute("UPDATE app_devices SET apns_token = ?, apns_env = ? WHERE id = ?", (token, env, device_id))
+
+
+def drop_apns(token: str) -> None:
+    """Apple says the token is no longer valid (the app was deleted, or notifications turned off for good)."""
+    with opstore.connect() as db:
+        db.execute("UPDATE app_devices SET apns_token = NULL, apns_env = NULL WHERE apns_token = ?", (token,))
+
+
+def apns_targets(people: set[str]) -> list[dict]:
+    """The devices of these people that Apple can deliver to, and not idle past their expiry."""
+    people = {p.casefold() for p in people}
+    with opstore.connect() as db:
+        rows = db.execute("SELECT id, email, apns_token, apns_env FROM app_devices"
+                          " WHERE apns_token IS NOT NULL AND last_seen_at > ?", (time.time() - IDLE_SECONDS,)).fetchall()
+    return [dict(r) for r in rows if r["email"] in people]
+
+
 def devices(email: str | None) -> list[dict]:
     """One person's devices, or everyone's (email None: an operator, or open mode)."""
     query = "SELECT id, email, name, created_at, last_seen_at FROM app_devices"
@@ -224,6 +249,21 @@ def _whose(request: Request) -> str | None:
     if not email or auth.role_for_email(email) == "operator":
         return None
     return email
+
+
+class ApnsRegistration(BaseModel):
+    token: str = Field(pattern=r"^[0-9a-fA-F]{64,200}$")  # Apple's device token, as hex
+    env: Literal["sandbox", "production"]
+
+
+@router.put("/api/app/devices/self/apns")
+def register_apns(body: ApnsRegistration, request: Request) -> dict:
+    """The app tells Beacon its APNs token at each launch (Apple may change it at any time)."""
+    device = getattr(request.state, "app_device", None)
+    if device is None:
+        raise HTTPException(409, "only a device logged in through the app has an APNs token")
+    set_apns(device["id"], body.token.lower(), body.env)
+    return {"ok": True}
 
 
 @router.get("/api/app/devices")

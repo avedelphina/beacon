@@ -1,6 +1,6 @@
 # Beacon for iOS and iPadOS — technical plan
 
-Status: decisions taken 2026-11-26 (§8); P1 built on `feat/app-login`. Implements step 2 of the App track in
+Status: decisions taken 2026-11-26 (§8). P1 merged (#127); P2 built on `feat/apns`. Implements step 2 of the App track in
 [ROADMAP.md](../ROADMAP.md), iOS and iPadOS first; macOS later from the same code.
 
 Audience: whoever builds it — a person or an agent with this repository. Each
@@ -219,15 +219,14 @@ The `.p8` is key material: gitignored path, mounted, never in the image.
 | `WF_OPEN` | `decision`, `question`, `handoff` | Open |
 | none | health, quiet, stuck cards | tap opens the app |
 
-`interruption-level: time-sensitive` and `apns-priority: 10` for `WF_HUMAN`
-and for any notice sent with `urgent=True`; everything else `active` with
-priority 5. Time-sensitive needs the Time Sensitive capability on the App ID.
+`interruption-level: time-sensitive` for `WF_HUMAN` and for any notice sent
+with `urgent=True`, `active` for other requests. `apns-priority: 10` for every
+workflow request and urgent notice (someone is waiting), 5 for the rest. Time-sensitive needs the Time Sensitive capability on the App ID.
 It can break through Focus and the notification summary where the person
 allows that, but it does not sound on a muted phone.
 
-**notify.py integration** — builds on the `urgent` flag that the
-working-hours branch (`feat/working-hours`, in progress on 2026-11-26) adds to
-`_tell` and `push.send`; rebase P2 on it. The signature becomes
+**notify.py integration** — builds on the `urgent` flag from working hours
+(0.40.0). The signature becomes
 `_tell(recipients, subject, body, urgent=False, about=None)`:
 `about` is `{"workflow": id, "clearance": n, "kind": k, "card": c}` from
 `workflow_created`, `workflow_escalated`, `client_needs_person` and
