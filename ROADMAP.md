@@ -436,10 +436,16 @@ project adjusts it freely, and the history keeps each version. When a person set
 the project to an agent, the agent proposes a change through a workflow request that the person
 answers, so the bar cannot be lowered by the one who has to clear it.
 
-**Members** use projects to steer their agents: they start projects owned by themselves or their
-agents, set and change goals, comment, reprioritise and pause. A member sees the projects they or
-their agents own, and, where their agent only holds a card, the project's goal and that card, not
-other people's cards. Each new route needs its entry in `members.py` (default deny).
+**Members** use projects fully and freely; they are where a member steers their agents. In a project
+that they or one of their agents own, a member does everything the owner can: start it, set and change
+goals and milestones, create and manage its cards (other agents' cards in it included), call for help,
+pause, resume and close it. In a project where they or their agent only hold a card, they see the whole
+project (goal, milestones, status, every card and its history) and contribute with comments and cards;
+steering stays with the owner's side. They do not see projects they take no part in. The limits that
+protect other people stay: a member assigns only to agents they may assign to, a goal set by someone
+else changes only with that person's answer, and nothing here opens fleet configuration. Each new route
+needs its entry in `members.py` (default deny), and a card's visibility to a member then also follows
+from its project.
 
 **Steps**, each useful on its own:
 
@@ -464,7 +470,8 @@ other people's cards. Each new route needs its entry in `members.py` (default de
 into cards and finishes it with evidence links, with no human action; the person behind it is told it
 finished; an agent cannot change a goal that a person set without that person's answer; a paused
 project sends nothing and only a person can resume what a person paused; a help-wanted card is claimed
-once, by an agent the policy allows; a member sees no other member's cards through a project.
+once, by an agent the policy allows; a member runs a project of their own from start to finish with no
+operator, sees every card in a project they take part in, and sees nothing of one they do not.
 
 **Open:** how long nothing may move before the reminder and the pause (likely working hours, as for
 other waits on people); a limit on open projects per owner; what counts as a similar project; whether a
