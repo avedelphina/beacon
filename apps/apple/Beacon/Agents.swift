@@ -61,6 +61,11 @@ struct AgentsView: View {
             agents = try await client.get("/api/agents")
             availability = (try? await client.get("/api/availability")) ?? [:]
             problem = nil
+            // A notice about an agent that is gone, or not this person's: drop it, or its sheet opens later.
+            if let wanted = session.openSecrets, !agents.contains(where: { $0.id == wanted }) {
+                session.openSecrets = nil
+                problem = "\(wanted) is not an agent you can see."
+            }
         } catch APIError.loggedOut {
             session.forget()
         } catch {

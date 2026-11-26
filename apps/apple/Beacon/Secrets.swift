@@ -38,6 +38,7 @@ struct SecretsView: View {
     @State private var working = false
     @State private var saved: String?
     @State private var problem: String?
+    @State private var confirmClose = false
 
     var body: some View {
         NavigationStack {
@@ -91,7 +92,16 @@ struct SecretsView: View {
             }
             .navigationTitle("Secrets of \(agent)")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { if revealed == nil { dismiss() } else { confirmClose = true } }
+                }
+            }
+            .confirmationDialog("Close and lose this secret?", isPresented: $confirmClose, titleVisibility: .visible) {
+                Button("Close", role: .destructive) { dismiss() }
+            } message: {
+                Text("It is no longer on the agent's host, so it cannot be shown again.")
+            }
             .confirmationDialog("Reveal this secret?", isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }),
                                 titleVisibility: .visible, presenting: asking) { waiting in
                 Button("Reveal with \(Biometry.name)") { reveal(waiting) }
