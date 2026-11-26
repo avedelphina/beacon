@@ -18,6 +18,9 @@
   address and your usual account, see the workflow requests you can see, and answer them as on the
   web page; CL4/CL5 answers ask for Face ID. `apps/contract/` now also holds the API answers the app
   decodes, which `tests/test_app_contract.py` keeps current.
+- **The app is ready for TestFlight**: an app icon, a privacy manifest and the export-compliance
+  declaration, and [`apps/apple/TESTFLIGHT.md`](apps/apple/TESTFLIGHT.md) with the one-time setup, the
+  upload commands and a checklist for a real device. Not uploaded yet.
 - **Agents and board in the app.** Agents with their availability, searchable by name, host or tag; an
   agent's service state, health events and logs, and restarting its gateway behind the same confirm step
   (Beacon's own words are shown first). The board by column: read a card and its history, comment, and

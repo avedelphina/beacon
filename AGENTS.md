@@ -142,7 +142,8 @@ python3 scripts/dump_hermes_config_schema.py [path/to/hermes-agent]
 
 The app: `cd apps/apple && xcodebuild test -project Beacon.xcodeproj -scheme Beacon
 -destination 'platform=iOS Simulator,name=iPhone 17'` (CI: `.github/workflows/apple.yml`,
-only when `apps/` changes). A change to an API answer the app decodes fails
+only when `apps/` changes; it also compiles a device build, which the simulator
+leaves the Secure Enclave code out of). Releasing: `apps/apple/TESTFLIGHT.md`. A change to an API answer the app decodes fails
 `tests/test_app_contract.py` until `apps/contract/` is regenerated; a change that breaks the app
 also raises `app_devices.API`.
 

@@ -1434,8 +1434,8 @@ configured with a fixed API key rather than walked through a browser login.
 ## App and notifications
 
 The page installs as an app (a PWA) on a phone, a tablet or a desktop, and it
-can send notifications. A native iOS and iPadOS app is being built
-([plan](docs/ios-app-plan.md)); its login is described under
+can send notifications. There is also a native iOS and iPadOS app
+([`apps/apple/`](apps/apple), not yet on TestFlight); see
 [Native app login](#native-app-login).
 
 - **Install it.** iPhone and iPad (iOS 16.4 or later): open Beacon in Safari,
@@ -1479,11 +1479,12 @@ session: they contain nothing about the fleet.
 
 ### Native app login
 
-The iOS and iPadOS app lives in [`apps/apple/`](apps/apple) (in progress,
-[plan](docs/ios-app-plan.md)). To run it on a device, copy
-`apps/apple/Config/Local.xcconfig.example` to `Local.xcconfig` with your Apple
-team and bundle id, open `apps/apple/Beacon.xcodeproj` in Xcode, and run. It
-does not keep a browser session. It logs in once and Beacon gives the device a token of its own.
+The iOS and iPadOS app lives in [`apps/apple/`](apps/apple)
+([plan](docs/ios-app-plan.md)): requests you can answer (with lock-screen Approve
+and Reject up to CL3), agents with their state, logs and restart, and the board.
+Setup, running it on a device and TestFlight are in
+[`apps/apple/TESTFLIGHT.md`](apps/apple/TESTFLIGHT.md). It does not keep a
+browser session. It logs in once and Beacon gives the device a token of its own.
 
 - **Setup.** In Zitadel, add a second application to Beacon's project: type
   Native, PKCE, redirect URI `<the app's bundle id>:/oauth/callback`, with user
