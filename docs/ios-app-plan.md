@@ -222,6 +222,8 @@ The `.p8` is key material: gitignored path, mounted, never in the image.
 `interruption-level: time-sensitive` and `apns-priority: 10` for `WF_HUMAN`
 and for any notice sent with `urgent=True`; everything else `active` with
 priority 5. Time-sensitive needs the Time Sensitive capability on the App ID.
+It can break through Focus and the notification summary where the person
+allows that, but it does not sound on a muted phone.
 
 **notify.py integration** — builds on the `urgent` flag that the
 working-hours branch (`feat/working-hours`, in progress on 2026-11-26) adds to
@@ -320,8 +322,8 @@ apps/
 | Screen | API | Notes |
 |---|---|---|
 | Server + login | `/auth/app/config`, `/auth/app/login`, `/api/version` | URL field, "Log in" |
-| **Requests** (default) | `GET /api/workflows?state=pending` | waiting on me first, then others I can see; pull to refresh; badge count |
-| Request detail | `GET /api/workflows/{id}` | title, clearance, kind, summary, card context and links (0.39.2), consulted, options; actions by kind: Approve / Reject / Request changes / choose option / answer text; "Send to a person"; plan_revision/plan_hash sent from what was shown; Face ID sheet for CL ≥ 4 |
+| **Requests** (default) | `GET /api/workflows?state=pending` | waiting on me first, then others I can see; urgent ones (`urgent_reason` set) at the top of each group, marked URGENT; pull to refresh; badge count |
+| Request detail | `GET /api/workflows/{id}` | title, clearance, kind, URGENT with `urgent_reason`, expiry (by default two working days), summary, card context and links (0.39.2), consulted, options; actions by kind: Approve / Reject / Request changes / choose option / answer text; "Send to a person"; plan_revision/plan_hash sent from what was shown; Face ID sheet for CL ≥ 4 |
 | Agents | `GET /api/agents`, `/api/availability` | availability pill, tags, owner; search |
 | Agent detail | `/status`, `/health-events`, `/logs` | Restart: show the `would_run` text, then confirm (`confirm=true`) |
 | Board | `GET /api/board`, card detail, comments | v1: read, comment, change state |
@@ -434,7 +436,10 @@ are fixed; P3 needs P1 merged for anything past login.
 
 **Later, not in this plan:** macOS destination; CL4/CL5 direct actions in the
 app (policy save, decommission — the backend already accepts a signed request);
-widgets; a "trust this CA" option; Xcode Cloud or fastlane.
+widgets; a "trust this CA" option; Xcode Cloud or fastlane; Critical Alerts, so
+that an urgent request sounds on a muted phone (needs an entitlement Apple grants
+on application, which it may refuse; apply only if time-sensitive proves too
+quiet).
 
 ## 7. Docs to update with the code
 

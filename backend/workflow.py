@@ -14,7 +14,7 @@ import logging
 import time
 from typing import Any
 
-from . import mesh, notify, opstore, store
+from . import mesh, notify, opstore, store, workhours
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +174,8 @@ def _card_text(request_id: int, row, kind: str, from_state: str | None, to_state
     label = f"workflow #{request_id} ({row['kind']}) {row['title'][:80]}"
     if kind == "created":
         text = f"{label}: asked {row['eligible_responder']}"
+        if payload.get("urgent_reason"):
+            text += f", URGENT ({payload['urgent_reason']})"
         if payload.get("consulted"):
             return text + f" (after consulting {', '.join(payload['consulted'])})"
         if payload.get("consult_skipped"):
@@ -188,7 +190,7 @@ def _card_text(request_id: int, row, kind: str, from_state: str | None, to_state
     if kind == "revised":
         return f"{label}: plan revised, pending again"
     if kind == "operators_told":
-        return f"{label}: still waiting on {row['eligible_responder']} after {OPERATOR_NUDGE_SECONDS // 3600} h; the operators were told"
+        return f"{label}: still waiting on {row['eligible_responder']}; the operators were told"
     if kind == "escalated":
         return f"{label}: needs a person: {payload.get('reason', '')[:200]}"
     if kind == "expired":
@@ -376,7 +378,28 @@ def _is_operator(email: str) -> bool:
 # that asks, and an operator may always answer it. CL5 (human-only) is an operator. The doc these levels come
 # from (DeepOcean's operating model) names the authority per object class; the owner of the asking agent is
 # the nearest thing Beacon knows, and the operators stay the backstop.
-OPERATOR_NUDGE_SECONDS = 4 * 3600  # a CL4 left this long with a non-operator owner: the operators are told
+OPERATOR_NUDGE_SECONDS = 4 * 3600  # working time (workhours) a CL4 waits on a non-operator owner before operators hear
+URGENT_NUDGE_SECONDS = 30 * 60  # the same for an urgent one, on the clock
+MAX_URGENT_REASON = 300
+
+
+def _default_expiry(now: float, urgent: bool) -> float:
+    """Two working days, so a request asked on Friday afternoon is still there when someone looks. An urgent one
+    cannot wait that long by definition: 24 hours on the clock."""
+    if urgent or workhours.window() is None:
+        return now + 24 * 60 * 60
+    return workhours.after(now, 2 * workhours.day_seconds())
+
+
+def _urgent_reason(urgent_reason, eligible_responder: str) -> str | None:
+    """Why this cannot wait for working hours. A reason, not a flag: the person woken by it reads why."""
+    if urgent_reason is None:
+        return None
+    if not isinstance(urgent_reason, str) or not urgent_reason.strip() or len(urgent_reason) > MAX_URGENT_REASON:
+        raise WorkflowError(f"urgent_reason must say in 1 to {MAX_URGENT_REASON} characters what breaks if this waits")
+    if eligible_responder != "human" and "@" not in eligible_responder:
+        raise WorkflowError("urgent_reason is only for a request to a person; agents answer at any hour")
+    return urgent_reason.strip()
 
 
 def _route_clearance(requester: str, eligible_responder: str, clearance: int) -> str:
@@ -408,7 +431,8 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
            options: list[str] | None, target: dict[str, Any] | None,
            plan_revision: str, plan_hash: str, expires_at: float | None = None,
            now: float | None = None, context_id: str | None = None,
-           consulted: list[dict] | None = None, consult_skipped: str | None = None) -> dict:
+           consulted: list[dict] | None = None, consult_skipped: str | None = None,
+           urgent_reason: str | None = None) -> dict:
     """Create one pending request and its initial history event, on the card as well."""
     if kind not in REQUEST_KINDS:
         raise WorkflowError(f"kind must be one of {', '.join(REQUEST_KINDS)}")
@@ -447,8 +471,9 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
     consulted = _consulted(consulted)
     consult_skipped = _consult_skipped(consult_skipped)
     flag = _consult_flag(requester, eligible_responder, kind, consulted, consult_skipped)
+    urgent_reason = _urgent_reason(urgent_reason, eligible_responder)
     now = time.time() if now is None else now
-    expires_at = now + 24 * 60 * 60 if expires_at is None else expires_at
+    expires_at = _default_expiry(now, urgent_reason is not None) if expires_at is None else expires_at
     if not isinstance(expires_at, (int, float)) or expires_at <= now:
         raise WorkflowError("expires_at must be in the future")
 
@@ -458,15 +483,16 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
         request_id = db.execute(
             "INSERT INTO workflow_requests (card_id, kind, state, requester, eligible_responder, capability, clearance, "
             "title, summary, options_json, target_json, plan_revision, plan_hash, expires_at, created_at, updated_at,"
-            " consulted_json, consult_skipped, consult_flag) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " consulted_json, consult_skipped, consult_flag, urgent_reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (card_id, kind, "pending", requester, eligible_responder, capability.strip(), clearance, title.strip(), summary.strip(),
              json_text(options), json_text(target), plan_revision.strip(), plan_hash.strip(), expires_at, now, now,
-             json_text(consulted), consult_skipped, flag),
+             json_text(consulted), consult_skipped, flag, urgent_reason),
         ).lastrowid
         _event(db, request_id, requester, "created", None, "pending", {
             "kind": kind, "capability": capability.strip(), "clearance": clearance,
             "consulted": [c["agent"] for c in consulted], "consult_skipped": consult_skipped, "consult_flag": flag,
+            "urgent_reason": urgent_reason,
         }, context_id)
     created = get(request_id)
     _tell(notify.workflow_created, created)  # after the commit: a notice must never undo the request
@@ -670,19 +696,24 @@ def escalate(request_id: int, *, actor: str, human: bool, reason: str, context_i
 
 
 def nudge_operators(now: float | None = None) -> int:
-    """A CL4 request addressed to an owner who is not an operator, still pending after OPERATOR_NUDGE_SECONDS: tell
-    the operators once, since they may always answer it. For the scheduler. Returns how many."""
+    """A CL4 request addressed to an owner who is not an operator and still pending: tell the operators once,
+    since they may always answer it. After 4 working hours, or 30 minutes on the clock when urgent. For the
+    scheduler. Returns how many."""
     now = time.time() if now is None else now
     told = []
     with opstore.connect() as db:
         _expire_due(db, now)
         rows = db.execute(
             "SELECT * FROM workflow_requests WHERE state = 'pending' AND clearance = 4 AND operators_told_at IS NULL"
-            " AND created_at <= ? AND eligible_responder LIKE '%@%'", (now - OPERATOR_NUDGE_SECONDS,)).fetchall()
+            " AND eligible_responder LIKE '%@%'").fetchall()
         for row in rows:
             request = _decode(row)
             if _is_operator(request["eligible_responder"]):
                 continue  # an operator already has it
+            due = (request["created_at"] + URGENT_NUDGE_SECONDS if request["urgent_reason"]
+                   else workhours.after(request["created_at"], OPERATOR_NUDGE_SECONDS))
+            if now < due:
+                continue
             db.execute("UPDATE workflow_requests SET operators_told_at = ? WHERE id = ?", (now, request["id"]))
             _event(db, request["id"], "beacon", "operators_told", "pending", "pending", {})
             told.append(request)
@@ -733,7 +764,7 @@ def revise(request_id: int, *, actor: str, plan_revision: str, plan_hash: str,
         if not isinstance(target, dict):
             raise WorkflowError("target must be an object")
         now = time.time()
-        expires_at = now + 24 * 60 * 60 if expires_at is None else expires_at
+        expires_at = _default_expiry(now, request["urgent_reason"] is not None) if expires_at is None else expires_at
         if not isinstance(expires_at, (int, float)) or expires_at <= now:
             raise WorkflowError("expires_at must be in the future")
         db.execute(

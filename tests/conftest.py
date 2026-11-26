@@ -37,6 +37,13 @@ store.FLEET_DIR = Path(tempfile.mkdtemp(prefix="beacon-test-fleet-"))
 
 
 @pytest.fixture(autouse=True)
+def _clock_time(monkeypatch):
+    """Waits for a person count working hours; a test's result must not depend on the day it runs.
+    tests/test_workhours.py sets its own window."""
+    monkeypatch.setenv("BEACON_WORK_HOURS", "always")
+
+
+@pytest.fixture(autouse=True)
 def _board_notices_run_inline(monkeypatch):
     """Assignment notices are delivered from a background thread in production.
     In tests that thread can outlive the test and run after its patches and

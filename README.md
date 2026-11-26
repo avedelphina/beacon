@@ -905,11 +905,24 @@ agent's everything except intake cards the operators keep from agents.
 answers. CL3 is an independent agent's review. **CL4** (execute with human approval) goes to the owner of
 the agent that asks: a request that agent addresses to `human` is sent to its owner when it has one (an
 agent with none, a person, or Beacon asking keeps `human`), and it may also name an operator. An operator may
-always see and answer a CL4, whoever it was addressed to. A CL4 left waiting more than four hours on an
-owner who is not an operator tells the operators once (the scheduler tick does this). **CL5** (human-only)
+always see and answer a CL4, whoever it was addressed to. A CL4 left waiting more than four working hours
+on an owner who is not an operator tells the operators once (the scheduler tick does this). **CL5** (human-only)
 goes to an operator only: `human`, or an operator's email, never an owner who is not one, and only an operator
 can answer it. A CL4 or CL5 addressed to the wrong person is refused with the reason. The agent skill teaches
 agents which to choose. Nobody can answer a request they made.
+
+**Working hours.** Agents run around the clock; people do not. `BEACON_WORK_HOURS` (default
+`Mon-Fri 08:00-17:00 UTC`; set your own time zone, for example `Mon-Fri 08:00-17:00 Europe/Berlin`) is one
+window for the whole fleet. A request's default expiry is two working days, and the four hours before
+operators hear about a silent owner are working hours, so a request made on Friday afternoon is still there
+on Monday. `always` counts clock time instead (default expiry 24 hours). Holidays and per-person hours are
+not known. The first notice is sent as soon as the request is made, at any hour. An `expires_at` set by the
+requester is used as given.
+
+**Urgent requests.** A request to a person may carry `urgent_reason`: what breaks if it waits. It counts the
+clock (operators hear after 30 minutes, default expiry 24 hours), the page and the notices say URGENT with
+that reason, the push asks the device to wake (`Urgency: high`), and urgent notices have their own hourly
+limit. It changes no clearance and approves nothing.
 
 **"I am not sure": sending a request to a person.** Whoever may answer a pending request can call
 `workflow_require_human` (`POST /api/workflows/{id}/require-human`) with a reason. A clearance belongs

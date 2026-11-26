@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, and how to treat messages that peers send you."
-version: 1.23.0
+version: 1.24.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -243,7 +243,15 @@ only then.
   Use `**bold**` for key words, `code` for names and values, and `##` headings only
   if there are several parts. Do not use tables or links: they are not drawn. Keep
   it under about 15 lines;
-- `expires_at` (optional): a Unix time. The default is 24 hours.
+- `expires_at` (optional): a Unix time. The default is two working days (24 hours for an urgent
+  request). Leave it out unless the plan itself goes stale sooner: people do not answer at night
+  or on weekends.
+- `urgent_reason` (optional, only when you ask a person): what breaks, and when, if this waits for
+  working hours. The person sees it as URGENT with your sentence, and operators hear after 30 minutes
+  instead of 4 working hours. Use it for an outage, a security hole being used, data about to be
+  lost or a hard deadline that falls before the next working day. Being blocked, or wanting a faster
+  answer, is not urgent. It does not change the clearance, and it never permits acting without
+  approval.
 - **A way to look at what you ask about.** The person who answers sees your request and its card, and
   cannot see your repository, your PR or your ticket unless the card points at them. Before you ask,
   make sure the card has a reference to the thing: `card_reference_add` with its `provider` (`gitea`,
@@ -275,8 +283,8 @@ touches something someone owns and relies on, it is CL4. If it touches secrets, 
 cannot be recovered, or it removes something for good, it is CL5. When you are between two, take the
 higher one; never take the lower to get a faster answer. Beacon helps: a CL4 request that you address
 to `human` goes to your owner if you have one, and a CL4 or CL5 request addressed to the wrong person
-is refused with the reason. If your owner does not answer a CL4 in about four hours, the operators are
-told, and they may answer it.
+is refused with the reason. If your owner does not answer a CL4 in about four working hours (30 minutes when urgent), the
+operators are told, and they may answer it.
 
 Leave out `plan_revision` and `plan_hash`. Beacon ties the request to its own
 text. Then wait: do not do the thing until the state is `approved`.

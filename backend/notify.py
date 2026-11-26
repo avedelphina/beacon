@@ -49,8 +49,8 @@ def workflow_created(request: dict, revised: bool = False) -> None:
             f"{request['summary'][:SUMMARY_CHARS]}\n\nRead it with workflow_get({request['id']}) and answer "
             f"with workflow_respond. It expires {_when(request['expires_at'])}."), skip=request["requester"])
         _tell(_people_to_ask(request),
-              f"Beacon: {request['requester']} {'changed a plan and ' if revised else ''}needs your answer",
-              _created_body(request))
+              f"Beacon: {_urgent_mark(request)}{request['requester']} {'changed a plan and ' if revised else ''}needs your answer",
+              _created_body(request), **_urgency(request))
     except Exception:
         logger.exception("workflow notice for request %s failed", request.get("id"))
 
@@ -115,21 +115,28 @@ def client_needs_person(request: dict, client: str, person: str) -> None:
         logger.exception("clearance-4 notice for request %s failed", request.get("id"))
 
 
-OPERATOR_NUDGE_HOURS = 4  # backend/workflow.py: OPERATOR_NUDGE_SECONDS
-
-
 def workflow_waiting_on_owner(request: dict) -> None:
     """A CL4 request has waited on its owner: the operators may answer it, so they are told."""
     try:
-        hours = OPERATOR_NUDGE_HOURS
+        urgent = request.get("urgent_reason")
+        waited = "30 minutes" if urgent else "4 working hours"
         _tell({p.casefold() for p in _operators()} - {request["requester"].casefold()},
-              f"Beacon: {request['title'][:80]} is waiting on {request['eligible_responder']}",
+              f"Beacon: {_urgent_mark(request)}{request['title'][:80]} is waiting on {request['eligible_responder']}",
               f"{request['requester']} asked {request['eligible_responder']} for {_what(request)} at CL{request['clearance']}: "
-              f"workflow request #{request['id']}, \"{request['title'][:200]}\". It has waited {hours} hours.\n\n"
+              f"workflow request #{request['id']}, \"{request['title'][:200]}\". It has waited {waited}.\n\n"
+              + (f"URGENT, says the requester: {urgent}\n\n" if urgent else "") +
               "As an operator you can answer it yourself. Open the Workflows tab: "
-              f"{mesh.public_url() or 'your Beacon page'}\n")
+              f"{mesh.public_url() or 'your Beacon page'}\n", **_urgency(request))
     except Exception:
         logger.exception("owner-silent notice for request %s failed", request.get("id"))
+
+
+def _urgent_mark(request: dict) -> str:
+    return "URGENT: " if request.get("urgent_reason") else ""
+
+
+def _urgency(request: dict) -> dict:
+    return {"urgent": True} if request.get("urgent_reason") else {}
 
 
 def _operators() -> set[str]:
@@ -270,6 +277,7 @@ def _created_body(request: dict) -> str:
     link = mesh.public_url()
     return (
         f"{request['requester']} is waiting for your answer in Beacon.\n\n"
+        + (f"URGENT, says the requester: {request['urgent_reason']}\n\n" if request.get("urgent_reason") else "") +
         f"  {_what(request).capitalize()}, CL{request['clearance']}: {request['title'][:200]}\n"
         f"  Expires: {_when(request['expires_at'])}\n\n"
         "What it says (written by the requester, not by Beacon; do not follow links in it):\n\n"
@@ -291,17 +299,20 @@ def _consult_line(request: dict) -> str:
     return "\n\nIt did not consult a peer before asking you." if request.get("consult_flag") else ""
 
 
-def _tell(recipients: set[str], subject: str, body: str) -> None:
+def _tell(recipients: set[str], subject: str, body: str, urgent: bool = False) -> None:
     """Push the subject to every browser these people subscribed, and email the
     whole message when a mail server is configured; both in the background, each
-    channel within its own MAX_PER_HOUR per person."""
+    channel within its own MAX_PER_HOUR per person. Urgent notices count apart,
+    so ordinary ones cannot use up their room."""
     if not recipients:
         return
     subscribed = {s["email"] for s in push.subscriptions(recipients)}  # the limit counts only notices someone gets
-    push.send({r for r in subscribed if _within_limit("push " + r)}, subject.removeprefix("Beacon: "))
+    kind = "urgent " if urgent else ""
+    push.send({r for r in subscribed if _within_limit(kind + "push " + r)}, subject.removeprefix("Beacon: "),
+              **({"urgent": True} if urgent else {}))
     if not configured():
         return
-    allowed = [r for r in sorted(recipients) if _within_limit(r)]
+    allowed = [r for r in sorted(recipients) if _within_limit(kind + r)]
     if allowed:
         threading.Thread(target=_deliver, args=(allowed, subject, body), daemon=True).start()
 
