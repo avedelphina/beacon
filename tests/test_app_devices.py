@@ -306,6 +306,25 @@ def test_an_operator_sends_a_request_to_a_person_from_the_app(secured):
     assert sent.status_code == 200 and sent.json()["require_human"] and sent.json()["escalated_by"] == TOM
 
 
+def test_a_secret_moves_from_the_app_only_with_face_id(secured, monkeypatch):
+    from backend import secret_pipe
+    seen = []
+    monkeypatch.setattr(secret_pipe, "put", lambda agent_id, name, data: seen.append(("put", data)) or "inbox/" + name)
+    monkeypatch.setattr(secret_pipe, "read", lambda agent_id, name: b"s3cret")
+    monkeypatch.setattr(secret_pipe, "remove", lambda agent_id, name: seen.append(("removed", name)))
+    device = logged_in(secured)
+    path, body = "/api/agents/worker/secrets", json.dumps({"name": "k", "value": "v", "confirm": True}).encode()
+    reveal = "/api/agents/worker/secrets/k/reveal"
+    assert _post(secured, path, body, device.headers()).status_code == 403
+    assert secured.post(reveal + "?confirm=true", headers=device.headers()).status_code == 403
+    assert seen == []
+    assert _post(secured, path, body, device.headers("POST", path, body)).status_code == 200
+    # The signature covers the query string, as the app sends it.
+    shown = secured.post(reveal + "?confirm=true", headers=device.headers("POST", reveal + "?confirm=true"))
+    assert shown.status_code == 200 and shown.json()["value"] == "s3cret"
+    assert seen == [("put", b"v"), ("removed", "k")]
+
+
 # --- the format the app implements ---------------------------------------------
 
 def test_the_shared_signature_vector_holds():

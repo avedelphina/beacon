@@ -46,6 +46,7 @@ struct AgentsView: View {
             }
         }
         .task { await load() }
+        .onChange(of: session.openSecrets, initial: true) { if let id = session.openSecrets { selected = id } }
     }
 
     static func matching(_ agents: [Agent], _ search: String) -> [Agent] {
@@ -60,6 +61,11 @@ struct AgentsView: View {
             agents = try await client.get("/api/agents")
             availability = (try? await client.get("/api/availability")) ?? [:]
             problem = nil
+            // A notice about an agent that is gone, or not this person's: drop it, or its sheet opens later.
+            if let wanted = session.openSecrets, !agents.contains(where: { $0.id == wanted }) {
+                session.openSecrets = nil
+                problem = "\(wanted) is not an agent you can see."
+            }
         } catch APIError.loggedOut {
             session.forget()
         } catch {
@@ -108,6 +114,7 @@ struct AgentDetailView: View {
     @State private var restarting = false
     @State private var result: CommandResult?
     @State private var problem: String?
+    @State private var showSecrets = false
 
     private var isOperator: Bool { session.role == "operator" }
     /// Logs are an operator's, or the owner's where an operator turned them on.
@@ -143,6 +150,10 @@ struct AgentDetailView: View {
                 if mayReadLogs {
                     NavigationLink("Logs") { LogsView(agent: agent.id) }
                 }
+                // A client is a program on someone's computer: there is no host to hold a file.
+                if agent.type != "client" {
+                    Button("Secrets…") { showSecrets = true }
+                }
             }
             if !events.isEmpty {
                 Section("Health events") {
@@ -156,6 +167,13 @@ struct AgentDetailView: View {
         }
         .navigationTitle(agent.id)
         .task { await load() }
+        .sheet(isPresented: $showSecrets) { SecretsView(agent: agent.id) }
+        .onChange(of: session.openSecrets, initial: true) {
+            if session.openSecrets == agent.id {
+                session.openSecrets = nil
+                showSecrets = true
+            }
+        }
         .refreshable { await load() }
         .confirmationDialog("Restart \(agent.id)?", isPresented: Binding(get: { wouldRun != nil }, set: { if !$0 { wouldRun = nil } }),
                             titleVisibility: .visible, presenting: wouldRun) { _ in

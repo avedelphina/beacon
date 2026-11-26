@@ -245,3 +245,31 @@ struct MineTests {
         #expect(SettingsView.describe(.notDetermined) == "Not asked yet" && SettingsView.describe(nil) == "-")
     }
 }
+
+struct SecretTests {
+    @Test func theAnswersDecode() throws {
+        #expect(try Client.decoder.decode(Secrets.Names.self, from: contract("secrets.json")).names == ["db-password"])
+        #expect(try Client.decoder.decode(Secrets.Revealed.self, from: contract("secret-reveal.json")).value == "correct horse")
+        #expect(try Client.decoder.decode(Secrets.Saved.self, from: contract("secret-put.json")).path.hasSuffix("api-key"))
+    }
+
+    @Test func aNameIsCheckedAsBeaconChecksIt() {
+        for good in ["a", "api-key", "db_password.v2", String(repeating: "x", count: 64)] { #expect(Secrets.isName(good)) }
+        for bad in ["", "-a", ".env", "a b", "a/b", "a?b", "é", String(repeating: "x", count: 65)] { #expect(!Secrets.isName(bad)) }
+    }
+
+    @Test func aPasteCarriesItsConfirmation() throws {
+        let sent = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Secrets.Paste(name: "k", value: "v"))) as! [String: Any]
+        #expect(sent["confirm"] as? Bool == true && sent["value"] as? String == "v")
+    }
+
+    @Test func aTappedSecretNoticeNamesItsAgent() throws {
+        let sent = try JSONSerialization.jsonObject(with: contract("apns.json")) as! [String: [AnyHashable: Any]]
+        #expect(Notices.secretsAgent(sent["secret"]!) == "alpha" && Notices.workflowID(sent["secret"]!) == nil)
+        #expect(Notices.secretsAgent(sent["plain"]!) == nil)
+    }
+
+    @Test func nothingBeaconAnswersIsCachedOnDisk() {
+        #expect(Client.session.configuration.urlCache?.diskCapacity ?? 0 == 0)
+    }
+}

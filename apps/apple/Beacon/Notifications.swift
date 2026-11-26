@@ -35,6 +35,11 @@ nonisolated enum Notices {
         (userInfo["beacon"] as? [String: Any])?["workflow"] as? Int
     }
 
+    /// The agent whose secrets a notice is about, if it is one.
+    static func secretsAgent(_ userInfo: [AnyHashable: Any]) -> String? {
+        (userInfo["beacon"] as? [String: Any])?["agent"] as? String
+    }
+
     static func tokenHex(_ token: Data) -> String { Signing.hex(token) }
 
     /// Which APNs Beacon must use for this build: Xcode's (debug) builds get sandbox tokens,
@@ -76,7 +81,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let content = response.notification.request.content
-        guard let id = Notices.workflowID(content.userInfo) else { return }  // any other notice: the app opens, that is all
+        guard let id = Notices.workflowID(content.userInfo) else {
+            // Any other notice: the app opens, at what it is about if Beacon said.
+            session.openSecrets = Notices.secretsAgent(content.userInfo)
+            return
+        }
         switch response.actionIdentifier {
         case Notices.approveAction, Notices.rejectAction:
             let result = await session.answerFromNotice(id, approve: response.actionIdentifier == Notices.approveAction)

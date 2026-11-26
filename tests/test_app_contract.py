@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 from itsdangerous import TimestampSigner
 
-from backend import auth, availability, board, mesh, opstore, store, workflow
+from backend import auth, availability, board, mesh, opstore, secret_pipe, store, workflow
 from backend.app import app
 from backend.schemas import Agent
 from backend.ssh import SSHResult
@@ -84,6 +84,15 @@ def answers(fleet, fake_ssh, monkeypatch):
         "restart-gate.json": client.post("/api/agents/alpha/restart"),
         "restart.json": client.post("/api/agents/alpha/restart?confirm=true"),
     }
+    monkeypatch.setattr(secret_pipe, "names", lambda agent_id: ["db-password"])
+    monkeypatch.setattr(secret_pipe, "put", lambda agent_id, name, data: f"beacon-secrets/inbox/{name}")
+    monkeypatch.setattr(secret_pipe, "read", lambda agent_id, name: b"correct horse")
+    monkeypatch.setattr(secret_pipe, "remove", lambda agent_id, name: None)
+    answers |= {
+        "secrets.json": client.get("/api/agents/alpha/secrets"),
+        "secret-put.json": client.post("/api/agents/alpha/secrets", json={"name": "api-key", "value": "x", "confirm": True}),
+        "secret-reveal.json": client.post("/api/agents/alpha/secrets/db-password/reveal?confirm=true"),
+    }
     # A member gets trimmed views (backend/members.py); the app must decode those too.
     member = TestClient(app)
     member_payload = base64.b64encode(json.dumps({"user": {"email": "ann@example.com"}}).encode()).decode()
@@ -109,6 +118,7 @@ def test_the_notification_payloads_match_what_beacon_sends():
                               about={"workflow": 18, "clearance": 4, "kind": "approval", "card": 4}),
         "open": apns.payload("alpha needs your answer", about={"workflow": 19, "clearance": 2, "kind": "decision", "card": 5}),
         "plain": apns.payload("alpha has not synced for 2 hours"),
+        "secret": apns.payload("alpha has a secret for you", about={"agent": "alpha"}),
     }
     path = CONTRACT / "apns.json"
     if os.environ.get("BEACON_UPDATE_CONTRACT"):
@@ -119,6 +129,7 @@ def test_the_notification_payloads_match_what_beacon_sends():
 @pytest.mark.parametrize("name", [
     "workflow.json", "workflows.json", "card.json", "version.json", "board.json", "agents.json", "availability.json",
     "health-events.json", "status.json", "logs.json", "restart-gate.json", "restart.json", "agents-member.json",
+    "secrets.json", "secret-put.json", "secret-reveal.json",
     "availability-member.json", "status-member.json"])
 def test_the_apps_contract_files_match_the_api(answers, name):
     path = CONTRACT / name

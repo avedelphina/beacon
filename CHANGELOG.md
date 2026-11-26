@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Secrets in the app.** An agent's screen opens its secrets: what it left for you, revealed once after
+  Face ID or Touch ID, and giving it a password, key or token. The app keeps nothing: a revealed value is
+  covered when the app is not in front and gone once it is in the background, a copy stays on the device
+  for 90 seconds, and the app now caches nothing Beacon answers. Tapping "… has a secret for you" opens
+  that agent's secrets.
+
 ### Fixed
 
 - **Who sees intake cards could be changed with an app token alone.** Since the app login (not yet
