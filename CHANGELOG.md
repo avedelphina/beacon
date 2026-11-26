@@ -15,13 +15,68 @@
   now also answers `api`, which changes only when a change breaks the app. `apps/contract/` holds the
   signature test vector the app is tested against.
 
+## [0.40.0] — 2026-11-26
+
+### Upgrading
+
+This release renames database columns and parts of the API. Read this before you upgrade.
+
+1. **Back up the database.** Stop Beacon first, so that the copy is complete. Keep the copy outside
+   the repository folder: it holds your whole fleet.
+
+   ```bash
+   docker compose stop beacon mcp
+   cp -a state ../beacon-state-0.39   # may need sudo: the files belong to uid 10001
+   ```
+
+2. **Set your working hours** in `.env`, with your own time zone. Without this, Beacon uses
+   `Mon-Fri 08:00-17:00 UTC`. Use `always` to count clock time, as before. A value that Beacon
+   cannot read stops it from starting.
+
+   ```bash
+   BEACON_WORK_HOURS=Mon-Fri 08:00-17:00 Europe/Berlin
+   ```
+
+   If your scheduler tick runs outside the container (system cron, launchd or systemd with a
+   virtualenv), set the same variable for it too.
+
+3. **Get 0.40.0 and rebuild all services.** The database is migrated on the first start; there is
+   no separate migration command.
+
+   ```bash
+   git fetch --tags && git checkout v0.40.0
+   docker compose up -d --build
+   ```
+
+4. **Update your own API clients and scripts.** Use `/api/clearances` and `clearance` (`CL0` to
+   `CL5`). `tier` and `max_tier` are accepted on input in this release only. See "Changed
+   (breaking)" below.
+5. **Restart agent gateways**, so that they load the new tool descriptions. Their hosts install the
+   new agent skill on the next sync.
+6. **Check the Workflows tab.** Ask again for any enrollment request that was pending during the
+   upgrade: its approval no longer matches.
+
+**To go back to 0.39.2**, stop `beacon` and `mcp`, put the backup back in place of `state/`, check
+out `v0.39.2` and rebuild. 0.39.2 cannot use a migrated database, and changes made after the backup
+are lost.
+
+### Added
+
+- **Working hours.** `BEACON_WORK_HOURS` (days, hours, time zone; default `Mon-Fri 08:00-17:00 UTC`;
+  `always` for clock time) is when people are expected to answer. The default expiry of a workflow
+  request is now two working days instead of 24 hours, and the wait before operators hear about a
+  silent owner counts working hours only. A value that cannot be read stops Beacon from starting.
+- **Urgent requests.** `urgent_reason` on a request to a person (REST and `workflow_create`) says what
+  breaks if it waits: it is marked URGENT in the page, email and push (sent with `Urgency: high`),
+  operators hear after 30 minutes of clock time and the default expiry is 24 hours. Agent skill
+  1.24.0 says when to use it.
 - **Who the human authority is, by clearance.** A CL4 request (execute with human approval) goes to
   the owner of the agent that asks: asked of `human`, it is sent to that agent's owner if it has one,
   and it may also name an operator; to anyone else it is refused with the reason. A CL5 request
   (human-only) goes to an operator (`human` or an operator's email) and only an operator can answer it,
   never an owner who is not one. An operator can always see and answer a CL4, and nobody answers a
-  request they made. A CL4 left more than four hours on an owner who is not an operator tells the
-  operators once, from the scheduler tick; the card history records it. The agent skill (1.23.0)
+  request they made. A CL4 left more than four working hours on an owner who is not an operator tells
+  the operators once, from the scheduler tick; the card history records it. The agent skill (1.23.0)
   and the `workflow_create` and `agent_owner` descriptions teach agents which clearance to choose
   (CL4 for a change that can be rolled back, CL5 for secrets, money or data that cannot be recovered)
   and whom to ask.

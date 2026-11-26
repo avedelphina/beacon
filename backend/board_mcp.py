@@ -308,7 +308,7 @@ def build() -> MCPServer:
                         expires_at: float | None = None, plan_revision: str | None = None,
                         plan_hash: str | None = None, context_id: str | None = None,
                         consulted: list[dict] | None = None, consult_skipped: str | None = None,
-                        tier: int | None = None) -> dict:
+                        urgent_reason: str | None = None, tier: int | None = None) -> dict:
         """Create a pending typed workflow request attached to a board card. When you ask a person
         (eligible_responder "human" or an email), first consult at least one peer you may call about
         the problem and your plan, and pass what you learned as consulted: [{"agent": "<peer>",
@@ -317,7 +317,9 @@ def build() -> MCPServer:
         is flagged for them as "no peer consulted"; it is not refused. clearance is 0 to 5: 3 asks an
         independent agent to review, 4 asks the human authority (your owner; an operator may always
         answer), 5 asks an operator only. Beacon sends a clearance 4 request addressed to "human" to
-        your owner when you have one, and refuses 4 or 5 addressed to the wrong person. The person sees the card the request is
+        your owner when you have one, and refuses 4 or 5 addressed to the wrong person. People answer in working
+        hours, and the default expiry counts those. Set urgent_reason (what breaks, and when) only for a request to
+        a person where waiting for working hours does real damage: it is shown to them as urgent. The person sees the card the request is
         on, but only what it points at: before you ask about a PR, issue or ticket, add it to the card with
         card_reference_add (the full url), because links in the summary are not shown as links. summary is Markdown:
         its first line says what you need, then the short plan. kind: decision (the
@@ -345,6 +347,7 @@ def build() -> MCPServer:
             capability=capability, clearance=clearance, title=title, summary=summary, options=options,
             target=target, plan_revision=plan_revision, plan_hash=plan_hash, expires_at=expires_at,
             context_id=context_id, consulted=consulted, consult_skipped=consult_skipped,
+            urgent_reason=urgent_reason,
         )
 
     @server.tool()

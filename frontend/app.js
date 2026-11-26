@@ -1330,7 +1330,7 @@ function sortWorkflows(items) {
   return [...items].sort((a, b) => {
     const ra = WORKFLOW_RANK[a.state] ?? 3, rb = WORKFLOW_RANK[b.state] ?? 3;
     if (ra !== rb) return ra - rb;
-    return ra === 0 ? a.expires_at - b.expires_at : 0;
+    return ra === 0 ? !!b.urgent_reason - !!a.urgent_reason || a.expires_at - b.expires_at : 0;
   });
 }
 
@@ -1394,7 +1394,7 @@ function renderWorkflowItems(items) {
     return `<article class="workflow-item">
       <header class="wf-head">
         <div>
-          <div class="wf-kind">${esc(WORKFLOW_KIND_LABEL[w.kind] || w.kind)} · CL${esc(w.clearance)}</div>
+          <div class="wf-kind">${esc(WORKFLOW_KIND_LABEL[w.kind] || w.kind)} · CL${esc(w.clearance)}${w.urgent_reason ? ' · <strong class="wf-urgent">URGENT</strong>' : ""}</div>
           <h3 class="wf-title">${esc(w.title)}</h3>
         </div>
         <span class="chip">${esc(w.state)}</span>
@@ -1405,6 +1405,7 @@ function renderWorkflowItems(items) {
       ${card ? (sources.length ? `<ul class="wf-sources">${sources.join("")}</ul>`
         : '<p class="hint">The card links to nothing outside Beacon. Ask the requester to add the PR or ticket to it.</p>') : ""}
       ${aboutCard}
+      ${w.urgent_reason ? `<p class="wf-flag">Urgent: ${esc(w.urgent_reason)}</p>` : ""}
       <div class="wf-plan">${renderMarkdown(w.summary)}</div>
       ${consulted}
       ${w.answered_by ? `<p class="hint">Answered by <strong>${esc(w.answered_by)}</strong>, an AI client, for ${esc(w.on_behalf_of)}.</p>` : ""}
