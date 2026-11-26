@@ -196,7 +196,7 @@ def test_agent_writes_to_the_board_as_itself(fleet_agents):
             "card_reference_add", "card_reference_remove", "card_reference_update", "card_references",
             "card_remove_dependency", "card_set_parent", "card_update", "enroll_claim",
             "enroll_request", "milestone_add", "milestone_update", "project_comment", "project_create", "project_get", "project_list",
-            "project_update", "role_list", "workflow_create", "workflow_get", "workflow_list", "workflow_require_human",
+            "project_update", "role_list", "secret_offer", "secret_send", "workflow_create", "workflow_get", "workflow_list", "workflow_require_human",
             "workflow_respond", "workflow_revise",
         ]
     notice, = _notices()

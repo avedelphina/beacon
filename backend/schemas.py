@@ -26,6 +26,10 @@ def _reject_ssh_option_injection(value: str, field: str) -> str:
     return value
 
 
+class SecretError(Exception):
+    """A secret could not be moved. The message never carries the value."""
+
+
 class SSHConfig(BaseModel):
     user: str
     key: str | None = None

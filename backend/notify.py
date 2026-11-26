@@ -295,6 +295,13 @@ def _footer() -> str:
     return f"\nThe Agents tab shows its state: {mesh.public_url() or 'your Beacon page'}\n"
 
 
+def secret_offered(agent_id: str, name: str) -> None:
+    """Names only: the value stays on the host until a person reveals it."""
+    _tell(_people_for(agent_id), f"Beacon: {agent_id} has a secret for you",
+          f"{agent_id} left a secret named {name!r} for you. Reveal it under Agents, Inspect, Secrets: "
+          f"{mesh.public_url() or 'your Beacon page'}\n")
+
+
 # --- email -----------------------------------------------------------------
 
 

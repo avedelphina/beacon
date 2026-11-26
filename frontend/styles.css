@@ -567,3 +567,7 @@ td.sel input { width: 1.05rem; height: 1.05rem; cursor: pointer; }
 .policy-health td:first-child { font-family: var(--font-mono); }
 .modal label.check { flex-direction: row; flex-wrap: wrap; align-items: center; }
 .modal label.check input { width: auto; }
+
+#inspect-secret-form { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.4rem 0 1rem; }
+#inspect-secret-form .btn { align-self: flex-start; }
+#inspect-secret-value { user-select: all; white-space: pre-wrap; overflow-wrap: anywhere; }

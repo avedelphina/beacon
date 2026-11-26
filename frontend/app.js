@@ -62,6 +62,9 @@ const api = {
     return `/api/agents/${id}/config-diff?${params}`;
   },
   restart: (id) => json(`/api/agents/${id}/restart?confirm=true`, "POST"),
+  listSecrets: (id) => json(`/api/agents/${id}/secrets`),
+  putSecret: (id, name, value) => json(`/api/agents/${id}/secrets`, "POST", { name, value, confirm: true }),
+  revealSecret: (id, name) => json(`/api/agents/${id}/secrets/${encodeURIComponent(name)}/reveal?confirm=true`, "POST"),
   restartAgent: (id) => json(`/api/agents/${id}/restart-agent?confirm=true`, "POST"),
   listPlugins: (id) => json(`/api/agents/${id}/plugins`),
   updatePlugin: (id, plugin) => json(`/api/agents/${id}/plugins/${plugin}/update?confirm=true`, "POST"),
@@ -371,6 +374,7 @@ async function openInspect(id) {
     out.hidden = true;
     out.textContent = "";
   }
+  clearSecrets();
   for (const panel of ["plugins", "reconcile", "config"]) {
     document.getElementById(`inspect-${panel}-results`).innerHTML = "";
   }
@@ -409,6 +413,50 @@ document.getElementById("inspect-load-logs").addEventListener("click", async () 
     el.textContent = (await api.agentLogs(currentInspectId)) || "(empty)";
   } catch (err) {
     el.textContent = `[error] ${err.message}`;
+  }
+});
+
+// A secret stays on the page only while its agent's dialog is open and the page is in front.
+function clearSecrets() {
+  const shown = document.getElementById("inspect-secret-value");
+  shown.textContent = "";
+  shown.hidden = true;
+  document.getElementById("inspect-secrets-results").innerHTML = "";
+  document.getElementById("inspect-secret-form").reset();
+}
+document.querySelectorAll("#inspect-modal [data-close]").forEach((b) => b.addEventListener("click", clearSecrets));
+document.addEventListener("visibilitychange", () => { if (document.hidden) clearSecrets(); });
+
+document.getElementById("inspect-secrets-list").addEventListener("click", () =>
+  loadInto("inspect-secrets-results", "asking the host…", api.listSecrets, ({ names }) => {
+    const el = document.getElementById("inspect-secrets-results");
+    el.innerHTML = names.length
+      ? names.map((n) => finding("info", esc(n), `<button type="button" class="link-btn" data-reveal="${esc(n)}">Reveal</button>`)).join("")
+      : finding("ok", "nothing waiting");
+    el.querySelectorAll("[data-reveal]").forEach((b) => b.addEventListener("click", async () => {
+      const name = b.dataset.reveal;
+      if (!confirm(`Show ${name} and remove it from the agent's host? It cannot be shown again.`)) return;
+      const shown = document.getElementById("inspect-secret-value");
+      try {
+        shown.textContent = (await api.revealSecret(currentInspectId, name)).value;
+        shown.hidden = false;
+        b.remove();
+      } catch (err) {
+        alert(err.message);
+      }
+    }));
+  }));
+
+document.getElementById("inspect-secret-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const id = currentInspectId;
+  try {
+    const { path } = await api.putSecret(id, form.elements.name.value.trim(), form.elements.value.value);
+    form.reset();
+    document.getElementById("inspect-secrets-results").innerHTML = finding("ok", `saved as ${esc(path)}`);
+  } catch (err) {
+    alert(err.message);
   }
 });
 
