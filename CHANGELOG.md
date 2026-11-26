@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-11-26
+
 ### Added
 
 - **Working hours.** `BEACON_WORK_HOURS` (days, hours, time zone; default `Mon-Fri 08:00-17:00 UTC`;
