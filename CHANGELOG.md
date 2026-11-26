@@ -8,6 +8,7 @@
   released), `PUT /api/intake/visibility` accepted a device's token without Face ID, though it was for a
   person in the web page only. It now needs the Face ID or Touch ID signature, like other access changes.
 - Refusals and notices that said only the web page can answer now name the app too.
+  The agent skill (1.27.0) says the same.
 
 ### Added
 
