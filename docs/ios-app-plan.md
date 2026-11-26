@@ -1,6 +1,6 @@
 # Beacon for iOS and iPadOS — technical plan
 
-Status: decisions taken 2026-11-26 (§8). P1 merged (#127), P2 merged (#128); P3 built on `feat/ios-app`. Implements step 2 of the App track in
+Status: decisions taken 2026-11-26 (§8). P1 merged (#127), P2 merged (#128), P3 merged (#129); P4 built on `feat/ios-notifications`. Implements step 2 of the App track in
 [ROADMAP.md](../ROADMAP.md), iOS and iPadOS first; macOS later from the same code.
 
 Audience: whoever builds it — a person or an agent with this repository. Each
@@ -343,6 +343,10 @@ custom trust in v1; add a "trust this CA" option only if someone needs the app
 without trusting the CA device-wide.
 
 ### 4.4 Notification actions
+
+As built: what Beacon sends is pinned in `apps/contract/apns.json` (written by
+`tests/test_app_contract.py`), and the app's tests check that every category in it is one the app
+registers, and that only `WF_APPROVE` has actions that answer.
 
 - Register categories at launch; request authorization (alert, sound, badge).
 - `didRegisterForRemoteNotificationsWithDeviceToken` → `PUT /api/app/devices/self/apns`

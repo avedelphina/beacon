@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Xcode signs TestFlight/App Store builds with "production" itself. -->
+	<key>aps-environment</key>
+	<string>development</string>
+	<!-- CL4/CL5 and urgent requests break through Focus (backend/apns.py). -->
+	<key>com.apple.developer.usernotifications.time-sensitive</key>
+	<true/>
+</dict>
+</plist>

@@ -1,12 +1,14 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct BeaconApp: App {
-    @State private var session = Session()
+    // The delegate owns the session: notifications arrive there, before or without any view.
+    @UIApplicationDelegateAdaptor private var delegate: AppDelegate
 
     var body: some Scene {
         WindowGroup {
-            RootView().environment(session)
+            RootView().environment(delegate.session)
         }
     }
 }
@@ -21,6 +23,11 @@ final class Session {
     private(set) var token: String?
     /// Set when this Beacon speaks an API the app does not know: nothing else is shown then.
     var incompatible: String?
+    /// A request to show, from a tapped notification.
+    var openRequest: Int?
+    /// Bumped when something changed the requests (a notice arrived, an answer from a notification).
+    var refreshes = 0
+    var pushProblem: String?
 
     init() {
         let defaults = UserDefaults.standard
@@ -51,6 +58,7 @@ final class Session {
         token = nil
         deviceId = nil
         role = nil
+        UNUserNotificationCenter.current().setBadgeCount(0)
     }
 
     /// Checks that this Beacon's `api` is one the app understands. Called after login and at launch.
@@ -76,7 +84,10 @@ struct RootView: View {
         if let problem = session.incompatible {
             ContentUnavailableView("Update needed", systemImage: "arrow.triangle.2.circlepath", description: Text(problem))
         } else if session.loggedIn {
-            RequestsSplitView().task { await session.checkVersion() }
+            RequestsSplitView().task {
+                await session.checkVersion()
+                await session.startNotifications()
+            }
         } else {
             LoginView()
         }

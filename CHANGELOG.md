@@ -18,6 +18,11 @@
   address and your usual account, see the workflow requests you can see, and answer them as on the
   web page; CL4/CL5 answers ask for Face ID. `apps/contract/` now also holds the API answers the app
   decodes, which `tests/test_app_contract.py` keeps current.
+- **The app's notifications.** After login the app asks to send notifications and registers its APNs
+  token with Beacon at each launch. Approve and Reject work right on a CL3-or-below approval or review
+  notification (the phone must be unlocked; the result comes back as a notification), CL4/CL5 notices
+  open the request in the app for Face ID, and a tap opens the request. The app's icon shows how many
+  requests are pending. `apps/contract/apns.json` pins the payloads Beacon sends.
 - **Notifications to the native app.** With `BEACON_APNS_KEY_FILE`, `_KEY_ID`, `_TEAM_ID` and `_TOPIC`
   set (an APNs key from the Apple Developer account), Beacon sends the app the notices that browsers
   get, through Apple's push service: the subject line only, plus, for a workflow request, its ids and a
