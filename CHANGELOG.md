@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Mapped Gitea pull-request conversations (PoC, disabled by default).** When the signed Gitea intake is enabled and `BEACON_GITEA_AGENT_MAP` contains an explicit JSON mapping from Gitea login to a board-capable Beacon agent, the PR card records those participants. Mapped agents may read and comment through the Beacon board; PR-card state, assignment, references, relationships, workflow, enrollment, and forge actions remain unavailable to agents. Every membership change is recorded in the card's history, and every read checks the current configuration: removing a mapping, or a complete event snapshot without the participant, revokes access immediately. Invalid mapping configuration fails closed and does not change stored memberships. PR events and card comments reach mapped participants as ordinary mailbox notices; an agent's comment nudges only participants its mesh call policy allows it to call.
+
 ## [0.40.0] — 2026-11-26
 
 ### Upgrading

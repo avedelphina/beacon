@@ -844,6 +844,19 @@ one unassigned operator-only triage card with a `gitea/pull_request` reference. 
 call Gitea, assign an agent, create an approval, or merge anything. The route is disabled
 with `404` until both the secret and a non-empty repository allowlist are configured.
 
+**Mapped Gitea PR conversations (disabled by default).** With `BEACON_GITEA_AGENT_MAP` set to a
+JSON object mapping Gitea logins to board-capable agent ids (`{"login": "agent"}`), the PR card
+records the mapped author, assignees and requested reviewers as participants. Mapped agents may
+read the card and comment through the board; state, assignment, references, relationships,
+workflows and enrollment stay unavailable to them, and workflow requests on PR cards are hidden
+from agents. An event whose snapshot omits a participant field keeps the current roster; a
+complete snapshot reconciles membership to it. Every membership change is recorded in the card's
+history, but every read checks the current mapping: removing a mapping, or a complete snapshot
+without the participant, revokes access immediately, and invalid mapping configuration fails
+closed without changing stored memberships. PR events and card comments reach mapped participants
+as ordinary mailbox notices; an agent's comment nudges only participants its mesh call policy
+allows it to call. Beacon still never writes back to Gitea.
+
 - **Secrets, one per source.** Set `BEACON_INTAKE_SECRET_<SOURCE>` (upper case, `-` as `_`)
   for each source, so a valid signature for one source cannot stand for another. A source with
   its own secret accepts only that one. `BEACON_INTAKE_SECRET` is a shared secret for sources

@@ -127,9 +127,19 @@ def set_visibility(actor: str, *, members: bool, agents: bool) -> dict:
 
 
 def agent_may_see(author: str, card: dict) -> bool:
-    """Ordinary cards are as before. An intake card goes to an agent only when the
-    operators have said so; a person's own tools (the web page, an MCP client with
-    no agent identity) are not filtered here."""
+    """Ordinary cards are as before. Gitea PR cards use their explicit participant
+    list; the generic intake visibility toggle never widens a PR conversation.
+    Other intake cards remain operator-only unless the operators opt agents in.
+    """
+    if card.get("created_by") == "intake:gitea":
+        try:
+            agent = store.get_agent(author)
+        except (store.NotFound, store.InvalidId):
+            return True  # Beacon/operator callers are not agent-filtered here.
+        if agent.client is not None or agent.reach is None:
+            return True  # an operator's own MCP client keeps its ordinary board access
+        from . import board
+        return board.agent_may_see_pr(author, card)
     if not is_intake(card) or visibility()["agents"]:
         return True
     try:
