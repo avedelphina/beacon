@@ -1,0 +1,4 @@
+{
+  "ok": true,
+  "output": "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=4321\nActiveEnterTimestamp=Thu 2026-11-26 08:00:00 UTC"
+}

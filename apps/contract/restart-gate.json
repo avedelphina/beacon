@@ -1,0 +1,6 @@
+{
+  "clearance": "CL2",
+  "clearance_label": "Execute reversible",
+  "detail": "Would restart the gateway for 'alpha' (clearance CL2 \u2014 Reversible, low-risk, everyday operate action \u2014 the service comes back up on its own, nothing is lost.). Call again with confirm=true to actually run it.",
+  "would_run": true
+}

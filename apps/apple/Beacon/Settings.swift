@@ -3,7 +3,6 @@ import SwiftUI
 /// Who is logged in where, this person's devices, and logging out.
 struct SettingsView: View {
     @Environment(Session.self) private var session
-    @Environment(\.dismiss) private var dismiss
     @State private var devices: [Device] = []
     @State private var version: Version?
     @State private var problem: String?
@@ -28,13 +27,15 @@ struct SettingsView: View {
                 } footer: {
                     Text("A device stays logged in until it has not been used for 30 days. Log out a lost one from the web page.")
                 }
+                if let pushProblem = session.pushProblem {
+                    Section("Notifications") { Text(pushProblem).foregroundStyle(.red) }
+                }
                 Section {
                     Button("Log out", role: .destructive, action: logOut)
                 }
                 if let problem { Section { Text(problem).foregroundStyle(.red) } }
             }
             .navigationTitle("Settings")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .task {
                 guard let client = session.client else { return }
                 version = try? await client.get("/api/version")
@@ -56,7 +57,6 @@ struct SettingsView: View {
                 }
             }
             session.forget()
-            dismiss()
         }
     }
 }

@@ -1,6 +1,6 @@
 # Beacon for iOS and iPadOS — technical plan
 
-Status: decisions taken 2026-11-26 (§8). P1 merged (#127), P2 merged (#128), P3 merged (#129); P4 built on `feat/ios-notifications`. Implements step 2 of the App track in
+Status: decisions taken 2026-11-26 (§8). P1 merged (#127), P2 merged (#128), P3 merged (#129); P4 built on `feat/ios-notifications`, P5 on `feat/ios-fleet` (stacked on P4). Implements step 2 of the App track in
 [ROADMAP.md](../ROADMAP.md), iOS and iPadOS first; macOS later from the same code.
 
 Audience: whoever builds it — a person or an agent with this repository. Each

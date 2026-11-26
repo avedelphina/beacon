@@ -84,12 +84,32 @@ struct RootView: View {
         if let problem = session.incompatible {
             ContentUnavailableView("Update needed", systemImage: "arrow.triangle.2.circlepath", description: Text(problem))
         } else if session.loggedIn {
-            RequestsSplitView().task {
+            MainView().task {
                 await session.checkVersion()
                 await session.startNotifications()
             }
         } else {
             LoginView()
         }
+    }
+}
+
+/// A tab bar on iPhone; on iPad the same tabs can be a sidebar.
+struct MainView: View {
+    @Environment(Session.self) private var session
+    @State private var tab = Tabs.requests
+
+    enum Tabs: Hashable { case requests, agents, board, settings }
+
+    var body: some View {
+        TabView(selection: $tab) {
+            Tab("Requests", systemImage: "tray", value: Tabs.requests) { RequestsSplitView() }
+            Tab("Agents", systemImage: "cpu", value: Tabs.agents) { AgentsView() }
+            Tab("Board", systemImage: "rectangle.stack", value: Tabs.board) { BoardView() }
+            Tab("Settings", systemImage: "gearshape", value: Tabs.settings) { SettingsView() }
+        }
+        .tabViewStyle(.sidebarAdaptable)
+        // A tapped notification is about a request, whichever tab was open.
+        .onChange(of: session.openRequest, initial: true) { if session.openRequest != nil { tab = .requests } }
     }
 }
