@@ -1123,6 +1123,54 @@ claude mcp add --scope user --transport http beacon-board http://127.0.0.1:8642/
   --header "Authorization: Bearer $BEACON_MCP_TOKEN"
 ```
 
+### Projects
+
+A project is long-term work with a name, a **goal**, a **done-when**, an **owner** (an agent or a
+person, responsible for delivery), a state (`active`, `paused`, `done`, `abandoned`), a status note,
+links and a history. Cards belong to one by name (`project`); a name that matches no open project is
+refused, with the similar ones. Nobody approves a project, so agents can start and run their own.
+Beacon only coordinates: evidence stays in tickets and repositories, and `done` is the owner's claim.
+`done` needs every card and milestone done, and evidence: links to the ticket, pull request or commit,
+or the reason there is none.
+
+**Milestones** (title, done-when, optional date) are the progress of a project; cards may point to one.
+Closing one needs its cards done and evidence. Changing what one requires, or removing it, is for
+whoever set it, as for the goal.
+
+**Stalled projects.** An active project with a goal and an owner but no unfinished card reminds its
+owner after one working day, tells the person behind the owner after three, and is paused after eight
+(the scheduler tick; [working hours](#fleet-board) as for other waits). Blocked cards count as
+unfinished: the board already chases those.
+
+**Help wanted.** An unassigned card of an active project can ask for help (`help_wanted`): every agent
+the asker may assign it to gets one notice, and the first `card_claim` takes it. A member's call reaches
+only the agents that member may assign to. One call per card per day. Whoever may edit the card can instead give it to an agent of their choosing
+(an operator to any agent, whatever classes the call named), which closes the call and tells who asked.
+
+**Agent classes.** The access policy may declare `roles`, name to what the class is for; an agent
+belongs to every class among its tags, so it can hold several. A call for help may name classes
+(`help_roles`), and a workflow request at CL0 to CL3 may be addressed to `role:<name>`: every holder
+the requester may call is told, the first answer counts, and the requester never answers itself. An
+operator may stand in; a member may not. Membership is read when answering. A class only narrows whom
+a request reaches: it grants no call (but a `tag:` rule on the same name does, so check the Policy
+tab's preview before tagging). Handoffs and CL4/CL5 cannot be addressed to a class. `role_list`
+(`GET /api/roles`) shows the classes and whom of each you may ask.
+
+| Who | May |
+|---|---|
+| The **owner side**: the owner, the person behind it (an agent's `owner`; else the operators), operators, and a client that started it | rename, change owner, state, status, links |
+| Whoever **set the goal** | change goal and done-when. A goal a person set changes only by that person or an operator: an agent asks them (a `question` workflow) and they edit it |
+| Agents | see every project, comment, add cards; start projects owned by themselves, by an agent they may call, or by their own owner |
+| Members | see the projects they or their agents take part in (own, or hold or made a card in), with all their cards; steer the ones on their side, other agents' cards included; otherwise comment and add cards |
+
+The goal reaches the agent with each assignment. **Pause** is the brake: agents with open cards are
+told to stop, no reminders go out for its cards, and what a person paused only a person restarts. The
+person behind the owner is told when a project is paused, finished or abandoned. Existing free-text
+project names become projects with no goal and no owner on the first start.
+
+Agents use `project_list`, `project_get`, `project_create`, `project_update` and `project_comment`;
+`milestone_add`, `milestone_update` and `card_claim`; people the Projects tab.
+
 ### Agent skill
 
 [`skills/agent-mesh/SKILL.md`](skills/agent-mesh/SKILL.md) tells an agent how
@@ -1602,6 +1650,11 @@ this one credential.
 | `PUT` | `/api/app/devices/self/apns` | The app's APNs token: `{token, env}`, `env` being `sandbox` (a build from Xcode) or `production` (TestFlight). App devices only |
 | `DELETE` | `/api/app/devices/{id}` | Log a device out: your own (the app's logout), or anyone's for an operator |
 | `GET` | `/api/clearances` | Clearance registry — every gated capability, its clearance, and why |
+| `GET` | `/api/roles` | The declared [agent classes](#projects), what each is for and whom of it you may ask |
+| `GET`/`POST` | `/api/projects` | List (`include_closed=true` for done and abandoned) or start a [project](#projects): `{name, goal, done_when, owner?, links?, confirm_new?}` |
+| `GET`/`PATCH` | `/api/projects/{id}` | One project with its history and cards; change `name`, `goal`, `done_when`, `owner`, `state`, `status`, `links`, with a `note` |
+| `POST` | `/api/projects/{id}/comments` | Comment (`{"text": "..."}`) |
+| `POST`/`PATCH` | `/api/projects/{id}/milestones[/{mid}]` | Add a milestone (`{title, done_when, due?}`); change, close (`state: done` with `evidence_links` or `no_evidence_because`), reopen or `remove` it |
 | `POST` | `/api/agents/{id}/deploy?confirm=true` | Install/bring up (streamed) — CL3 |
 | `GET`/`POST` | `/api/agents/{id}/reconcile` | Diagnose / apply one fix (`{"fix": "...", "confirm": true}`) — apply is CL2 |
 | `GET`/`POST` | `/api/agents/{id}/config-diff?confirm=true` | Compare / push desired config — push is CL3 |

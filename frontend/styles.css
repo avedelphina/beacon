@@ -385,6 +385,8 @@ td[data-label="ID"] .chip { margin-left: 0.4rem; }
 .wf-consulted { max-width: 68ch; margin: 0.4rem 0 0.9rem; font-size: 0.85rem; color: var(--slate); }
 .wf-consulted ul { margin: 0.2rem 0 0; padding-left: 1.2rem; }
 .wf-urgent { color: var(--crit); }
+.wf-title a { color: inherit; }
+#projects-view > .check { margin-bottom: 0.8rem; }
 .wf-flag { max-width: 68ch; margin: 0.4rem 0 0.9rem; font-size: 0.85rem; color: var(--crit); }
 .wf-choice { border: 0; padding: 0; margin: 0.9rem 0 0; display: flex; flex-direction: column; gap: 0.4rem; }
 .wf-choice legend { font-size: 0.8rem; color: var(--slate); margin-bottom: 0.3rem; }
@@ -563,3 +565,5 @@ td.sel input { width: 1.05rem; height: 1.05rem; cursor: pointer; }
 .policy-health { border-collapse: collapse; font-size: 0.85rem; }
 .policy-health th, .policy-health td { border: 1px solid var(--line-soft); padding: 0.3rem 0.6rem; text-align: left; }
 .policy-health td:first-child { font-family: var(--font-mono); }
+.modal label.check { flex-direction: row; flex-wrap: wrap; align-items: center; }
+.modal label.check input { width: auto; }

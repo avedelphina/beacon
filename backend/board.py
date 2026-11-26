@@ -38,7 +38,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from . import mailbox, mesh, opstore, store
+from . import mailbox, mesh, opstore, projects, store
 
 STATES = ("todo", "doing", "blocked", "review", "done")
 # Why a card is blocked. Each needs different handling, so each is reminded differently (remind()):
@@ -130,15 +130,15 @@ def get_card(card_id: int) -> dict:
         participants = [dict(r) for r in db.execute(
             "SELECT agent, gitea_login, created_at, updated_at FROM card_participants "
             "WHERE card_id = ? ORDER BY agent", (card_id,))]
-        parent = db.execute("SELECT id, title, state, assignee, created_by FROM cards WHERE id = ?",
+        parent = db.execute("SELECT id, title, state, assignee, created_by, project FROM cards WHERE id = ?",
                             (card["parent_id"],)).fetchone() if card["parent_id"] else None
         children = [dict(r) for r in db.execute(
-            "SELECT id, title, state, assignee, created_by FROM cards WHERE parent_id = ? ORDER BY id", (card_id,))]
+            "SELECT id, title, state, assignee, created_by, project FROM cards WHERE parent_id = ? ORDER BY id", (card_id,))]
         depends_on = [dict(r) for r in db.execute(
-            "SELECT c.id, c.title, c.state, c.assignee, c.created_by FROM card_dependencies d"
+            "SELECT c.id, c.title, c.state, c.assignee, c.created_by, c.project FROM card_dependencies d"
             " JOIN cards c ON c.id = d.depends_on_id WHERE d.card_id = ? ORDER BY c.id", (card_id,))]
         blocks = [dict(r) for r in db.execute(
-            "SELECT c.id, c.title, c.state, c.assignee, c.created_by FROM card_dependencies d"
+            "SELECT c.id, c.title, c.state, c.assignee, c.created_by, c.project FROM card_dependencies d"
             " JOIN cards c ON c.id = d.card_id WHERE d.depends_on_id = ? ORDER BY c.id", (card_id,))]
         notice_ids = [e["notice_id"] for e in events if e["notice_id"] is not None]
         notices = {}
@@ -324,19 +324,21 @@ def record_gitea_event(author: str, card_id: int, body: str) -> None:
 
 def create_card(author: str, title: str, body: str = "", project: str | None = None,
                 assignee: str | None = None, state: str = "todo", *, next_action: str | None = None,
-                done_when: str | None = None, links: list | None = None) -> dict:
+                done_when: str | None = None, links: list | None = None, milestone: int | None = None) -> dict:
     title = _required(title, "title")
     _check_state(state)
     links = _links(links or [])
     if assignee:
         _check_may_assign(author, assignee)
+    project = projects.resolve(author, project) if project and project.strip() else None
+    milestone = projects.check_milestone(project, milestone) if milestone else None
     now = time.time()
     with opstore.connect() as db:
         row = db.execute(
             "INSERT INTO cards (title, body, project, assignee, state, next_action, done_when, links,"
-            " created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (title, body or "", project or None, assignee or None, state, _text(next_action), _text(done_when),
-             json.dumps(links), author, now, now))
+            " created_by, created_at, updated_at, milestone_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (title, body or "", project, assignee or None, state, _text(next_action), _text(done_when),
+             json.dumps(links), author, now, now, milestone))
         if row.lastrowid is None:
             raise RuntimeError("card insert did not return an id")
         card_id = int(row.lastrowid)
@@ -350,7 +352,8 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
                 title: str | None = None, body: str | None = None, project: str | None = None,
                 next_action: str | None = None, done_when: str | None = None, links: list | None = None,
                 note: str | None = None, context_id: str | None = None, blocked_reason: str | None = None,
-                waiting_on: str | None = None) -> dict:
+                waiting_on: str | None = None, milestone: int | None = None, help_wanted: bool | None = None,
+                help_roles: list[str] | None = None) -> dict:
     """Change what's given; each change is its own event. `assignee=""`
     unassigns, `next_action=""`/`done_when=""` clear, `links` replaces the list.
     `note` explains the change and is recorded with it. Moving a card to blocked
@@ -371,7 +374,36 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
         if assignee:
             _check_may_assign(author, assignee)
         changes.append(("assignee", "assign", assignee or None, f"{card['assignee'] or '-'} -> {assignee or '-'}"))
-    for column, value in (("title", title), ("body", body), ("project", project)):
+    if project is not None:
+        project = project.strip()
+        if project.casefold() != (card["project"] or "").casefold():
+            name = projects.resolve(author, project) if project else None
+            changes.append(("project", "edit", name, f"project: {card['project'] or '-'} -> {name or '-'}"))
+    in_project = next((value for column, _, value, _ in changes if column == "project"), card["project"])
+    moved = any(column == "project" for column, *_ in changes)
+    if milestone is not None and (milestone or None) != card["milestone_id"]:
+        target = projects.check_milestone(in_project, milestone) if milestone else None
+        changes.append(("milestone_id", "edit", target, f"milestone: {target or '-'}"))
+    elif moved and card["milestone_id"]:
+        changes.append(("milestone_id", "edit", None, "milestone: - (it belonged to the other project)"))
+    leaving = moved or state == "done" or bool(assignee)
+    if help_roles and not help_wanted:
+        raise ValueError("help_roles goes with help_wanted=true")
+    if help_wanted:
+        if leaving or card["assignee"] and assignee != "":
+            raise ValueError("help is asked for an unassigned card that stays open in its project")
+        if not card["help_by"]:
+            wanted = _check_roles(help_roles or [])
+            _check_may_ask_help(author, card, wanted)
+            changes.append(("help_roles", "edit", json.dumps(wanted), None))
+            changes.append(("help_by", "edit", author,
+                            "help wanted" + (f" from {', '.join(wanted)}" if wanted else "")))
+    elif card["help_by"] and (help_wanted is False or leaving):
+        if help_wanted is False and not leaving:
+            _check_may_steer_help(author, card)
+        changes.append(("help_by", "edit", None,
+                        f"help call closed: given to {assignee}" if assignee else "help no longer wanted"))
+    for column, value in (("title", title), ("body", body)):
         if value is not None and value != (card[column] or ""):
             changes.append((column, "edit", value if column != "title" else _required(value, "title"),
                             f"{column} changed"))
@@ -392,11 +424,120 @@ def update_card(author: str, card_id: int, *, state: str | None = None, assignee
         if note and not changes:
             _event(db, card_id, author, "comment", note, context_id)
             db.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (now, card_id))
+    if any(column == "help_by" and value for column, _, value, _ in changes):
+        _ask_for_help(card_id, author)
     new_assignee = next((value for column, _, value, _ in changes if column == "assignee"), None)
+    # Whoever asked for help hears who got the card when someone else chose, before the assignee's own
+    # notice so that the card shows that one as the latest.
+    if card["help_by"] and new_assignee and card["help_by"] != new_assignee:
+        _send_notice(card_id, author, card["help_by"], "comment_notice",
+                     f"{author} gave card #{card_id}, which you asked for help with, to {new_assignee}.\n"
+                     f"Title: {card['title']}")
     if new_assignee:
         _notify_assignee(card_id, author, new_assignee)
     elif note and not changes:
         _notify_comment(card_id, author, note)
+    return get_card(card_id)
+
+
+# --- help wanted --------------------------------------------------------------
+
+HELP_AGAIN_SECONDS = 24 * 3600  # a card asks the fleet at most this often
+
+
+def _check_roles(roles: list[str]) -> list[str]:
+    from . import policy
+    declared = (policy.load() or policy.Policy()).roles
+    unknown = [r for r in roles if r not in declared]
+    if unknown:
+        raise ValueError(f"unknown class {', '.join(unknown)}. Declared: {', '.join(declared) or 'none'}")
+    return sorted(set(roles))
+
+
+def role_directory(asker: str) -> list[dict]:
+    """The classes the policy declares, what each is for, and whom of it `asker` may ask."""
+    from . import policy
+    return [{"role": name, "description": purpose, "agents": eligible_helpers(asker, [name])}
+            for name, purpose in (policy.load() or policy.Policy()).roles.items()]
+
+
+def eligible_helpers(asker: str, roles: list[str] | None = None) -> list[str]:
+    """The agents `asker` may give a card to, which is exactly who may be asked: a call for help
+    must not reach an agent that an assignment could not. `roles` narrows that to agents of any of
+    those classes, and never widens it. Clients take no work."""
+    from . import members
+    exposure = mesh.open_chats()
+    fleet = [a for a in store.list_agents()
+             if a.reach and a.client is None and a.id != asker and mesh.board_allowed(a, exposure)
+             and (not roles or set(roles) & set(a.tags))]
+    if projects._is_member(asker):
+        allowed = members.assignable_ids(asker)
+        return sorted(a.id for a in fleet if a.id in allowed)
+    if _is_agent(asker) or _is_client(asker):
+        return sorted(a.id for a in fleet if mesh.may_call(asker, a))
+    return sorted(a.id for a in fleet)
+
+
+def _check_may_steer_help(author: str, card: dict) -> None:
+    project = projects.for_card(card["project"])
+    if author != card["created_by"] and author != card["help_by"] and (
+            project is None or not projects.owner_side(author, project)):
+        raise projects.NotAllowed("only whoever made the card, or the project's owner side, asks for help with it")
+
+
+def _check_may_ask_help(author: str, card: dict, roles: list[str]) -> None:
+    from . import intake
+    project = projects.for_card(card["project"])
+    if project is None or project["state"] != "active" or card["state"] == "done":
+        raise ValueError("help is asked for an open card of an active project")
+    _check_may_steer_help(author, card)
+    if is_pr_conversation(card):
+        raise ValueError("a Gitea PR conversation is for its participants: it cannot be offered to others")
+    if intake.is_intake(card) and not intake.visibility()["agents"]:
+        raise ValueError("this is an intake card and agents may not see those")
+    if card["help_asked_at"] and time.time() - card["help_asked_at"] < HELP_AGAIN_SECONDS:
+        raise ValueError("the fleet was asked about this card less than a day ago")
+    if not eligible_helpers(author, roles):
+        of_class = f" of class {', '.join(roles)}" if roles else ""
+        raise ValueError(f"there is no agent{of_class} you may give this card to, so nobody can be asked")
+
+
+def _ask_for_help(card_id: int, asker: str) -> None:
+    """One notice to each agent that could take the card. Nobody is obliged to."""
+    card = get_card(card_id)
+    with opstore.connect() as db:
+        db.execute("UPDATE cards SET help_asked_at = ? WHERE id = ?", (time.time(), card_id))
+    of_class = f" You are asked as {', '.join(card['help_roles'])}." if card["help_roles"] else ""
+    text = (f"Help is wanted on card #{card_id} on the Beacon board, asked by {asker}.{of_class} Nobody has to take it. "
+            f"If you can do it, call card_claim({card_id}): the first to claim gets it.\n"
+            f"Title: {card['title']}\n{_project_lines(card)}"
+            + "".join(f"{label}: {card[column][:NOTICE_BODY]}\n" for column, label in
+                      (("next_action", "Next action"), ("done_when", "Done when")) if card[column])
+            + f"\n{card['body'][:NOTICE_BODY]}")
+    for agent_id in eligible_helpers(asker, card["help_roles"]):
+        _send_notice(card_id, asker, agent_id, "help_notice", text)
+
+
+def claim(agent_id: str, card_id: int) -> dict:
+    """An agent takes a card that asks for help. Checked again now: the policy, the project or the
+    asker's rights may have changed since the notice."""
+    card = get_card(card_id)
+    project = projects.for_card(card["project"])
+    if not card["help_by"] or card["assignee"]:
+        raise ValueError(f"card #{card_id} is not asking for help (someone may have taken it)")
+    if project is None or project["state"] != "active":
+        raise ValueError("its project is not active")
+    if agent_id not in eligible_helpers(card["help_by"], card["help_roles"]):
+        raise projects.NotAllowed("this call is not for you: it asks for a class you are not in, or "
+                                  f"{card['help_by']} may not give you work")
+    now = time.time()
+    with opstore.connect() as db:
+        if db.execute("UPDATE cards SET assignee = ?, help_by = NULL, updated_at = ? WHERE id = ?"
+                      " AND help_by IS NOT NULL AND assignee IS NULL", (agent_id, now, card_id)).rowcount != 1:
+            raise ValueError(f"card #{card_id} was just taken by someone else")
+        _event(db, card_id, agent_id, "assign", f"- -> {agent_id}: claimed the call for help")
+    _send_notice(card_id, agent_id, card["help_by"], "comment_notice",
+                 f"{agent_id} took card #{card_id} that you asked for help with.\nTitle: {card['title']}")
     return get_card(card_id)
 
 
@@ -822,11 +963,25 @@ def _notify_assignee(card_id: int, author: str, assignee: str) -> None:
     update with the same assignee and no other change never re-enqueues."""
     card = get_card(card_id)
     text = (f"You were assigned card #{card_id} on the Beacon board by {author}.\n"
-            f"Title: {card['title']}\nProject: {card['project'] or '-'}\nState: {card['state']}\n"
+            f"Title: {card['title']}\n{_project_lines(card)}State: {card['state']}\n"
             + "".join(f"{label}: {card[column][:NOTICE_BODY]}\n" for column, label in
                       (("next_action", "Next action"), ("done_when", "Done when")) if card[column])
             + f"\n{card['body'][:NOTICE_BODY]}")
     _send_notice(card_id, author, assignee, "assign_notice", text)
+
+
+def _project_lines(card: dict) -> str:
+    """The project and its goal, so an agent that gets a card knows what the work is for."""
+    project = projects.for_card(card["project"])
+    if project is None:
+        return f"Project: {card['project'] or '-'}\n"
+    lines = f"Project: {project['name']} (#{project['id']}"
+    lines += ", PAUSED: do not start this yet)\n" if project["state"] == "paused" else ")\n"
+    if project["goal"]:
+        lines += f"Project goal: {project['goal'][:NOTICE_BODY]}\n"
+    if project["done_when"]:
+        lines += f"Project done when: {project['done_when'][:NOTICE_BODY]}\n"
+    return lines
 
 
 def _notify_comment(card_id: int, author: str, text: str) -> None:
@@ -983,6 +1138,7 @@ MAX_LINKS = 20
 def _card(row) -> dict:
     card = dict(row)
     card["links"] = json.loads(card["links"] or "[]")
+    card["help_roles"] = json.loads(card.get("help_roles") or "[]")
     return card
 
 
@@ -1057,7 +1213,10 @@ def remind(puller: str | None = None, now: float | None = None) -> None:
     now = time.time() if now is None else now
     rules, fleet, exposure = policy.load(), {a.id: a for a in store.list_agents()}, mesh.open_chats()
     with opstore.connect() as db:
-        cards = [dict(row) for row in db.execute("SELECT * FROM cards WHERE state != 'done' ORDER BY id")]
+        # A project that is paused or closed is not chased: nobody is meant to move its cards.
+        cards = [dict(row) for row in db.execute(
+            "SELECT * FROM cards WHERE state != 'done' AND NOT EXISTS (SELECT 1 FROM projects p WHERE"
+            " p.name = cards.project AND p.state != 'active') ORDER BY id")]
         open_requests = {row["id"] for row in db.execute(
             "SELECT id FROM workflow_requests WHERE state IN ('pending', 'changes_requested', 'approved')")}
     mine, stuck = {}, []  # agent id -> its cards
