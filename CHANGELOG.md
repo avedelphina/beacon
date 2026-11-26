@@ -2,38 +2,39 @@
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-11-26
+
+### Upgrading
+
+1. **Back up the database.** Stop Beacon first, so that the copy is complete, and keep the copy outside
+   the repository folder: it holds your whole fleet.
+
+   ```bash
+   docker compose stop beacon mcp
+   cp -a state ../beacon-state-0.40   # may need sudo: the files belong to uid 10001
+   ```
+
+2. **Get 0.41.0 and rebuild** (there is a new dependency). The database is migrated on the first start.
+
+   ```bash
+   git fetch --tags && git checkout v0.41.0
+   docker compose up -d --build
+   ```
+
+3. **Check your projects.** The project names on your cards become projects with no goal and no owner;
+   names that differ only in case or outer spaces are merged. Give them goals and owners in the Projects
+   tab. A card can now only be put in an existing, open project, so update scripts and clients that made
+   up a project name when they created a card.
+4. **Restart agent gateways**, so that they load the new tools. Their hosts install the new agent skill
+   on the next sync.
+5. **Only for the app:** set `ZITADEL_APP_CLIENT_ID` and, for notifications, the four `BEACON_APNS_*`
+   settings (see `.env.example`). Without them nothing changes.
+
+**To go back to 0.40.0**, stop `beacon` and `mcp`, put the backup back in place of `state/`, check out
+`v0.40.0` and rebuild. Changes made after the backup are lost.
+
 ### Added
 
-- **Projects in the app.** A Projects tab: each project's state, owner and card counts; its goal,
-  status, milestones with their evidence, links, cards and history. The owner side can pause one (its
-  agents are told to stop), resume it and post a status; anyone who sees it can comment. Tapping a
-  project notice opens the project. Creating, goals, milestones and closing stay in the web page. Cards
-  show when help is wanted and their milestone; a review asked of a class of agent reads "any <class>";
-  and a member is no longer offered a state change on someone else's card (a member's card answer now
-  has `can.change`).
-- **Secrets in the app.** An agent's screen opens its secrets: what it left for you, revealed once after
-  Face ID or Touch ID, and giving it a password, key or token. The app keeps nothing: a revealed value is
-  covered when the app is not in front and gone once it is in the background, a copy stays on the device
-  for 90 seconds, and the app now caches nothing Beacon answers. Tapping "… has a secret for you" opens
-  that agent's secrets.
-
-### Fixed
-
-- **Who sees intake cards could be changed with an app token alone.** Since the app login (not yet
-  released), `PUT /api/intake/visibility` accepted a device's token without Face ID, though it was for a
-  person in the web page only. It now needs the Face ID or Touch ID signature, like other access changes.
-- Refusals and notices that said only the web page can answer now name the app too.
-  The agent skill (1.27.0) says the same.
-
-### Added
-
-- **Secret transfer.** Move a password, key or token between a person and an agent, or between two
-  agents, without Beacon keeping it. The value goes over SSH into or out of a 0600 file under
-  `beacon-secrets/` in the agent's Hermes home; the database, mailbox, audit and logs get names only.
-  A person pastes or reveals under Agents, Inspect, Secrets: browser session (or the app with Face ID,
-  once the app has the screen), never the MCP token; owners only for their own agents. Agents use the
-  new board tools `secret_send` (to an agent the access policy lets them call) and `secret_offer` (to
-  their people, who are told). The `agent-mesh` skill (1.26.0) tells agents never to print a value.
 - **Projects.** A card's free-text project is now a record with a goal, a done-when, an owner (an agent
   or a person), a state, a status note, links and a history. Agents start and run their own
   (`project_*` board tools, agent skill 1.25.0) with no approval; people use the new Projects tab and
@@ -54,53 +55,39 @@
   **Changes for clients:** a card can only be put in an existing, open project (create it first), and
   existing project names become projects with no goal and no owner on the first start; names that
   differ only in case or spaces are merged.
+- **Secret transfer.** Move a password, key or token between a person and an agent, or between two
+  agents, without Beacon keeping it. The value goes over SSH into or out of a 0600 file under
+  `beacon-secrets/` in the agent's Hermes home; the database, mailbox, audit and logs get names only.
+  A person pastes or reveals under Agents, Inspect, Secrets: browser session (or the app with Face ID),
+  never the MCP token; owners only for their own agents. Agents use the new board tools `secret_send` (to an agent the access policy lets them call) and `secret_offer` (to
+  their people, who are told). The `agent-mesh` skill (1.26.0) tells agents never to print a value.
 - **Mapped Gitea pull-request conversations (PoC, disabled by default).** When the signed Gitea intake is enabled and `BEACON_GITEA_AGENT_MAP` contains an explicit JSON mapping from Gitea login to a board-capable Beacon agent, the PR card records those participants. Mapped agents may read and comment through the Beacon board; PR-card state, assignment, references, relationships, workflow, enrollment, and forge actions remain unavailable to agents. Every membership change is recorded in the card's history, and every read checks the current configuration: removing a mapping, or a complete event snapshot without the participant, revokes access immediately. Invalid mapping configuration fails closed and does not change stored memberships. PR events and card comments reach mapped participants as ordinary mailbox notices; an agent's comment nudges only participants its mesh call policy allows it to call.
-- **Login for the native app.** The iOS and iPadOS app (being built, see `docs/ios-app-plan.md`) logs in
-  through a native Zitadel client (`ZITADEL_APP_CLIENT_ID`) and gets a device token from Beacon
-  (`POST /auth/app/login`). The token is that person, with the role read on every request as for a
-  browser session; it ends after 30 days without use, at most 10 per person. Up to CL3 the token is
-  enough, so a lock-screen Approve can work; a CL4/CL5 answer or action also needs a signature by the
-  device's Face ID-gated Secure Enclave key, which works once and only within 2 minutes. People see and
-  log out their devices under **App devices** on the Agents tab (`GET`/`DELETE /api/app/devices`), an
-  operator anyone's. What the app does is recorded under the person, `via` = `app`. `GET /api/version`
-  now also answers `api`, which changes only when a change breaks the app. `apps/contract/` holds the
-  signature test vector the app is tested against.
-- **The iOS and iPadOS app, first version** (`apps/apple/`, not yet on TestFlight): log in with Beacon's
-  address and your usual account, see the workflow requests you can see, and answer them as on the
-  web page; CL4/CL5 answers ask for Face ID. `apps/contract/` now also holds the API answers the app
-  decodes, which `tests/test_app_contract.py` keeps current.
-- **The app is ready for TestFlight**: an app icon, a privacy manifest and the export-compliance
-  declaration, and [`apps/apple/TESTFLIGHT.md`](apps/apple/TESTFLIGHT.md) with the one-time setup, the
-  upload commands and a checklist for a real device. Not uploaded yet.
-- **App fixes before the first release.** Links in text that agents write are no longer tappable (their
-  address is written out, as the web page links nothing), and card links show the host they go to.
-  Requests waiting on you come first, and the badge counts those. An operator can send a pending request
-  to a person. Settings says whether notifications are on and opens the system's settings when they are
-  off; logging out also stops notices on that phone. A "Request changes" note that was cancelled is no
-  longer sent with a later Reject. Touch ID devices are told "Touch ID", a failed signature says what to
-  do, and login asks for biometry to be set up first. The agent list shows owners and searches them.
-- **Agents and board in the app.** Agents with their availability, searchable by name, host or tag; an
-  agent's service state, health events and logs, and restarting its gateway behind the same confirm step
-  (Beacon's own words are shown first). The board by column: read a card and its history, comment, and
-  move it (a blocked card asks why). Members get what they get on the web page. The app now has tabs, a
-  sidebar on iPad.
-- **The app's notifications.** After login the app asks to send notifications and registers its APNs
-  token with Beacon at each launch. Approve and Reject work right on a CL3-or-below approval or review
-  notification (the phone must be unlocked; the result comes back as a notification), CL4/CL5 notices
-  open the request in the app for Face ID, and a tap opens the request. The app's icon shows how many
-  requests are pending. `apps/contract/apns.json` pins the payloads Beacon sends.
-- **Notifications to the native app.** With `BEACON_APNS_KEY_FILE`, `_KEY_ID`, `_TEAM_ID` and `_TOPIC`
-  set (an APNs key from the Apple Developer account), Beacon sends the app the notices that browsers
-  get, through Apple's push service: the subject line only, plus, for a workflow request, its ids and a
-  category that decides the notification's actions (Approve/Reject on the lock screen up to CL3; CL4 and
-  CL5 open the app for Face ID). CL4/CL5 and urgent requests are Time Sensitive. Browsers and the app
-  share one hourly limit per person. The app registers its token with `PUT /api/app/devices/self/apns`.
-  New dependency: `httpx[http2]` (adds `h2`), since APNs speaks only HTTP/2. `*.p8` is gitignored.
+- **iOS and iPadOS app** ([`apps/apple/`](apps/apple), not yet on TestFlight). Log in with Beacon's
+  address and your usual account. Requests waiting on you come first; answer them as on the web page, or
+  send one to a person. Agents with their state, health events, logs, gateway restart and secrets. The
+  board: read, comment, move cards. Projects: read them, pause and resume, post a status, comment.
+  Text that agents write is never tappable, and the app keeps no secret value and no cache of Beacon's
+  answers. Setup, TestFlight and a checklist for a real device:
+  [`apps/apple/TESTFLIGHT.md`](apps/apple/TESTFLIGHT.md).
+- **Login for the app.** A native Zitadel client (`ZITADEL_APP_CLIENT_ID`) and a device token from
+  Beacon (`POST /auth/app/login`). The token is that person, with the role read on every request; it ends
+  after 30 days without use, at most 10 per person. Up to CL3 it is enough. A CL4 or CL5 answer or
+  action, and changing who sees intake cards, also need a signature by the device's Face ID or Touch ID
+  key, which works once and only within 2 minutes. People see and log out devices under **App devices**
+  on the Agents tab. The audit log records `via` = `app`. `GET /api/version` also answers `api`, which
+  changes only when a change breaks the app. A member's card answer has `can.change`.
+- **Notifications to the app.** With `BEACON_APNS_KEY_FILE`, `_KEY_ID`, `_TEAM_ID` and `_TOPIC` set,
+  Beacon sends the app the notices that browsers get: the subject line only, plus ids so that a tap opens
+  the request, project or agent's secrets. Approve and Reject work from the lock screen up to CL3; CL4
+  and CL5 open the app. Browsers and the app share one hourly limit per person. New dependency:
+  `httpx[http2]` (adds `h2`). `*.p8` is gitignored.
 
 ### Changed
 
 - **Workflow requests show their number** (`#15`) beside the kind and clearance, the same number the
   card history, the notices and the board tools use.
+- Refusals and notices that said only the web page can answer now name the app too. The agent skill
+  (1.27.0) says the same.
 
 ## [0.40.0] — 2026-11-26
 

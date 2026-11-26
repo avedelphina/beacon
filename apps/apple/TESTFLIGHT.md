@@ -12,7 +12,7 @@
 
 **Beacon**
 
-3. Run a Beacon that has the app login and APNs (the release after 0.40.0).
+3. Run Beacon 0.41.0 or later.
 4. In `.env`: `ZITADEL_APP_CLIENT_ID` and the four `BEACON_APNS_*` settings (see
    `.env.example`). Beacon must reach `api.push.apple.com:443`, and
    `api.sandbox.push.apple.com:443` for builds run from Xcode.
