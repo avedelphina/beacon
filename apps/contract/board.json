@@ -15,10 +15,15 @@
     },
     "done_when": null,
     "escalated_at": null,
+    "help_asked_at": null,
+    "help_by": null,
+    "help_roles": [],
     "id": 1,
     "links": [],
+    "milestone_id": null,
     "next_action": null,
     "parent_id": null,
+    "participants": [],
     "project": "infra",
     "references": [
       {

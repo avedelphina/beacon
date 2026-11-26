@@ -80,6 +80,8 @@ backend/
                   pull) go through the mailbox
   board_mcp.py    /board/mcp: board-only MCP tools for agents (own token) and
                   MCP clients (bearer); a fresh server per app lifespan
+  projects.py     projects: goal, done-when, owner, state; who may steer, move the goal,
+                  and see (cards belong by name, cards.project)
   mesh.py         A2A mesh: same-network peers, derived tokens, /mesh pull config,
                   `install` CLI (host bootstrap)
   ssh.py          the one place that shells out to `ssh` (run + stream_script)

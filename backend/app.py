@@ -7,17 +7,17 @@ import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import app_devices, audit, auth, availability, board, bus, clients, cron_store, fleet, gitea_intake, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, push, scheduler, store, templates, workflow, workhours
+from . import app_devices, audit, auth, availability, board, bus, clients, cron_store, fleet, gitea_intake, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, projects, push, scheduler, secret_pipe, store, templates, workflow, workhours
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
-from .schemas import Agent, AgentClient, CronJob, Host
+from .schemas import Agent, AgentClient, CronJob, Host, SecretError
 from .clearances import CLEARANCE_LABELS, CAPABILITY_CLEARANCES, requires_confirm, clearance_for
 
 
@@ -157,9 +157,9 @@ def _require_human_session(request: Request, capability: str, **clearance_params
     """
     clearance, _ = clearance_for(capability, **clearance_params)
     if clearance >= 4 and getattr(request.state, "auth_via_mcp", False):
-        raise HTTPException(403, f"{clearance.name} action requires a human browser session; MCP callers cannot execute it")
+        raise HTTPException(403, f"{clearance.name} action requires a human browser session or the app; MCP callers cannot execute it")
     if clearance >= 4 and _app_unverified(request):
-        raise HTTPException(403, f"{clearance.name} action needs Face ID: confirm it in the app")
+        raise HTTPException(403, f"{clearance.name} action needs Face ID or Touch ID: confirm it in the app")
 
 app.include_router(auth.router)
 app.include_router(app_devices.router)
@@ -228,6 +228,8 @@ app.add_exception_handler(workflow.UnauthorizedWorkflowAccess, _error_handler(40
 app.add_exception_handler(workflow.HumanApprovalRequired, _error_handler(403))
 app.add_exception_handler(workflow.StalePlan, _error_handler(409))
 app.add_exception_handler(NoSSH, _error_handler(409))
+app.add_exception_handler(projects.NotAllowed, _error_handler(403))
+app.add_exception_handler(SecretError, _error_handler(409))
 app.add_exception_handler(store.HostInUse, _error_handler(409))
 
 
@@ -509,6 +511,7 @@ class CardCreate(BaseModel):
     next_action: str | None = None
     done_when: str | None = None
     links: list[dict] | None = None  # [{url, label}]; board._links checks each
+    milestone: int | None = None
 
 
 class CardUpdate(BaseModel):
@@ -524,6 +527,9 @@ class CardUpdate(BaseModel):
     context_id: str | None = None
     blocked_reason: str | None = None  # unclear | waiting | cannot: required when the card moves to blocked
     waiting_on: str | None = None  # what a waiting card waits on, or what a cannot card lacks
+    milestone: int | None = None  # a milestone of the card's project; 0 clears it
+    help_wanted: bool | None = None  # ask the agents you may assign to; the first to claim takes it
+    help_roles: list[str] | None = None  # with help_wanted: only agents of these classes (policy `roles`)
 
 
 class CardComment(BaseModel):
@@ -694,7 +700,7 @@ def _create_workflow(card_id: int, body: WorkflowCreateRequest, request: Request
 
 def _respond_workflow(request_id: int, body: WorkflowResponseRequest, request: Request) -> dict:
     if _app_unverified(request) and workflow.get(request_id, actor=_workflow_view_actor(request), human=True)["clearance"] >= 4:
-        raise HTTPException(403, f"workflow request {request_id} is CL4 or CL5: confirm the answer with Face ID in the app")
+        raise HTTPException(403, f"workflow request {request_id} is CL4 or CL5: confirm the answer with Face ID or Touch ID in the app")
     return workflow.respond(
         request_id, actor=_workflow_response_actor(request), human=_workflow_human(request),
         action=body.action, response=body.response,
@@ -720,6 +726,100 @@ def _member_may_assign(request: Request, assignee: str | None, current: str | No
                                  "and to the agents the policy opens to members")
 
 
+class ProjectCreate(BaseModel):
+    name: str
+    goal: str
+    done_when: str
+    owner: str | None = None  # left out: the caller
+    links: list[dict] | None = None
+    confirm_new: bool = False  # create it although a similar one is open
+
+
+class ProjectUpdate(BaseModel):
+    name: str | None = None
+    goal: str | None = None
+    done_when: str | None = None
+    owner: str | None = None  # "" hands it to the operators
+    state: str | None = None  # active | paused | done | abandoned
+    status: str | None = None
+    links: list[dict] | None = None
+    note: str | None = None
+    evidence_links: list[dict] | None = None  # needed for state "done", or no_evidence_because
+    no_evidence_because: str | None = None
+
+
+class MilestoneCreate(BaseModel):
+    title: str
+    done_when: str
+    due: str | None = None
+
+
+class MilestoneUpdate(BaseModel):
+    title: str | None = None
+    done_when: str | None = None
+    due: str | None = None  # "" clears it
+    state: str | None = None  # open | done
+    remove: bool = False
+    evidence_links: list[dict] | None = None
+    no_evidence_because: str | None = None
+
+
+@app.post("/api/projects/{project_id}/milestones")
+def milestone_add(project_id: int, body: MilestoneCreate, request: Request) -> dict:
+    return _project_for_viewer(request, projects.add_milestone(_board_author(request), project_id, **body.model_dump()))
+
+
+@app.patch("/api/projects/{project_id}/milestones/{milestone_id}")
+def milestone_change(project_id: int, milestone_id: int, body: MilestoneUpdate, request: Request) -> dict:
+    return _project_for_viewer(request, projects.change_milestone(
+        _board_author(request), project_id, milestone_id, **body.model_dump()))
+
+
+@app.get("/api/roles")
+def role_list(request: Request) -> list[dict]:
+    """The agent classes the policy declares, and whom of each the viewer may ask."""
+    return board.role_directory(_board_author(request))
+
+
+@app.get("/api/projects")
+def project_list(request: Request, include_closed: bool = False) -> list[dict]:
+    return projects.list_projects(_board_author(request), include_closed)
+
+
+@app.post("/api/projects")
+def project_create(body: ProjectCreate, request: Request) -> dict:
+    given = body.model_dump()
+    if "owner" not in body.model_fields_set:
+        given["owner"] = projects.DEFAULT
+    return _project_for_viewer(request, projects.create(_board_author(request), **given))
+
+
+@app.get("/api/projects/{project_id}")
+def project_get(project_id: int, request: Request) -> dict:
+    return _project_for_viewer(request, projects.get(_board_author(request), project_id))
+
+
+@app.patch("/api/projects/{project_id}")
+def project_update(project_id: int, body: ProjectUpdate, request: Request) -> dict:
+    given = body.model_dump()
+    if "owner" not in body.model_fields_set:
+        given["owner"] = projects.DEFAULT
+    return _project_for_viewer(request, projects.update(_board_author(request), project_id, **given))
+
+
+@app.post("/api/projects/{project_id}/comments")
+def project_comment(project_id: int, body: CardComment, request: Request) -> dict:
+    return _project_for_viewer(request, projects.comment(_board_author(request), project_id, body.text))
+
+
+def _project_for_viewer(request: Request, project: dict) -> dict:
+    """A member sees every card of a project they take part in, except intake cards the
+    operators keep from members."""
+    if member := _member(request):
+        return {**project, "card_list": list(filter(members.card_filter(member), project["card_list"]))}
+    return project
+
+
 @app.get("/api/board/assignees")
 def board_assignees(request: Request) -> list[str]:
     """The agents the viewer may give a card to: for the assignee dropdowns."""
@@ -732,7 +832,7 @@ def board_list(request: Request, project: str | None = None, assignee: str | Non
                include_done: bool = False) -> list[dict]:
     cards = board.list_cards(project, assignee, state, include_done)
     if member := _member(request):
-        return [c for c in cards if members.card_visible(member, c)]
+        return list(filter(members.card_filter(member), cards))
     return cards
 
 
@@ -759,7 +859,8 @@ def board_card(card_id: int, request: Request) -> dict:
 def board_create(body: CardCreate, request: Request) -> dict:
     _member_may_assign(request, body.assignee)
     return board.create_card(_board_author(request), body.title, body.body, body.project, body.assignee,
-                             next_action=body.next_action, done_when=body.done_when, links=body.links)
+                             next_action=body.next_action, done_when=body.done_when, links=body.links,
+                             milestone=body.milestone)
 
 
 @app.patch("/api/board/cards/{card_id}")
@@ -906,9 +1007,12 @@ def intake_visibility() -> dict:
 
 @app.put("/api/intake/visibility")
 def set_intake_visibility(body: IntakeVisibilityRequest, request: Request) -> dict:
-    """Who besides operators may see intake cards. Only a person in the web page may change it."""
+    """Who besides operators may see intake cards. Only a person may change it, in the web page or in
+    the app after Face ID or Touch ID: it is an access change, so an app's token alone is not enough."""
     if not _workflow_human(request):
-        raise HTTPException(403, "only a person in the web page may change who sees intake cards")
+        raise HTTPException(403, "only a person in the web page or the app may change who sees intake cards")
+    if _app_unverified(request):
+        raise HTTPException(403, "changing who sees intake cards needs Face ID or Touch ID: confirm it in the app")
     return intake.set_visibility(_board_author(request), members=body.members, agents=body.agents)
 
 
@@ -1459,6 +1563,64 @@ def restart_agent(id_: str, request: Request, confirm: bool = False) -> dict:
     logger.warning("gateway restart of %s by %s", id_, _board_author(request))
     agent, host, driver = for_agent(id_)
     return driver.restart(agent, host)
+
+
+def _refuse_mcp_secrets(request: Request) -> None:
+    if getattr(request.state, "auth_via_mcp", False):
+        raise HTTPException(403, "secrets need a human browser session; MCP callers cannot see them")
+
+
+class SecretPutRequest(BaseModel):
+    name: str = Field(max_length=64)
+    value: str = Field(max_length=secret_pipe.MAX_BYTES)
+    confirm: bool = False
+
+
+@app.get("/api/agents/{id_}/secrets")
+def list_secrets(id_: str, request: Request, response: Response) -> dict:
+    """Names waiting in the agent's outbox. Names only, so an app needs no Face ID to look."""
+    _refuse_mcp_secrets(request)
+    response.headers["Cache-Control"] = "no-store"
+    return {"names": secret_pipe.names(id_)}
+
+
+@app.post("/api/agents/{id_}/secrets")
+def put_secret(id_: str, body: SecretPutRequest, request: Request) -> dict:
+    """A person's paste, into the agent's inbox (backend/secret_pipe.py). Nothing is kept."""
+    _require_human_session(request, "secret_put")
+    if (gate := _confirm_gate("secret_put", body.confirm, f"put secret {body.name!r} in the inbox of {id_!r}",
+                              target=id_)) is not None:
+        return gate
+    action = audit.CURRENT.get()
+    try:
+        path = secret_pipe.put(id_, body.name, body.value.encode())
+    except Exception:
+        audit.finish(action, "failed")
+        raise
+    audit.finish(action, "succeeded")
+    return {"ok": True, "path": path}
+
+
+@app.post("/api/agents/{id_}/secrets/{name}/reveal")
+def reveal_secret(id_: str, name: str, request: Request, response: Response, confirm: bool = False) -> dict:
+    """Show outbox/<name> once: the file is removed after it has been read."""
+    _require_human_session(request, "secret_reveal")
+    if (gate := _confirm_gate("secret_reveal", confirm, f"reveal secret {name!r} of {id_!r} and remove it",
+                              target=id_)) is not None:
+        return gate
+    action = audit.CURRENT.get()
+    try:
+        try:
+            value = secret_pipe.read(id_, name).decode()
+        except UnicodeDecodeError:
+            raise SecretError("this is not text, so the page cannot show it; the file is left where it is")
+        secret_pipe.remove(id_, name)
+    except Exception:
+        audit.finish(action, "failed")
+        raise
+    audit.finish(action, "succeeded")
+    response.headers["Cache-Control"] = "no-store"
+    return {"name": name, "value": value}
 
 
 @app.post("/api/agents/{id_}/restart-agent")

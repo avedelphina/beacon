@@ -11,6 +11,7 @@ locking for no gain. WAL lets readers and the one writer overlap.
 
 import os
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -66,6 +67,54 @@ CREATE TABLE IF NOT EXISTS card_events (
     created_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS card_events_by_card ON card_events (card_id);
+
+-- Long-term work with an owner and a goal (backend/projects.py). A card belongs to one by name
+-- (cards.project), which is how it was before projects were records.
+CREATE TABLE IF NOT EXISTS projects (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    goal        TEXT NOT NULL DEFAULT '',
+    done_when   TEXT,
+    owner       TEXT,                        -- agent id or email; NULL = the operators
+    goal_by     TEXT,                        -- who set goal and done_when: only they change them (projects.may_set_goal)
+    state       TEXT NOT NULL,               -- active | paused | done | abandoned
+    paused_by   TEXT,
+    status      TEXT,                        -- the owner's current summary
+    status_at   REAL,
+    links       TEXT NOT NULL DEFAULT '[]',  -- JSON [{url, label}]: tickets, repositories
+    evidence    TEXT,                        -- when done: JSON {links, none_because}; a claim, never checked
+    active_at   REAL NOT NULL DEFAULT 0,     -- created, reopened, resumed or planned: the stall clock starts no earlier
+    stall_step  INTEGER NOT NULL DEFAULT 0,  -- 1 owner reminded, 2 person told, 3 paused (projects.check_stalled)
+    stall_at    REAL,                        -- when; a step older than the last activity no longer counts
+    created_by  TEXT NOT NULL,
+    created_at  REAL NOT NULL,
+    updated_at  REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS project_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL REFERENCES projects (id),
+    author      TEXT NOT NULL,
+    kind        TEXT NOT NULL,     -- created | comment | goal | milestone | owner | status | state | edit
+    body        TEXT NOT NULL,
+    created_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS project_events_by_project ON project_events (project_id);
+
+-- A project's progress is which of these are met, in order of creation.
+CREATE TABLE IF NOT EXISTS project_milestones (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL REFERENCES projects (id),
+    title       TEXT NOT NULL,
+    done_when   TEXT NOT NULL,
+    due         TEXT,              -- YYYY-MM-DD, for people to read; nothing acts on it
+    set_by      TEXT NOT NULL,     -- who set title and done_when: only they change or remove it (as a goal)
+    state       TEXT NOT NULL DEFAULT 'open',  -- open | done
+    evidence    TEXT,              -- as projects.evidence
+    closed_by   TEXT,
+    closed_at   REAL,
+    created_at  REAL NOT NULL
+);
 
 -- "card_id cannot finish until depends_on_id is done". A card's blocked_by is computed from these
 -- edges and the other card's state, never stored (board.get_card). No cycles (board.add_dependency).
@@ -187,6 +236,19 @@ CREATE TABLE IF NOT EXISTS card_reference_claims (
     UNIQUE (card_id, reference_id)
 );
 CREATE INDEX IF NOT EXISTS card_reference_claims_by_card ON card_reference_claims (card_id);
+
+-- Agents explicitly mapped from an external Gitea login may join that PR's Beacon thread.
+-- Membership is source-derived and never grants forge authority; board and mailbox policy
+-- still decide whether the agent can read or receive a nudge.
+CREATE TABLE IF NOT EXISTS card_participants (
+    card_id      INTEGER NOT NULL REFERENCES cards (id),
+    agent        TEXT NOT NULL,
+    gitea_login  TEXT NOT NULL,
+    created_at   REAL NOT NULL,
+    updated_at   REAL NOT NULL,
+    PRIMARY KEY (card_id, gitea_login)
+);
+CREATE INDEX IF NOT EXISTS card_participants_by_agent ON card_participants (agent, card_id);
 
 CREATE TABLE IF NOT EXISTS chat_exposure (
     agent       TEXT PRIMARY KEY,
@@ -341,7 +403,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for column, decl in (("reminded_at", "REAL"), ("reminders", "INTEGER NOT NULL DEFAULT 0"),
                          ("escalated_at", "REAL"), ("next_action", "TEXT"), ("done_when", "TEXT"),
                          ("links", "TEXT NOT NULL DEFAULT '[]'"), ("blocked_reason", "TEXT"), ("waiting_on", "TEXT"),
-                         ("parent_id", "INTEGER REFERENCES cards (id)")):
+                         ("parent_id", "INTEGER REFERENCES cards (id)"),
+                         ("milestone_id", "INTEGER"), ("help_by", "TEXT"), ("help_asked_at", "REAL"),
+                         ("help_roles", "TEXT NOT NULL DEFAULT '[]'")):
         if column not in card_columns:
             conn.execute(f"ALTER TABLE cards ADD COLUMN {column} {decl}")
     # "tier" became "clearance" (CL0 to CL5, the DeepOcean operating model's word). Existing databases keep their
@@ -361,6 +425,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                          ("urgent_reason", "TEXT")):
         if column not in request_columns:
             conn.execute(f"ALTER TABLE workflow_requests ADD COLUMN {column} {decl}")
+    _migrate_projects(conn)
     columns = {row[1] for row in conn.execute("PRAGMA table_info(card_events)")}
     if "notice_id" not in columns:
         conn.execute("ALTER TABLE card_events ADD COLUMN notice_id INTEGER REFERENCES mailbox (id)")
@@ -374,3 +439,28 @@ def _migrate(conn: sqlite3.Connection) -> None:
     claim_columns = {row[1] for row in conn.execute("PRAGMA table_info(card_reference_claims)")}
     if claim_columns and "last_event_at" not in claim_columns:
         conn.execute("ALTER TABLE card_reference_claims ADD COLUMN last_event_at REAL")
+    # For an existing database this table is created by the schema above; the index is
+    # additive too, so old state gets the same lookup path on its next connection.
+    conn.execute("CREATE TABLE IF NOT EXISTS card_participants ("
+                 "card_id INTEGER NOT NULL REFERENCES cards (id), agent TEXT NOT NULL, "
+                 "gitea_login TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, "
+                 "PRIMARY KEY (card_id, gitea_login))")
+    conn.execute("CREATE INDEX IF NOT EXISTS card_participants_by_agent "
+                 "ON card_participants (agent, card_id)")
+
+
+def _migrate_projects(conn: sqlite3.Connection) -> None:
+    """Once: every free-text project name on a card becomes a project with no goal and no owner
+    (the operators'). Names that differ only in case or outer spaces become one."""
+    if conn.execute("SELECT 1 FROM settings WHERE key = 'projects_migrated'").fetchone():
+        return
+    now = time.time()
+    with conn:
+        conn.execute("UPDATE cards SET project = NULLIF(trim(project), '') WHERE project IS NOT NULL")
+        conn.execute("INSERT OR IGNORE INTO projects (name, state, created_by, created_at, updated_at)"
+                     " SELECT project, 'active', 'beacon', ?, ? FROM cards WHERE project IS NOT NULL ORDER BY id",
+                     (now, now))
+        conn.execute("UPDATE cards SET project = (SELECT name FROM projects WHERE projects.name = cards.project)"
+                     " WHERE project IS NOT NULL")
+        conn.execute("INSERT OR IGNORE INTO settings (key, value, updated_by, updated_at)"
+                     " VALUES ('projects_migrated', '1', 'beacon', ?)", (now,))

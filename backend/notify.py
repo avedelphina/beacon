@@ -44,11 +44,20 @@ def workflow_created(request: dict, revised: bool = False) -> None:
     responder, and email the people who may answer."""
     try:
         lead = "changed the plan and asks again for" if revised else "asks you for"
-        _agent_notice(request["eligible_responder"], request, (
+        responder = request["eligible_responder"]
+        asked = [responder]
+        if responder.startswith("role:"):
+            from . import workflow
+            asked = workflow.role_holders(request["requester"], responder[len("role:"):])
+            lead = (f"{'changed the plan and asks again' if revised else 'asks'}, of any {responder[len('role:'):]} "
+                    "(the first answer counts), for")
+        text = (
             f"{request['requester']} {lead} {_what(request)}: workflow request #{request['id']} on card "
             f"#{request['card_id']}.\nTitle: {request['title']}\nClearance: CL{request['clearance']}\n\n"
             f"{request['summary'][:SUMMARY_CHARS]}\n\nRead it with workflow_get({request['id']}) and answer "
-            f"with workflow_respond. It expires {_when(request['expires_at'])}."), skip=request["requester"])
+            f"with workflow_respond. It expires {_when(request['expires_at'])}.")
+        for agent_id in asked:
+            _agent_notice(agent_id, request, text, skip=request["requester"])
         _tell(_people_to_ask(request),
               f"Beacon: {_urgent_mark(request)}{request['requester']} {'changed a plan and ' if revised else ''}needs your answer",
               _created_body(request), **_urgency(request), **_about(request))
@@ -243,6 +252,35 @@ def cards_stuck(stuck: list[tuple[dict, str | None, str]]) -> None:
         logger.exception("stuck-card notice failed")
 
 
+def project_changed(project: dict, actor: str, person: str | None, note: str | None) -> None:
+    """A project was paused, finished or abandoned: the person behind its owner (or the
+    operators) is told. Informed, not asked."""
+    try:
+        people = ({person} if person else {p.casefold() for p in _operators()}) - {actor.casefold()}
+        _tell(people, f"Beacon: project {project['name'][:60]} is {project['state']}",
+              f"{actor} marked project #{project['id']} \"{project['name']}\" {project['state']}. This is for your "
+              "information; nothing waits for you.\n"
+              + (f"\nGoal (written by whoever set it): {project['goal'][:400]}\n" if project["goal"] else "")
+              + (f"\nNote: {note[:400]}\n" if note else "")
+              + ("\n\"Done\" is the owner's claim: Beacon has not checked it.\n" if project["state"] == "done" else "")
+              + f"\nOpen the Projects tab: {mesh.public_url() or 'your Beacon page'}\n")
+    except Exception:
+        logger.exception("project notice for %s failed", project.get("id"))
+
+
+def project_stalled(project: dict, person: str | None) -> None:
+    """Nothing is planned for a project whose goal is not marked reached."""
+    try:
+        people = {person} if person else {p.casefold() for p in _operators()}
+        _tell(people, f"Beacon: nothing is planned for project {project['name'][:60]}",
+              f"Project #{project['id']} \"{project['name']}\" (owner {project['owner']}) has no unfinished card and is "
+              "not marked done. If nothing is planned it will be paused.\n"
+              f"\nGoal (written by whoever set it): {project['goal'][:400]}\n"
+              f"\nOpen the Projects tab: {mesh.public_url() or 'your Beacon page'}\n")
+    except Exception:
+        logger.exception("stalled-project notice for %s failed", project.get("id"))
+
+
 def _people_for(agent_id: str) -> set[str]:
     from . import auth
     owner = None
@@ -255,6 +293,13 @@ def _people_for(agent_id: str) -> set[str]:
 
 def _footer() -> str:
     return f"\nThe Agents tab shows its state: {mesh.public_url() or 'your Beacon page'}\n"
+
+
+def secret_offered(agent_id: str, name: str) -> None:
+    """Names only: the value stays on the host until a person reveals it."""
+    _tell(_people_for(agent_id), f"Beacon: {agent_id} has a secret for you",
+          f"{agent_id} left a secret named {name!r} for you. Reveal it under Agents, Inspect, Secrets: "
+          f"{mesh.public_url() or 'your Beacon page'}\n")
 
 
 # --- email -----------------------------------------------------------------
@@ -292,7 +337,7 @@ def _created_body(request: dict) -> str:
         + "\n".join("  > " + line for line in request["summary"][:SUMMARY_CHARS].splitlines())
         + ("\n  > [cut]" if len(request["summary"]) > SUMMARY_CHARS else "")
         + _consult_line(request)
-        + ("\n\nThis is CL4 or above: only you, in the web page, can answer it. Your AI clients cannot."
+        + ("\n\nThis is CL4 or above: only you, in the web page or the app, can answer it. Your AI clients cannot."
            if request["clearance"] >= 4 else "")
         + f"\n\nOpen the Workflows tab to read it in full and answer: {link or 'your Beacon page'}\n"
     )

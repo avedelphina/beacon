@@ -126,6 +126,21 @@ CAPABILITY_CLEARANCES: dict[str, tuple[Clearance, str]] = {
         "the board, so changing them is a policy change by another route. Human browser "
         "session only, like the policy editor.",
     ),
+    "secret_put": (
+        Clearance.CL4,
+        "A person pastes a secret into a file on an agent's host. Browser session or Face ID only: "
+        "the LLM-facing MCP token must neither see nor plant secrets.",
+    ),
+    "secret_reveal": (
+        Clearance.CL4,
+        "Shows a secret from an agent's host to a person, and removes the file. Browser session or "
+        "Face ID only, so no token can read secrets.",
+    ),
+    "secret_send": (
+        Clearance.CL2,
+        "An agent moves a file of its own to an agent the access policy lets it call. Autonomous and "
+        "recorded; neither agent's conversation carries the value.",
+    ),
     "auto_heal": (
         Clearance.CL2,
         "The host sync restarts a gateway that stopped answering its own probe: the everyday fix, "
