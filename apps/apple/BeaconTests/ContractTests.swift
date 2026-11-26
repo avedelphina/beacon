@@ -273,3 +273,43 @@ struct SecretTests {
         #expect(Client.session.configuration.urlCache?.diskCapacity ?? 0 == 0)
     }
 }
+
+struct ProjectTests {
+    @Test func theListAndAProjectDecode() throws {
+        let list = try Client.decoder.decode([ProjectSummary].self, from: contract("projects.json"))
+        #expect(list.first?.name == "infra" && list.first?.cards["todo"] == 1)
+        let project = try Client.decoder.decode(Project.self, from: contract("project.json"))
+        #expect(project.can.steer && project.state == "active" && !project.isClosed)
+        #expect(project.milestones.first?.due == "2026-12-01" && project.status == "Waiting for the approval")
+        #expect(project.cardList.count == 1 && !project.events.isEmpty && project.links.first?.label == "repo")
+    }
+
+    @Test func progressCountsWhatIsLeft() {
+        #expect(Projects.progress(["todo": 1, "doing": 1, "done": 3]) == "2 open · 3 done")
+        #expect(Projects.progress([:]) == "no cards")
+    }
+
+    @Test func aChangeSendsOnlyWhatChanged() throws {
+        let sent = try JSONSerialization.jsonObject(with: JSONEncoder().encode(ProjectChange(state: "paused"))) as! [String: Any]
+        #expect(Array(sent.keys) == ["state"])  // never "owner": leaving it out keeps it
+    }
+
+    @Test func aMembersCardSaysWhetherTheyMayChangeIt() throws {
+        #expect(try Client.decoder.decode(Card.self, from: contract("card-member.json")).can?.change == true)
+        #expect(try Client.decoder.decode(Card.self, from: contract("card.json")).mayChange)  // an operator: no `can`
+    }
+
+    @Test func aTappedProjectNoticeNamesIt() throws {
+        let sent = try JSONSerialization.jsonObject(with: contract("apns.json")) as! [String: [AnyHashable: Any]]
+        #expect(Notices.projectID(sent["project"]!) == 3 && Notices.projectID(sent["secret"]!) == nil)
+    }
+
+    @Test func aReviewAskedOfAClassSaysSo() throws {
+        var fields = try JSONSerialization.jsonObject(with: contract("workflow.json")) as! [String: Any]
+        for (asked, label) in [("role:reviewer", "any reviewer"), ("human", "a person"), ("beta", "beta")] {
+            fields["eligible_responder"] = asked
+            let request = try Client.decoder.decode(WorkflowRequest.self, from: JSONSerialization.data(withJSONObject: fields))
+            #expect(request.responderLabel == label)
+        }
+    }
+}

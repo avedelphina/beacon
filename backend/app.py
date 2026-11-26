@@ -837,9 +837,12 @@ def board_list(request: Request, project: str | None = None, assignee: str | Non
 
 
 def _for_viewer(request: Request, card: dict) -> dict:
-    """A member sees the cards a card is related to only if they may see those cards too."""
+    """A member sees the cards a card is related to only if they may see those cards too. Their
+    answer also says whether they may change this one or only comment on it (a card of someone else's
+    in a project they take part in), so that a client offers only what members.check will allow."""
     if member := _member(request):
-        return board.restrict(card, lambda c: members.card_visible(member, c))
+        return board.restrict(card, lambda c: members.card_visible(member, c)) | {
+            "can": {"change": members.card_manageable(member, card)}}
     return card
 
 

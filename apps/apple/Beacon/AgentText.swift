@@ -28,8 +28,14 @@ nonisolated enum AgentText {
 struct SourceLinks: View {
     let card: Card
 
+    var body: some View { LinkList(links: card.sources) }
+}
+
+struct LinkList: View {
+    let links: [(label: String, url: URL)]
+
     var body: some View {
-        ForEach(card.sources, id: \.url) { source in
+        ForEach(links, id: \.url) { source in
             Link(destination: source.url) {
                 VStack(alignment: .leading) {
                     Text(verbatim: source.label)
@@ -40,16 +46,21 @@ struct SourceLinks: View {
     }
 }
 
-nonisolated extension Card {
-    var sources: [(label: String, url: URL)] {
-        let typed = (references ?? []).map { ("\($0.provider) \($0.kind.replacingOccurrences(of: "_", with: " ")) \($0.externalId)", $0.url) }
-            + (links ?? []).map { ($0.label ?? $0.url, $0.url) }
+nonisolated enum SafeLinks {
+    /// Web addresses only, each once: never a file:, tel: or another app's scheme that an agent typed.
+    static func from(_ typed: [(String, String)]) -> [(label: String, url: URL)] {
         var seen = Set<URL>()
         return typed.compactMap { label, address in
-            // Web addresses only: never a file:, tel: or another app's scheme that an agent typed.
             guard let url = URL(string: address), url.scheme == "https" || url.scheme == "http", seen.insert(url).inserted else { return nil }
             return (label, url)
         }
+    }
+}
+
+nonisolated extension Card {
+    var sources: [(label: String, url: URL)] {
+        SafeLinks.from((references ?? []).map { ("\($0.provider) \($0.kind.replacingOccurrences(of: "_", with: " ")) \($0.externalId)", $0.url) }
+            + (links ?? []).map { ($0.label ?? $0.url, $0.url) })
     }
 }
 

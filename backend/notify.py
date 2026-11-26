@@ -263,7 +263,8 @@ def project_changed(project: dict, actor: str, person: str | None, note: str | N
               + (f"\nGoal (written by whoever set it): {project['goal'][:400]}\n" if project["goal"] else "")
               + (f"\nNote: {note[:400]}\n" if note else "")
               + ("\n\"Done\" is the owner's claim: Beacon has not checked it.\n" if project["state"] == "done" else "")
-              + f"\nOpen the Projects tab: {mesh.public_url() or 'your Beacon page'}\n")
+              + f"\nOpen the Projects tab: {mesh.public_url() or 'your Beacon page'}\n",
+              about={"project": project["id"]})  # the app opens it from the notification
     except Exception:
         logger.exception("project notice for %s failed", project.get("id"))
 
@@ -276,7 +277,7 @@ def project_stalled(project: dict, person: str | None) -> None:
               f"Project #{project['id']} \"{project['name']}\" (owner {project['owner']}) has no unfinished card and is "
               "not marked done. If nothing is planned it will be paused.\n"
               f"\nGoal (written by whoever set it): {project['goal'][:400]}\n"
-              f"\nOpen the Projects tab: {mesh.public_url() or 'your Beacon page'}\n")
+              f"\nOpen the Projects tab: {mesh.public_url() or 'your Beacon page'}\n", about={"project": project["id"]})
     except Exception:
         logger.exception("stalled-project notice for %s failed", project.get("id"))
 

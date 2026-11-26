@@ -70,6 +70,13 @@ nonisolated struct WorkflowRequest: Decodable, Identifiable, Sendable, Hashable 
         enum Keys: String, CodingKey { case note, text, option }
     }
 
+    /// Who is asked, in words: a person, any agent of a class ("role:reviewer"), or one by name.
+    var responderLabel: String {
+        if eligibleResponder == "human" { return "a person" }
+        if eligibleResponder.hasPrefix("role:") { return "any \(eligibleResponder.dropFirst(5))" }
+        return eligibleResponder
+    }
+
     var isOpen: Bool { state == "pending" }
     var needsFaceID: Bool { clearance >= 4 }
 }
@@ -108,6 +115,14 @@ nonisolated struct Card: Decodable, Sendable {
     let blockedReason: String?
     let waitingOn: String?
     let events: [CardEvent]?
+    let milestoneId: Int?
+    let helpBy: String?          // who is asking for help; nil when none is wanted
+    let helpRoles: [String]?
+    /// Only in a member's answer: false for someone else's card in a project they take part in.
+    let can: Rights?
+
+    nonisolated struct Rights: Decodable, Sendable { let change: Bool }
+    var mayChange: Bool { can?.change ?? true }
 
     nonisolated struct Reference: Decodable, Sendable, Identifiable {
         let id: Int

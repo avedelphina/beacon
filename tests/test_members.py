@@ -206,3 +206,14 @@ def test_making_someone_an_owner_is_an_access_change_for_a_person_only(people, m
     assert mcp.put("/api/agents/n1", json=record | {"owner": ANN}).status_code == 403
     assert mcp.put("/api/agents/n1", json=record | {"member_logs": True}).status_code == 403
     assert mcp.put("/api/agents/n1", json=record | {"notes": "fine"}).status_code == 200
+
+
+def test_a_member_is_told_which_cards_are_theirs_to_change(people):
+    mine = board.create_card("beacon", "Mine", assignee="a1")["id"]
+    assert people["ann"].get(f"/api/board/cards/{mine}").json()["can"] == {"change": True}
+    assert "can" not in people["tom"].get(f"/api/board/cards/{mine}").json()  # an operator may change any
+    people["tom"].post("/api/projects", json={"name": "shared", "goal": "g", "done_when": "d"})
+    board.create_card("beacon", "Hers", assignee="a1", project="shared")
+    theirs = board.create_card("beacon", "His", assignee="b1", project="shared")["id"]
+    assert people["ann"].get(f"/api/board/cards/{theirs}").json()["can"] == {"change": False}
+    assert people["ann"].patch(f"/api/board/cards/{theirs}", json={"state": "doing"}).status_code == 403

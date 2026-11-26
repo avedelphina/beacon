@@ -27,6 +27,8 @@ final class Session {
     var openRequest: Int?
     /// An agent whose secrets to show, from a tapped notification ("alpha has a secret for you").
     var openSecrets: String?
+    /// A project to show, from a tapped notification.
+    var openProject: Int?
     /// Bumped when something changed the requests (a notice arrived, an answer from a notification).
     var refreshes = 0
     var pushProblem: String?
@@ -105,13 +107,14 @@ struct MainView: View {
     @Environment(\.scenePhase) private var phase
     @State private var tab = Tabs.requests
 
-    enum Tabs: Hashable { case requests, agents, board, settings }
+    enum Tabs: Hashable { case requests, agents, board, projects, settings }
 
     var body: some View {
         TabView(selection: $tab) {
             Tab("Requests", systemImage: "tray", value: Tabs.requests) { RequestsSplitView() }
             Tab("Agents", systemImage: "cpu", value: Tabs.agents) { AgentsView() }
             Tab("Board", systemImage: "rectangle.stack", value: Tabs.board) { BoardView() }
+            Tab("Projects", systemImage: "flag", value: Tabs.projects) { ProjectsView() }
             Tab("Settings", systemImage: "gearshape", value: Tabs.settings) { SettingsView() }
         }
         .tabViewStyle(.sidebarAdaptable)
@@ -119,5 +122,6 @@ struct MainView: View {
         // A tapped notification is about a request, whichever tab was open.
         .onChange(of: session.openRequest, initial: true) { if session.openRequest != nil { tab = .requests } }
         .onChange(of: session.openSecrets, initial: true) { if session.openSecrets != nil { tab = .agents } }
+        .onChange(of: session.openProject, initial: true) { if session.openProject != nil { tab = .projects } }
     }
 }

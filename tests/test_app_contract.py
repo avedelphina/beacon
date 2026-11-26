@@ -93,6 +93,15 @@ def answers(fleet, fake_ssh, monkeypatch):
         "secret-put.json": client.post("/api/agents/alpha/secrets", json={"name": "api-key", "value": "x", "confirm": True}),
         "secret-reveal.json": client.post("/api/agents/alpha/secrets/db-password/reveal?confirm=true"),
     }
+    project_id = client.get("/api/projects").json()[0]["id"]
+    client.post(f"/api/projects/{project_id}/milestones", json={"title": "New key live", "done_when": "all zones signed",
+                                                               "due": "2026-12-01"})
+    client.patch(f"/api/projects/{project_id}", json={"status": "Waiting for the approval",
+                                                     "links": [{"url": "https://git.example.com/infra", "label": "repo"}]})
+    answers |= {
+        "projects.json": client.get("/api/projects"),
+        "project.json": client.get(f"/api/projects/{project_id}"),
+    }
     # A member gets trimmed views (backend/members.py); the app must decode those too.
     member = TestClient(app)
     member_payload = base64.b64encode(json.dumps({"user": {"email": "ann@example.com"}}).encode()).decode()
@@ -102,6 +111,7 @@ def answers(fleet, fake_ssh, monkeypatch):
         "agents-member.json": member.get("/api/agents"),
         "availability-member.json": member.get("/api/availability"),
         "status-member.json": member.get("/api/agents/alpha/status"),
+        "card-member.json": member.get(f"/api/board/cards/{card['id']}"),
     }
     assert all(r.status_code == 200 for r in answers.values()), {k: r.text for k, r in answers.items()}
     return {k: r.json() for k, r in answers.items()}
@@ -119,6 +129,7 @@ def test_the_notification_payloads_match_what_beacon_sends():
         "open": apns.payload("alpha needs your answer", about={"workflow": 19, "clearance": 2, "kind": "decision", "card": 5}),
         "plain": apns.payload("alpha has not synced for 2 hours"),
         "secret": apns.payload("alpha has a secret for you", about={"agent": "alpha"}),
+        "project": apns.payload("project infra is paused", about={"project": 3}),
     }
     path = CONTRACT / "apns.json"
     if os.environ.get("BEACON_UPDATE_CONTRACT"):
@@ -129,7 +140,7 @@ def test_the_notification_payloads_match_what_beacon_sends():
 @pytest.mark.parametrize("name", [
     "workflow.json", "workflows.json", "card.json", "version.json", "board.json", "agents.json", "availability.json",
     "health-events.json", "status.json", "logs.json", "restart-gate.json", "restart.json", "agents-member.json",
-    "secrets.json", "secret-put.json", "secret-reveal.json",
+    "secrets.json", "secret-put.json", "secret-reveal.json", "projects.json", "project.json", "card-member.json",
     "availability-member.json", "status-member.json"])
 def test_the_apps_contract_files_match_the_api(answers, name):
     path = CONTRACT / name
