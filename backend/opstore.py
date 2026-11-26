@@ -188,6 +188,19 @@ CREATE TABLE IF NOT EXISTS card_reference_claims (
 );
 CREATE INDEX IF NOT EXISTS card_reference_claims_by_card ON card_reference_claims (card_id);
 
+-- Agents explicitly mapped from an external Gitea login may join that PR's Beacon thread.
+-- Membership is source-derived and never grants forge authority; board and mailbox policy
+-- still decide whether the agent can read or receive a nudge.
+CREATE TABLE IF NOT EXISTS card_participants (
+    card_id      INTEGER NOT NULL REFERENCES cards (id),
+    agent        TEXT NOT NULL,
+    gitea_login  TEXT NOT NULL,
+    created_at   REAL NOT NULL,
+    updated_at   REAL NOT NULL,
+    PRIMARY KEY (card_id, gitea_login)
+);
+CREATE INDEX IF NOT EXISTS card_participants_by_agent ON card_participants (agent, card_id);
+
 CREATE TABLE IF NOT EXISTS chat_exposure (
     agent       TEXT PRIMARY KEY,
     open_json   TEXT NOT NULL,     -- names of the settings that open its chat to anyone; [] for none
@@ -374,3 +387,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     claim_columns = {row[1] for row in conn.execute("PRAGMA table_info(card_reference_claims)")}
     if claim_columns and "last_event_at" not in claim_columns:
         conn.execute("ALTER TABLE card_reference_claims ADD COLUMN last_event_at REAL")
+    # For an existing database this table is created by the schema above; the index is
+    # additive too, so old state gets the same lookup path on its next connection.
+    conn.execute("CREATE TABLE IF NOT EXISTS card_participants ("
+                 "card_id INTEGER NOT NULL REFERENCES cards (id), agent TEXT NOT NULL, "
+                 "gitea_login TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, "
+                 "PRIMARY KEY (card_id, gitea_login))")
+    conn.execute("CREATE INDEX IF NOT EXISTS card_participants_by_agent "
+                 "ON card_participants (agent, card_id)")
