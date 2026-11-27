@@ -62,6 +62,12 @@ struct SecretsView: View {
                             Button { asking = waiting } label: {
                                 LabeledContent { Text("Reveal…") } label: { Text(verbatim: waiting) }
                             }
+                            .confirmationDialog("Reveal this secret?", isPresented: Binding(get: { asking == waiting }, set: { if !$0 && asking == waiting { asking = nil } }),
+                                                titleVisibility: .visible) {
+                                Button("Reveal with \(Biometry.name)") { reveal(waiting) }
+                            } message: {
+                                Text(verbatim: "“\(waiting)” is then removed from the agent's host. It cannot be shown again.")
+                            }
                         }
                     } else if problem == nil {
                         ProgressView()
@@ -95,18 +101,12 @@ struct SecretsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { if revealed == nil { dismiss() } else { confirmClose = true } }
+                        .confirmationDialog("Close and lose this secret?", isPresented: $confirmClose, titleVisibility: .visible) {
+                            Button("Close", role: .destructive) { dismiss() }
+                        } message: {
+                            Text("It is no longer on the agent's host, so it cannot be shown again.")
+                        }
                 }
-            }
-            .confirmationDialog("Close and lose this secret?", isPresented: $confirmClose, titleVisibility: .visible) {
-                Button("Close", role: .destructive) { dismiss() }
-            } message: {
-                Text("It is no longer on the agent's host, so it cannot be shown again.")
-            }
-            .confirmationDialog("Reveal this secret?", isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }),
-                                titleVisibility: .visible, presenting: asking) { waiting in
-                Button("Reveal with \(Biometry.name)") { reveal(waiting) }
-            } message: { waiting in
-                Text(verbatim: "“\(waiting)” is then removed from the agent's host. It cannot be shown again.")
             }
             .task { await load() }
         }

@@ -144,6 +144,12 @@ struct AgentDetailView: View {
             }
             Section {
                 Button(restarting ? "Restarting…" : "Restart gateway…") { ask() }.disabled(restarting)
+                    .confirmationDialog("Restart \(agent.id)?", isPresented: Binding(get: { wouldRun != nil }, set: { if !$0 { wouldRun = nil } }),
+                                        titleVisibility: .visible, presenting: wouldRun) { _ in
+                        Button("Restart", role: .destructive) { restart() }
+                    } message: { gate in
+                        Text(gate.detail)  // Beacon's own words: what would run, at which clearance
+                    }
                 if let result {
                     Label(result.ok ? "Restarted" : "Restart failed", systemImage: result.ok ? "checkmark.circle" : "xmark.octagon")
                         .foregroundStyle(result.ok ? .green : .red)
@@ -177,12 +183,6 @@ struct AgentDetailView: View {
             }
         }
         .refreshable { await load() }
-        .confirmationDialog("Restart \(agent.id)?", isPresented: Binding(get: { wouldRun != nil }, set: { if !$0 { wouldRun = nil } }),
-                            titleVisibility: .visible, presenting: wouldRun) { _ in
-            Button("Restart", role: .destructive) { restart() }
-        } message: { gate in
-            Text(gate.detail)  // Beacon's own words: what would run, at which clearance
-        }
     }
 
     private func load() async {
