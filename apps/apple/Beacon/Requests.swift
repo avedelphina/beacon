@@ -171,6 +171,8 @@ struct RequestDetailView: View {
                             titleVisibility: .visible, presenting: asking) { action in
             Button(confirmButton(action), role: action == .rejected ? .destructive : nil) { send(action) }
         }
+        // The requester changed the plan while a dialog was open: ask again, over what is on screen now.
+        .onChange(of: request.planHash) { asking = nil; askingChanges = false }
         .alert("What needs to change?", isPresented: $askingChanges) {
             TextField("Note for \(request.requester)", text: $note)
             Button("Send") { send(.changes_requested) }
@@ -295,7 +297,7 @@ struct RequestDetailView: View {
     }
 
     /// The answer names the plan the person saw (revision and hash): if the requester changed it since,
-    /// Beacon marks the request stale instead of approving something else.
+    /// Beacon refuses the answer instead of approving something else.
     private func send(_ action: Action) {
         guard let client = session.client else { return }
         var response: [String: String] = [:]

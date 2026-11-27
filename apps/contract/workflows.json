@@ -28,6 +28,8 @@
     ],
     "plan_hash": "8f88ff93775dc4e3af62dcb4161b0e1314452c2608a0bb60eafffbf362af814b",
     "plan_revision": "desired:8f88ff93775dc4e3",
+    "replaces_id": null,
+    "report": null,
     "requester": "alpha",
     "require_human": false,
     "responded_at": null,

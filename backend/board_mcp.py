@@ -444,9 +444,11 @@ def build() -> MCPServer:
                         options: list[str] | None = None, target: dict | None = None,
                         expires_at: float | None = None, plan_revision: str | None = None,
                         plan_hash: str | None = None, context_id: str | None = None) -> dict:
-        """After a responder asked for changes (state "changes_requested"), send the changed plan: the
-        request goes back to pending for the same responder. Only the requester may; give only what
-        changed. Leave out plan_revision and plan_hash and Beacon binds the new text itself."""
+        """Change your own request while it is pending, or after a responder asked for changes
+        ("changes_requested"): it stays or goes back to pending for the same responder, and an answer to
+        the old text is refused. Give only what changed. An approved request is never rewritten, and a
+        pending approval or review below CL4 that a person could answer cannot change either: make a new
+        one with workflow_create(replaces=...). Leave out plan_revision and plan_hash and Beacon binds the new text itself."""
         if (plan_revision is None) != (plan_hash is None):
             raise workflow.WorkflowError("give both plan_revision and plan_hash, or neither")
         if plan_revision is None:
@@ -461,13 +463,31 @@ def build() -> MCPServer:
             expires_at=expires_at, plan_revision=plan_revision, plan_hash=plan_hash, context_id=context_id)
 
     @server.tool()
+    def workflow_withdraw(ctx: Context, request_id: int, reason: str, context_id: str | None = None) -> dict:
+        """Take back your own request: pending, sent back, or already approved (the approval is then void).
+        Use it as soon as you will not or cannot do what you asked about, so nobody answers or counts on it."""
+        _discussion_only_request(ctx, workflow.get(request_id, actor=_author(ctx)))
+        return workflow.withdraw(request_id, actor=_author(ctx), reason=reason, context_id=context_id)
+
+    @server.tool()
+    def workflow_report(ctx: Context, request_id: int, outcome: str, note: str, links: list[dict] | None = None,
+                        context_id: str | None = None) -> dict:
+        """Say what became of your approved request once you have acted: outcome "executed" or "failed",
+        note what happened, links [{url, label}] to the evidence. Recorded as your own account; Beacon
+        does not check it. Report promptly: an approval left alone expires."""
+        _discussion_only_request(ctx, workflow.get(request_id, actor=_author(ctx)))
+        return workflow.report(request_id, actor=_author(ctx), outcome=outcome, note=note, links=links,
+                               context_id=context_id)
+
+    @server.tool()
     def workflow_create(ctx: Context, card_id: int, kind: str, eligible_responder: str,
                         capability: str, title: str, summary: str, clearance: int | None = None,
                         options: list[str] | None = None, target: dict | None = None,
                         expires_at: float | None = None, plan_revision: str | None = None,
                         plan_hash: str | None = None, context_id: str | None = None,
                         consulted: list[dict] | None = None, consult_skipped: str | None = None,
-                        urgent_reason: str | None = None, tier: int | None = None) -> dict:
+                        urgent_reason: str | None = None, tier: int | None = None,
+                        replaces: int | None = None) -> dict:
         """Create a pending typed workflow request attached to a board card. eligible_responder may
         be "role:<name>" (see role_list) for CL0 to CL3: every agent of that class you may call is
         told, and the first answer counts. When you ask a person
@@ -489,7 +509,13 @@ def build() -> MCPServer:
         the card is assigned to it), review, or approval. Leave out plan_revision and plan_hash
         and Beacon binds the request to its own text: a response then has to name that exact
         plan, and an edited plan cannot be approved. context_id links an A2A thread; every change
-        to the request is also written to the card's history."""
+        to the request is also written to the card's history.
+
+        Ask a person rarely and broadly: one approval for the whole piece of work (outcome, systems,
+        limits, how to undo, until when), not one per step, commit or retry. Exact bindings (hashes,
+        commits, command lines) belong in reviews between agents. replaces is an earlier request of
+        yours on this card that this one takes the place of; if it was still open or approved it is
+        withdrawn, and the person sees what it said."""
         card = _visible_card(ctx, card_id)
         _discussion_only(ctx, card)
         # `tier` is the old name for `clearance`, still accepted while agents hold the old tool description.
@@ -509,7 +535,7 @@ def build() -> MCPServer:
             capability=capability, clearance=clearance, title=title, summary=summary, options=options,
             target=target, plan_revision=plan_revision, plan_hash=plan_hash, expires_at=expires_at,
             context_id=context_id, consulted=consulted, consult_skipped=consult_skipped,
-            urgent_reason=urgent_reason,
+            urgent_reason=urgent_reason, replaces=replaces,
         )
 
     @server.tool()

@@ -1011,7 +1011,8 @@ that waits (`pending` or `changes_requested`) carries a badge.
   `card_update`, and `card_comment`, the reference tools `card_references`,
   `card_reference_add`, `card_reference_update` and `card_reference_remove`, and the workflow tools
   `workflow_create`, `workflow_list`, `workflow_get`, `workflow_respond`, and
-  `workflow_revise` (the requester's answer to "changes requested": a changed plan, pending again),
+  `workflow_revise` (the requester changes its plan, while the request waits or after "changes
+  requested"), `workflow_withdraw` and `workflow_report` (below),
   plus `agent_owner` (below) and `enroll_request` and `enroll_claim` for enrollment
   (decisions, questions, handoffs, reviews, and approvals attached to a card; every change to
   one is also an event in the card's history, with an optional `context_id`; the agent skill
@@ -1021,6 +1022,22 @@ that waits (`pending` or `changes_requested`) carries a badge.
   pull token and is recorded under its own name. The MCP bearer is
   recorded as `beacon`. The endpoint has board tools only; fleet operations
   stay in the separate MCP service.
+
+**A requester keeps its request true.** Agents are told to ask people for a whole piece of work,
+not step by step; exact bindings are for reviews between agents.
+
+- **Update:** `workflow_revise` (`POST /api/workflows/{id}/revise`) while pending or after "changes
+  requested". Same number, new binding. An answer naming the old binding is refused and the request
+  stays pending. A pending approval or review below CL4 that a person could answer cannot be updated,
+  because the app can approve it from a lock screen; replace it. Enrollment requests cannot either.
+- **Withdraw:** `workflow_withdraw` (`POST .../withdraw`, `reason`), pending or approved. An approval
+  is then void.
+- **Report:** `workflow_report` (`POST .../report`; `outcome` `executed` or `failed`, `note`,
+  `links`) on an approved approval, review or decision carried out outside Beacon. It is the
+  requester's own account, not checked.
+- **Replace:** `replaces=<id>` on create, for the requester's own earlier request on the same card. An
+  approved request is never rewritten; the new one shows what the old one said, and the old one is
+  withdrawn if it was still open or approved.
 
 **Assigning a card to an agent sends that agent a notice** through the
 mailbox, so it hears about the work even while offline. The notice

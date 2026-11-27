@@ -26,6 +26,8 @@ STATES = (
     "stale", "executed", "verified", "failed", "execution_uncertain", "answered",
 )
 RESPONSE_ACTIONS = ("approved", "rejected", "changes_requested", "withdrawn", "choose_option", "answered")
+OPEN_STATES = ("pending", "changes_requested", "approved")  # what the requester may still take back
+OUTCOMES = ("executed", "failed")
 
 
 class WorkflowError(ValueError):
@@ -75,7 +77,7 @@ def _decode(row: Any) -> dict:
     result = dict(row)
     result["require_human"] = bool(result.get("require_human"))
     for column, fallback in (("options_json", []), ("response_json", None), ("target_json", {}),
-                             ("consulted_json", [])):
+                             ("consulted_json", []), ("report_json", None)):
         raw = result.pop(column, None)
         if raw is None:
             result[column.removesuffix("_json")] = fallback
@@ -193,6 +195,8 @@ def _card_text(request_id: int, row, kind: str, from_state: str | None, to_state
     label = f"workflow #{request_id} ({row['kind']}) {row['title'][:80]}"
     if kind == "created":
         text = f"{label}: asked {row['eligible_responder']}"
+        if payload.get("replaces"):
+            text += f", replacing #{payload['replaces']}"
         if payload.get("urgent_reason"):
             text += f", URGENT ({payload['urgent_reason']})"
         if payload.get("consulted"):
@@ -207,7 +211,11 @@ def _card_text(request_id: int, row, kind: str, from_state: str | None, to_state
         by = f" (by {payload['answered_by']} for {payload['on_behalf_of']})" if payload.get("answered_by") else ""
         return f"{label}: {to_state}{by}" + (f": {str(detail)[:300]}" if detail else "")
     if kind == "revised":
-        return f"{label}: plan revised, pending again"
+        return f"{label}: plan revised, " + ("pending again" if from_state == "changes_requested" else "still waiting")
+    if kind == "reported":
+        links = " ".join(link["url"] for link in payload["links"])
+        return (f"{label}: {to_state}, as its requester reports (not checked by Beacon): {payload['note'][:300]}"
+                + (f" {links}" if links else ""))
     if kind == "operators_told":
         return f"{label}: still waiting on {row['eligible_responder']}; the operators were told"
     if kind == "escalated":
@@ -460,7 +468,7 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
            plan_revision: str, plan_hash: str, expires_at: float | None = None,
            now: float | None = None, context_id: str | None = None,
            consulted: list[dict] | None = None, consult_skipped: str | None = None,
-           urgent_reason: str | None = None) -> dict:
+           urgent_reason: str | None = None, replaces: int | None = None) -> dict:
     """Create one pending request and its initial history event, on the card as well."""
     if kind not in REQUEST_KINDS:
         raise WorkflowError(f"kind must be one of {', '.join(REQUEST_KINDS)}")
@@ -510,20 +518,32 @@ def create(*, card_id: int, kind: str, requester: str, eligible_responder: str,
     with opstore.connect() as db:
         if db.execute("SELECT 1 FROM cards WHERE id = ?", (card_id,)).fetchone() is None:
             raise WorkflowNotFound(f"card {card_id} not found")
+        replaced = None
+        if replaces is not None:
+            replaced = _own(db, replaces, requester)
+            if replaced["card_id"] != card_id:
+                raise WorkflowError(f"workflow request {replaces} is on another card")
+            if replaced["state"] == "claimed":
+                raise WorkflowError(f"workflow request {replaces} is being carried out and cannot be replaced")
         request_id = db.execute(
             "INSERT INTO workflow_requests (card_id, kind, state, requester, eligible_responder, capability, clearance, "
             "title, summary, options_json, target_json, plan_revision, plan_hash, expires_at, created_at, updated_at,"
-            " consulted_json, consult_skipped, consult_flag, urgent_reason) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " consulted_json, consult_skipped, consult_flag, urgent_reason, replaces_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (card_id, kind, "pending", requester, eligible_responder, capability.strip(), clearance, title.strip(), summary.strip(),
              json_text(options), json_text(target), plan_revision.strip(), plan_hash.strip(), expires_at, now, now,
-             json_text(consulted), consult_skipped, flag, urgent_reason),
+             json_text(consulted), consult_skipped, flag, urgent_reason, replaces),
         ).lastrowid
         _event(db, request_id, requester, "created", None, "pending", {
             "kind": kind, "capability": capability.strip(), "clearance": clearance,
             "consulted": [c["agent"] for c in consulted], "consult_skipped": consult_skipped, "consult_flag": flag,
-            "urgent_reason": urgent_reason,
+            "urgent_reason": urgent_reason, "replaces": replaces,
         }, context_id)
+        if replaced is not None and replaced["state"] in OPEN_STATES:
+            _withdraw(db, replaced, requester, f"replaced by #{request_id}", context_id)
+        if replaced is not None:  # a card that waited on the old request now waits on this one
+            db.execute("UPDATE cards SET waiting_on = ? WHERE id = ? AND waiting_on = ?",
+                       (f"workflow:{request_id}", card_id, f"workflow:{replaces}"))
     created = get(request_id)
     _tell(notify.workflow_created, created)  # after the commit: a notice must never undo the request
     return created
@@ -616,13 +636,9 @@ def respond(request_id: int, *, actor: str, human: bool, action: str,
         if request["clearance"] >= 4 and not human:
             raise HumanApprovalRequired("CL4/CL5 workflow responses require a human browser session")
         if plan_revision != request["plan_revision"] or plan_hash != request["plan_hash"]:
-            now = time.time()
-            db.execute("UPDATE workflow_requests SET state = 'stale', updated_at = ? WHERE id = ?", (now, request_id))
-            _event(db, request_id, actor, "state_changed", "pending", "stale", {
-                "reason": "plan binding mismatch", "plan_revision": plan_revision, "plan_hash": plan_hash,
-            })
-            db.commit()
-            raise StalePlan("plan revision/hash no longer matches this workflow request")
+            # Refused and left pending: the requester may update a waiting request, so an answer
+            # from an older page is expected, and must not end the request for everyone.
+            raise StalePlan("the plan changed since you read it: reload, read it again, then answer")
         if request["kind"] == "question":
             # A question is answered in free text, or declined. Nothing else applies to it.
             if action not in ("answered", "rejected"):
@@ -757,32 +773,100 @@ def nudge_operators(now: float | None = None) -> int:
     return len(told)
 
 
+def _own(db, request_id: int, actor: str) -> dict:
+    """The request, for the one who made it."""
+    row = db.execute("SELECT * FROM workflow_requests WHERE id = ?", (request_id,)).fetchone()
+    if row is None:
+        raise WorkflowNotFound(f"workflow request {request_id} not found")
+    request = _decode(row)
+    if actor.casefold() != request["requester"].casefold():
+        raise UnauthorizedWorkflowAccess(f"{actor} did not make workflow request {request_id}")
+    return request
+
+
+def _short(text, what: str, limit: int) -> str:
+    if not isinstance(text, str) or not text.strip() or len(text.strip()) > limit:
+        raise WorkflowError(f"say {what}, in at most {limit} characters")
+    return text.strip()
+
+
+def _withdraw(db, request: dict, actor: str, reason: str, context_id: str | None) -> None:
+    changed = db.execute(
+        "UPDATE workflow_requests SET state = 'withdrawn', updated_at = ? WHERE id = ? AND state = ?"
+        " AND state IN ('pending', 'changes_requested', 'approved')", (time.time(), request["id"], request["state"]))
+    if changed.rowcount != 1:
+        raise WorkflowError(f"workflow request {request['id']} is {request['state']}: there is nothing to withdraw")
+    _event(db, request["id"], actor, "state_changed", request["state"], "withdrawn", {"reason": reason}, context_id)
+
+
+def withdraw(request_id: int, *, actor: str, reason: str, context_id: str | None = None) -> dict:
+    """The requester takes back its own request, an approval included: nothing may be done on it after."""
+    actor = _validate_actor(actor)
+    reason = _short(reason, "why you withdraw it", 300)
+    with opstore.connect() as db:
+        _expire_due(db, time.time())
+        _withdraw(db, _own(db, request_id, actor), actor, reason, context_id)
+    return get(request_id)
+
+
+def report(request_id: int, *, actor: str, outcome: str, note: str, links: list | None = None,
+           context_id: str | None = None) -> dict:
+    """What the requester says became of an approved request it carried out outside Beacon, so the
+    request does not stay "approved" for good. Its own account, kept as such: Beacon checks nothing."""
+    from . import board  # not at import: board imports what imports this module
+    actor = _validate_actor(actor)
+    if outcome not in OUTCOMES:
+        raise WorkflowError(f"outcome must be one of {', '.join(OUTCOMES)}")
+    note = _short(note, "what happened", 1000)
+    links = board._links(links or [])
+    now = time.time()
+    said = {"outcome": outcome, "note": note, "links": links, "by": actor, "at": now}
+    with opstore.connect() as db:
+        _expire_due(db, now)
+        request = _own(db, request_id, actor)
+        if request["kind"] not in ("approval", "review", "decision"):
+            raise WorkflowError(f"a {request['kind']} has no outcome to report")
+        changed = db.execute(
+            "UPDATE workflow_requests SET state = ?, report_json = ?, updated_at = ? WHERE id = ? AND state = 'approved'",
+            (outcome, json_text(said), now, request_id))
+        if changed.rowcount != 1:
+            raise WorkflowError(f"workflow request {request_id} is {request['state']}, not approved")
+        _event(db, request_id, actor, "reported", "approved", outcome, said, context_id)
+    return get(request_id)
+
+
 def revise(request_id: int, *, actor: str, plan_revision: str, plan_hash: str,
            title: str | None = None, summary: str | None = None, options: list[str] | None = None,
            target: dict[str, Any] | None = None, expires_at: float | None = None,
            context_id: str | None = None) -> dict:
-    """The requester answers "changes requested" with a changed plan: the request
-    goes back to pending under the new binding, so the responder can approve what
-    they asked for. Before, changes_requested was a dead end (respond() only takes
-    pending), and the requester had to open a second request on the card. Only the
-    requester may revise, and only from changes_requested: an approved or answered
-    request is never rewritten, so an approval still covers exactly one plan."""
+    """The requester changes its own plan, while the request waits or after "changes requested": same
+    request, pending under a new binding, so an answer given to the old text is refused. An approved or
+    answered request is never rewritten, so an approval still covers exactly one plan: a new plan after
+    that is a new request that `replaces` it."""
     actor = _validate_actor(actor)
     if not isinstance(plan_revision, str) or not plan_revision.strip():
         raise WorkflowError("plan_revision must not be empty")
     if not isinstance(plan_hash, str) or not plan_hash.strip():
         raise WorkflowError("plan_hash must not be empty")
     with opstore.connect() as db:
-        row = db.execute("SELECT * FROM workflow_requests WHERE id = ?", (request_id,)).fetchone()
-        if row is None:
-            raise WorkflowNotFound(f"workflow request {request_id} not found")
-        request = _decode(row)
-        if actor.casefold() != request["requester"].casefold():
-            raise UnauthorizedWorkflowAccess(f"{actor} did not make workflow request {request_id}")
-        if request["state"] != "changes_requested":
-            raise WorkflowError(f"workflow request {request_id} is {request['state']}, not changes_requested")
-        if (plan_revision, plan_hash) == (request["plan_revision"], request["plan_hash"]):
-            raise WorkflowError("the plan binding is unchanged: revise the plan, then bind the new one")
+        _expire_due(db, time.time())
+        request = _own(db, request_id, actor)
+        was = request["state"]
+        instead = f"make a new request with replaces={request_id}"
+        if was not in ("pending", "changes_requested"):
+            raise WorkflowError(f"workflow request {request_id} is {was} and cannot be revised: {instead}")
+        if request["capability"] == "enroll":
+            raise WorkflowError("Beacon writes an enrollment request: withdraw it and call enroll_request again")
+        # The app's lock-screen Approve answers whatever the plan is by then (apns.category), so a
+        # waiting request that offers it must not change under the person.
+        if (was == "pending" and request["kind"] in ("approval", "review") and request["clearance"] < 4
+                and notify._people_to_ask(request)):
+            raise WorkflowError(f"a person can approve this from a lock screen without reading a change: {instead}")
+        used = {request["plan_hash"]} | {
+            json.loads(row["payload_json"]).get("previous_plan_hash") for row in db.execute(
+                "SELECT payload_json FROM workflow_events WHERE request_id = ? AND kind = 'revised'", (request_id,))}
+        if plan_hash.strip() in used:
+            raise WorkflowError("the plan binding is unchanged or was used before: revise the plan, then bind the new one")
         title = request["title"] if title is None else title.strip()
         summary = request["summary"] if summary is None else summary.strip()
         options = request["options"] if options is None else options
@@ -805,12 +889,12 @@ def revise(request_id: int, *, actor: str, plan_revision: str, plan_hash: str,
         db.execute(
             "UPDATE workflow_requests SET state = 'pending', title = ?, summary = ?, options_json = ?, "
             "target_json = ?, plan_revision = ?, plan_hash = ?, expires_at = ?, response_json = NULL, "
-            "responded_at = NULL, updated_at = ? WHERE id = ? AND state = 'changes_requested'",
+            "responded_at = NULL, updated_at = ? WHERE id = ? AND state = ?",
             (title, summary, json_text(options), json_text(target), plan_revision.strip(), plan_hash.strip(),
-             expires_at, now, request_id),
+             expires_at, now, request_id, was),
         )
         # The earlier answer stays in the history: the responder's note is what the change answers.
-        _event(db, request_id, actor, "revised", "changes_requested", "pending", {
+        _event(db, request_id, actor, "revised", was, "pending", {
             "plan_revision": plan_revision, "plan_hash": plan_hash, "previous_plan_hash": request["plan_hash"],
         }, context_id)
     revised = get(request_id)

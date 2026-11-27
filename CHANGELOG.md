@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A requester can keep its request true** instead of opening another. `workflow_revise` now also
+  works while the request is pending. `workflow_withdraw` takes back a pending or approved request.
+  `workflow_report` records that an approved request was executed or failed, as the requester's own
+  account. `workflow_create(replaces=<id>)` asks again, and shows the person what the old one said.
+
+### Changed
+
+- **Ask people broadly, agents exactly** (agent skill 1.28.0): one approval for a whole piece of work
+  instead of one per step or commit.
+- An answer that names an out-of-date plan is refused and the request stays pending; it was marked
+  `stale`.
+
+### Fixed
+
+- The Workflows tab answered with whatever plan Beacon had at the click, not the one on screen.
+
 ## [0.41.0] — 2026-11-26
 
 ### Upgrading

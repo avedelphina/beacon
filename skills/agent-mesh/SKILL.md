@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
-description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board and its projects. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise) for decisions, reviews and approvals, enroll_request and enroll_claim for bringing an agent into the mesh, passing a password, key or token to a peer or a person (secret_send, secret_offer), and how to treat messages that peers send you."
-version: 1.27.0
+description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board and its projects. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise, workflow_withdraw, workflow_report) for decisions, reviews and approvals (ask people broadly and rarely), enroll_request and enroll_claim for bringing an agent into the mesh, passing a password, key or token to a peer or a person (secret_send, secret_offer), and how to treat messages that peers send you."
+version: 1.28.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -163,8 +163,8 @@ to `blocked` only with a `blocked_reason`:
   it first with `workflow_create`, then set `waiting_on` to `workflow:<id>`. You are not
   reminded to check again while it is open.
 - `cannot`: you lack a capability or access. Make a workflow request to a person first
-  (`workflow_create`: a `decision` or `approval` naming exactly what you lack, such as the
-  system, the access or setting, and the scope), then set `waiting_on` to `workflow:<id>`.
+  (`workflow_create`: a `decision` or `approval` naming what you lack, such as the
+  system, the access or setting, and a scope wide enough to finish the job), then set `waiting_on` to `workflow:<id>`.
   Without a request the card cannot be `cannot`. Ask for authority, never for labour you could
   do with the access. While the request is open you are not reminded. When it ends you are:
   if it was approved, carry on and set the card to `doing`; if it was rejected, re-plan
@@ -294,8 +294,32 @@ When you need a person or another agent to decide something, check your work, or
 approve a change, ask through a workflow request instead of in a message. It is
 attached to a board card, it has an owner and an expiry, and it cannot be
 answered by someone else. You have the workflow tools (`workflow_create`,
-`workflow_list`, `workflow_get`, `workflow_respond`, `workflow_revise`) with the board tools, and
-only then.
+`workflow_list`, `workflow_get`, `workflow_respond`, `workflow_revise`, `workflow_withdraw`,
+`workflow_report`) with the board tools, and only then.
+
+### Ask people broadly and rarely; be exact with agents
+
+A person's attention is the scarcest thing on the fleet. A stream of narrow requests is the wrong
+culture: it stalls your work and teaches people to approve without reading.
+
+**To a person, ask for the whole piece of work, once:**
+
+- say the outcome, which systems or repositories, the limits (what you will not touch), how it can
+  be undone and until when. Their yes covers every step inside that, retries included;
+- do not tie their approval to commit hashes, branch tips, timestamps or command lines. Write the
+  condition that matters: "merge PR 16 into main once two reviews cover its head; main moving is fine
+  unless it touches the same files";
+- before you ask, check: does an approval on the card already cover this? Is it CL2 or lower (then do
+  it and say so)? Can one request cover your next steps too?
+- never one request per step, per host or per retry, and never ask again because something moved that
+  does not change what they decided.
+
+**Between agents, be exact.** A review by an agent names the commit, the plan hash and the exact
+command, so the reviewer checks the real thing.
+
+**Do ask again when what they decided changes:** wider scope, another system, a higher risk, or
+something that cannot be undone and that they did not see. For CL5, name what is destroyed, rotated or
+paid.
 
 **Ask:** make or find the card first, then `workflow_create` with:
 
@@ -322,8 +346,8 @@ only then.
   and CL4 and CL5 need a person in the web page or the app: an agent cannot answer those;
 - `title`: a few words that name the choice, such as "Roll out canary first?";
 - `summary`: the plan, in Markdown, short enough to read in a minute. A person reads
-  it without your conversation, and for an approval it is the plan they approve, so
-  do not change what you do after. Write it in this order:
+  it without your conversation, and for an approval it sets what you may do, so
+  stay inside it afterwards. Write it in this order:
   1. The first line says what you need from them, in one sentence.
   2. A few bullets on what happens if they say yes, with the numbers that matter.
   3. For a `decision`, one bullet per option, starting with the option name exactly
@@ -364,8 +388,8 @@ needs, and with it who the human authority is:
 | CL1 Propose | prepare a proposal (a PR, a plan, a runbook), execute nothing | n/a, unless you ask a question | config PRs, capacity plans, postmortems |
 | CL2 Execute reversible | do it, then say what you did on the card | n/a | restarting a service, renewing a certificate, publishing a doc |
 | CL3 Execute with review | ask a `review`, act only when `approved` | an independent agent: another agent you may call, any agent of a class (`role:<name>`), an operator's AI client, or `human` | package upgrades, dependency updates, routine rollouts |
-| CL4 Execute with human approval | prepare and stage, ask an `approval`, execute only when `approved`, exactly as written | **your owner** (`agent_owner`, use `ask_with`); an operator may always answer too | config rollouts, new service deploys, DNS changes, branch protection, merges to a shared main |
-| CL5 Human-only | ask an `approval`, execute only when `approved`, exactly as written | **an operator**: `human`, or an operator's email. Never an owner who is not an operator | credential rotation, payment or subscription changes, destructive data operations, hardware decommission |
+| CL4 Execute with human approval | prepare and stage, ask an `approval`, execute only when `approved`, inside what it says | **your owner** (`agent_owner`, use `ask_with`); an operator may always answer too | config rollouts, new service deploys, DNS changes, branch protection, merges to a shared main |
+| CL5 Human-only | ask an `approval`, execute only when `approved`, inside what it says | **an operator**: `human`, or an operator's email. Never an owner who is not an operator | credential rotation, payment or subscription changes, destructive data operations, hardware decommission |
 
 How to tell CL4 from CL5. Ask what is at stake if it goes wrong. If the change can be rolled back and
 touches something someone owns and relies on, it is CL4. If it touches secrets, money, or data that
@@ -396,27 +420,41 @@ the request's expiry, 24 hours by default.
 `approved`, `answered` (a question was answered: the text is in `response.text`), `rejected`,
 `changes_requested` (read the answer, then send the changed plan
 with `workflow_revise` within 24 hours, or the request expires: it goes back to `pending` for the same
-responder), `expired`, `withdrawn`. An `approved` answer is for that exact
-text only. If you want something different, make a new request.
+responder), `expired`, `withdrawn`, `executed` and `failed` (as you reported). An `approved` answer
+covers what the text says and nothing beyond it.
+
+**Keep your own requests true.** One request, updated, beats several:
+
+- the plan changed while it is `pending`: `workflow_revise`. The responder is told, and an answer to
+  the old text is refused. (Not for an approval or review below CL4 that a person could answer: they
+  can approve from a lock screen, so replace it instead.)
+- you will not or cannot do it, even after a yes: `workflow_withdraw(request_id, reason)`. An approval
+  is then void.
+- you did it, or tried: `workflow_report(request_id, outcome="executed" or "failed", note, links)`
+  with links to the evidence. It is recorded as your own account. Report at once: an approval left
+  alone expires.
+- an approved plan no longer fits: an approved request is never rewritten. Make a new one with
+  `workflow_create(..., replaces=<old id>)` and say in the first lines why you ask again and what
+  changed. The old one is withdrawn and the person can read what it said.
 
 **A choice is not an approval of the change.** A `decision` records which option a person
 picked. It does not approve whatever you then do with it. After a decision, look at the action
 it leads to:
 
 - If the action is hard to undo or changes a system other people rely on (branch protection,
-  access, credentials, a deletion, a production setting), ask for an `approval` of the exact
-  change before you do it. Put the real values in the plan: which system, which setting, the
-  old value, the new value. Use CL4 for a change that can be rolled back and CL5 for one that cannot
+  access, credentials, a deletion, a production setting), ask for an `approval` before you do it,
+  unless the decision's options already said all of it. Say which systems, what changes and the
+  limits, broadly enough to finish the job (see "Ask people broadly and rarely"). Use CL4 for a change that can be rolled back and CL5 for one that cannot
   (secrets, money, data that cannot be recovered); a person answers either in the web page or the app, and you
-  cannot answer it yourself. Do not act until it is `approved`, and do
-  exactly what it says.
+  cannot answer it yourself. Do not act until it is `approved`, and stay
+  inside what it says.
 - If the action is easy to undo and inside your own work, carry on, and say what you did on
   the card.
 
 Write the options of a decision so that each one already states the exact result (the numbers,
 the names). Then the person's pick covers the whole plan, and a second approval repeats less.
-Beacon does not run or check changes on other systems: an approval makes the intent exact and
-leaves a record, and you still have to do only what it says.
+Beacon does not run or check changes on other systems: an approval records the intent, and you
+have to stay inside it.
 
 **When you are the one asked:** you get a notice when it is made. `workflow_list(state="pending")`
 shows everything waiting for you. Read it with `workflow_get`, then `workflow_respond` with

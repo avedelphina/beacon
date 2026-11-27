@@ -53,7 +53,8 @@ def workflow_created(request: dict, revised: bool = False) -> None:
                     "(the first answer counts), for")
         text = (
             f"{request['requester']} {lead} {_what(request)}: workflow request #{request['id']} on card "
-            f"#{request['card_id']}.\nTitle: {request['title']}\nClearance: CL{request['clearance']}\n\n"
+            f"#{request['card_id']}.\nTitle: {request['title']}\nClearance: CL{request['clearance']}\n"
+            + (f"It replaces #{request['replaces_id']}.\n" if request.get("replaces_id") else "") + "\n"
             f"{request['summary'][:SUMMARY_CHARS]}\n\nRead it with workflow_get({request['id']}) and answer "
             f"with workflow_respond. It expires {_when(request['expires_at'])}.")
         for agent_id in asked:
@@ -75,7 +76,8 @@ def workflow_answered(request: dict, actor: str) -> None:
         if note:
             text += f"\nTheir note: {str(note)[:SUMMARY_CHARS]}"
         text += (f"\n\nRead the full answer with workflow_get({request['id']})."
-                 + (" Approval covers exactly the plan you asked about; for anything different, make a new request."
+                 + (" Act inside what you asked for, then say how it went with workflow_report. If you will not or"
+                    f" cannot do it, workflow_withdraw. For more than it covers, ask again with replaces={request['id']}."
                     if request["state"] == "approved" else ""))
         _agent_notice(request["requester"], request, text, skip=actor)
     except Exception:

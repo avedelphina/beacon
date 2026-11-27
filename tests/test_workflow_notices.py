@@ -105,14 +105,14 @@ def test_the_requester_hears_the_answer(world):
 
     body, = _notices("asker")
     assert f"#{request['id']}" in body and "now approved" in body and "op1@example.com" in body
-    assert "tailnet only" in body and "exactly the plan" in body
+    assert "tailnet only" in body and "workflow_report" in body
 
 
 def test_a_rejection_is_reported_without_the_approval_hint(world):
     request, binding = _ask(responder="human")
     workflow.respond(request["id"], actor="op1@example.com", human=True, action="rejected", response=None, **binding)
     body, = _notices("asker")
-    assert "now rejected" in body and "exactly the plan" not in body
+    assert "now rejected" in body and "workflow_report" not in body
 
 
 def test_answering_your_own_request_tells_nobody(world):

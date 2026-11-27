@@ -132,7 +132,7 @@ def test_expiry_and_stale_plan_are_visible():
         pass
     else:
         raise AssertionError("changed plan was accepted")
-    assert workflow.get(fresh["id"])["state"] == "stale"
+    assert workflow.get(fresh["id"])["state"] == "pending"
 
 
 def test_t3_push_config_requires_approved_exact_workflow(client, human_client, fake_ssh):
@@ -546,17 +546,17 @@ def test_requester_revises_after_changes_requested_and_responder_approves():
     assert revised["response"] is None and revised["plan_hash"] == new["plan_hash"]
     assert [e["kind"] for e in revised["events"]] == ["created", "responded", "revised"]
 
-    # The old binding is refused (and marks the request stale); the new one is approved.
+    with pytest.raises(workflow.StalePlan):
+        workflow.respond(request["id"], actor="reviewer@example.com", human=True, action="approved",
+                         response={}, **old)
     approved = workflow.respond(request["id"], actor="reviewer@example.com", human=True, action="approved",
                                 response={}, **new)
     assert approved["state"] == "approved"
 
 
-def test_only_the_requester_revises_and_only_from_changes_requested():
+def test_only_the_requester_revises_and_a_new_binding_is_needed():
     request, binding = _t3_request()
     new = workflow.plan_binding({"v": 2})
-    with pytest.raises(workflow.WorkflowError, match="not changes_requested"):
-        workflow.revise(request["id"], actor="agent-a", **new)
     workflow.respond(request["id"], actor="reviewer@example.com", human=True, action="changes_requested",
                      response={"note": "no"}, **binding)
     with pytest.raises(workflow.UnauthorizedWorkflowAccess):
@@ -667,7 +667,7 @@ def test_expiry_and_a_stale_plan_reach_the_cards_history():
 
     bodies = [e["body"] for e in _card_history(card["id"])]
     assert bodies[1].endswith(": expired without an answer")
-    assert bodies[-1].endswith("pending -> stale (plan binding mismatch)")
+    assert bodies[-1].endswith(": asked human")  # a refused answer changes nothing
 
 
 def test_a_failed_notice_costs_neither_the_request_nor_the_card_history(monkeypatch):
@@ -755,3 +755,84 @@ def test_handoff_rules_are_fixed(quiet_notices):
     with pytest.raises(workflow.WorkflowError):  # a second answer on a request that is no longer pending
         workflow.respond(request["id"], actor="taker", human=False, action="approved", response={}, **binding)
     assert board.get_card(card["id"])["assignee"] is None
+
+
+def _new_request(card, **over):
+    fields = dict(card_id=card["id"], kind="approval", requester="agent-a", eligible_responder="human",
+                  capability="deploy", clearance=4, title="Upgrade", summary="Upgrade the service", options=None,
+                  target={}, **workflow.plan_binding({"v": 1}))
+    return workflow.create(**{**fields, **over})
+
+
+def _yes(request, **over):
+    return workflow.respond(request["id"], actor="human", human=True, action="approved", response={},
+                            **{"plan_revision": request["plan_revision"], "plan_hash": request["plan_hash"], **over})
+
+
+def test_a_pending_request_is_updated_and_an_answer_to_the_old_text_is_refused():
+    request = _new_request(_card())
+    new = workflow.revise(request["id"], actor="agent-a", summary="Upgrade, then check", **workflow.plan_binding({"v": 2}))
+    assert new["state"] == "pending" and new["id"] == request["id"]
+    with pytest.raises(workflow.StalePlan):
+        _yes(request)
+    # An old binding cannot come back for a new text.
+    with pytest.raises(workflow.WorkflowError, match="used before"):
+        workflow.revise(request["id"], actor="agent-a", summary="Something else", **workflow.plan_binding({"v": 1}))
+    assert _yes(new)["state"] == "approved"
+    with pytest.raises(workflow.WorkflowError, match="replaces"):
+        workflow.revise(request["id"], actor="agent-a", **workflow.plan_binding({"v": 3}))
+
+
+def test_what_a_lock_screen_can_approve_does_not_change_under_the_person(monkeypatch):
+    monkeypatch.setattr(workflow.notify, "_people_to_ask", lambda request: {"ann@example.com"})
+    request = _new_request(_card(), clearance=2)
+    with pytest.raises(workflow.WorkflowError, match="lock screen"):
+        workflow.revise(request["id"], actor="agent-a", **workflow.plan_binding({"v": 2}))
+
+
+def test_the_requester_withdraws_even_an_approval():
+    request = _new_request(_card())
+    _yes(request)
+    with pytest.raises(workflow.UnauthorizedWorkflowAccess):
+        workflow.withdraw(request["id"], actor="agent-b", reason="no")
+    assert workflow.withdraw(request["id"], actor="agent-a", reason="main moved")["state"] == "withdrawn"
+    with pytest.raises(workflow.WorkflowError, match="nothing to withdraw"):
+        workflow.withdraw(request["id"], actor="agent-a", reason="again")
+
+
+def test_the_requester_reports_the_outcome_of_an_approval():
+    card = _card()
+    request = _new_request(card)
+    link = [{"url": "https://git.example.com/pr/1", "label": "PR"}]
+    with pytest.raises(workflow.WorkflowError, match="not approved"):
+        workflow.report(request["id"], actor="agent-a", outcome="executed", note="done")
+    _yes(request)
+    with pytest.raises(ValueError):
+        workflow.report(request["id"], actor="agent-a", outcome="executed", note="done",
+                        links=[{"url": "javascript:alert(1)"}])
+    done = workflow.report(request["id"], actor="agent-a", outcome="executed", note="merged", links=link)
+    assert done["state"] == "executed" and done["report"]["by"] == "agent-a"
+    assert "not checked by Beacon" in _card_history(card["id"])[-1]["body"]
+
+
+def test_a_replacement_withdraws_the_old_request_and_names_it():
+    card = _card()
+    old = _new_request(card)
+    _yes(old)
+    board.update_card("beacon", card["id"], state="blocked", blocked_reason="waiting", waiting_on="ci")
+    with opstore.connect() as db:
+        db.execute("UPDATE cards SET waiting_on = ? WHERE id = ?", (f"workflow:{old['id']}", card["id"]))
+    with pytest.raises(workflow.UnauthorizedWorkflowAccess):
+        _new_request(card, requester="agent-b", replaces=old["id"])
+    with pytest.raises(workflow.WorkflowError, match="another card"):
+        _new_request(_card(), replaces=old["id"])
+    new = _new_request(card, replaces=old["id"])
+    assert new["replaces_id"] == old["id"] and new["state"] == "pending"
+    assert workflow.get(old["id"])["state"] == "withdrawn"
+    assert board.get_card(card["id"])["waiting_on"] == f"workflow:{new['id']}"
+
+
+def test_an_enrollment_request_is_not_rewritten():
+    request = _new_request(_card(), capability="enroll")
+    with pytest.raises(workflow.WorkflowError, match="enroll_request"):
+        workflow.revise(request["id"], actor="agent-a", **workflow.plan_binding({"v": 2}))
