@@ -254,8 +254,8 @@ answer needs the biometric check and a cancelled one changes nothing; a member
 sees only their own.
 
 **A4 — Notifications (M).** §4.3. Acceptance: Approve from a locked phone asks
-for unlock and reports the result; CL4 opens the app; a changed plan reports
-stale; a tap opens the request from a closed app.
+for unlock and reports the result; CL4 opens the app; an answer to a changed
+plan is refused and says so; a tap opens the request from a closed app.
 
 **A5 — Agents, board, secrets, projects (L).** Parity with iOS. Acceptance: the
 agent, board, secret and project items of the iOS checklist.
