@@ -127,6 +127,7 @@ struct RequestDetailView: View {
     let onAnswered: () -> Void
 
     @State private var card: Card?
+    @State private var replaced: WorkflowRequest?
     @State private var option = ""
     @State private var answer = ""
     @State private var note = ""
@@ -156,6 +157,8 @@ struct RequestDetailView: View {
             Section("Plan") {
                 Text(AgentText.render(request.summary)).textSelection(.enabled)
             }
+            replacedSection
+            reportSection
             cardSection
             consultedSection
             answerSection
@@ -166,13 +169,18 @@ struct RequestDetailView: View {
         .task {
             option = request.options.first ?? ""
             card = try? await session.client?.get("/api/board/cards/\(request.cardId)")
+            if let old = request.replacesId { replaced = try? await session.client?.get("/api/workflows/\(old)") }
         }
         .confirmationDialog(confirmTitle, isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }),
                             titleVisibility: .visible, presenting: asking) { action in
             Button(confirmButton(action), role: action == .rejected ? .destructive : nil) { send(action) }
         }
         // The requester changed the plan while a dialog was open: ask again, over what is on screen now.
-        .onChange(of: request.planHash) { asking = nil; askingChanges = false }
+        .onChange(of: request.planHash) {
+            asking = nil
+            askingChanges = false
+            if !request.options.contains(option) { option = request.options.first ?? "" }
+        }
         .alert("What needs to change?", isPresented: $askingChanges) {
             TextField("Note for \(request.requester)", text: $note)
             Button("Send") { send(.changes_requested) }
@@ -184,6 +192,37 @@ struct RequestDetailView: View {
             Button("Cancel", role: .cancel) { reason = "" }
         } message: {
             Text("Then only a person can answer it: no AI client may. This cannot be undone.")
+        }
+    }
+
+    @ViewBuilder private var replacedSection: some View {
+        if let old = request.replacesId {
+            Section {
+                DisclosureGroup("Replaces #\(old): what it said") {
+                    if let replaced {
+                        Text("\(replaced.wasApproved ? "It had been approved. " : "")Now \(replaced.state.replacingOccurrences(of: "_", with: " ")).")
+                            .foregroundStyle(.secondary)
+                        Text(verbatim: replaced.title).bold()
+                        Text(AgentText.render(replaced.summary))
+                    } else {
+                        Text("Not loaded.").foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var reportSection: some View {
+        if let report = request.report {
+            Section {
+                LabeledContent("Outcome", value: report.outcome)
+                Text(AgentText.render(report.note))
+                LinkList(links: SafeLinks.from((report.links ?? []).map { ($0.label ?? $0.url, $0.url) }))
+            } header: {
+                Text(verbatim: "Report from \(report.by)")
+            } footer: {
+                Text("The requester's own account. Beacon did not check it.")
+            }
         }
     }
 
@@ -326,6 +365,7 @@ struct RequestDetailView: View {
                 session.forget()
             } catch {
                 problem = error.localizedDescription
+                onAnswered()  // the plan may have changed: show what there is to answer now
             }
         }
     }

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### Fixed
+
+- **The app catches up with 0.42.0.** A request shows what the one it replaces said, and the
+  requester's report of what became of it. After a refused answer the app reloads the request, so
+  the next answer is to the plan on screen.
+
 ## [0.42.0] — 2026-11-27
 
 ### Upgrading

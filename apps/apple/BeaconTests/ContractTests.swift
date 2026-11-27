@@ -77,6 +77,17 @@ struct DecodingTests {
         #expect(!request.planHash.isEmpty && request.isOpen && !request.needsFaceID)
     }
 
+    @Test func aReportAndAReplacedRequestDecode() throws {
+        var fields = try JSONSerialization.jsonObject(with: contract("workflow.json")) as! [String: Any]
+        fields["replaces_id"] = 7
+        fields["report"] = ["outcome": "failed", "note": "the host was down", "by": "alpha", "at": 1.0,
+                            "links": [["url": "https://git.example.com/infra/pulls/42", "label": "PR"]]]
+        fields["events"] = [["kind": "responded", "to_state": "approved"], ["kind": "state_changed", "to_state": "withdrawn"]]
+        let request = try Client.decoder.decode(WorkflowRequest.self, from: JSONSerialization.data(withJSONObject: fields))
+        #expect(request.replacesId == 7 && request.report?.outcome == "failed" && request.report?.links?.first?.label == "PR")
+        #expect(request.wasApproved)
+    }
+
     @Test func theListDecodes() throws {
         let list = try Client.decoder.decode([WorkflowRequest].self, from: contract("workflows.json"))
         #expect(list.count == 1)

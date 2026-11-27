@@ -74,8 +74,12 @@ None of this can be checked in the simulator or in CI.
 - [ ] A CL4 request notification offers only **Review with Face ID…**; answering
       it asks for Face ID and succeeds.
 - [ ] The same CL4 answer after cancelling Face ID changes nothing.
-- [ ] A request changed by its agent after the notification: the answer reports
-      it is stale.
+- [ ] A request its agent replaced after the notification: **Approve** on the old
+      notification reports it is already withdrawn.
+- [ ] A CL4 request changed by its agent while open on the phone: the answer is
+      refused and the screen shows the new plan.
+- [ ] A replacing request shows what the old one said; a reported one shows the
+      report.
 - [ ] A tap on a notification opens that request, from a closed app too.
 - [ ] A member account sees only its agents, cards and requests.
 - [ ] Revoke the device on the web page: the app returns to login.
