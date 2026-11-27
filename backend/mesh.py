@@ -168,6 +168,21 @@ def peers(agent: Agent, fleet: list[Agent]) -> list[Agent]:
     return [a for a in fleet if a.id != agent.id and a.reach is not None and a.reach.network == network]
 
 
+CHAT_PLUGIN_DIR = Path(__file__).resolve().parent / "drivers" / "hermes_chat_plugin"
+
+
+def chat_offer(agent: Agent, beacon_url: str | None) -> dict | None:
+    """For an agent whose owner may talk with it (backend/chat.py): where its plugin connects, and the
+    plugin itself, which the host sync installs and keeps up to date."""
+    if not (beacon_url and agent.owner and agent.reach.chat):
+        return None
+    files = []
+    for path in sorted([*CHAT_PLUGIN_DIR.glob("*.py"), *CHAT_PLUGIN_DIR.glob("*.yaml")]):
+        content = path.read_text()
+        files.append({"name": path.name, "sha256": hashlib.sha256(content.encode()).hexdigest(), "content": content})
+    return {"url": f"{beacon_url}/mesh/{agent.id}/chat", "plugin": files}
+
+
 def config(agent_id: str) -> dict:
     """Everything `agent_id` needs to sit in the mesh, agent-type neutral:
     where to listen, who may call in with which token, and whom to call.
@@ -230,6 +245,7 @@ def config(agent_id: str) -> dict:
         # The agent signs in to the board with its pull token, which it has.
         "board": {"url": f"{beacon_url}/board/mcp"} if beacon_url and board_allowed(agent) else None,
         "skills": skills(),
+        "chat": chat_offer(agent, beacon_url),
         # How the host sync looks after this agent (fleet policy `health`).
         "health": health,
         "sync": sync_offer(agent, health, beacon_url),

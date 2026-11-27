@@ -779,9 +779,20 @@ Keep the old instance until every agent has moved.
 ### Chat with your own agent
 
 An agent's **owner** can talk with it (`backend/chat.py`; plan and design in
-[docs/chat-plan.md](docs/chat-plan.md)). This release has Beacon's side only:
-the agent-side plugin and the app screen are not built yet, so nothing can be
-done with it so far.
+[docs/chat-plan.md](docs/chat-plan.md)). Beacon and the agent side exist; the app
+screen is not built yet, so for now only the API reaches it.
+
+With chat on, the agent's host sync installs Beacon's `beacon-chat` platform
+plugin into the profile (`plugins/beacon-chat`), enables it, writes
+`BEACON_CHAT_*` to `.env` and restarts the gateway once. The plugin connects out
+to Beacon with the agent's pull token: no port is opened. Turning chat off
+removes the folder and the settings again (Hermes keeps the plugin's name in its
+disabled list). A folder of that name Beacon did not make is left alone. The
+host needs the sync from this release, and the gateway's Python must trust
+Beacon's certificate (`SSL_CERT_FILE` for a private CA).
+
+Scheduled jobs (`deliver: beacon`), `hermes send --to beacon` and Hermes's own
+restart notices arrive in one conversation of their own.
 
 - Turn it on per agent (`reach.chat`, "Its owner may chat with it" in the agent
   form). Like other changes to `reach`, only a person can (CL4).
