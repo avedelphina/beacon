@@ -356,7 +356,8 @@ def _consult_line(request: dict) -> str:
     return "\n\nIt did not consult a peer before asking you." if request.get("consult_flag") else ""
 
 
-def _tell(recipients: set[str], subject: str, body: str, urgent: bool = False, about: dict | None = None) -> None:
+def _tell(recipients: set[str], subject: str, body: str, urgent: bool = False, about: dict | None = None,
+          email: bool = True) -> None:
     """Push the subject to every browser and app device these people have, and email
     the whole message when a mail server is configured; all in the background. Push
     (browsers and the app together, so having both does not double the room) and email
@@ -373,11 +374,16 @@ def _tell(recipients: set[str], subject: str, body: str, urgent: bool = False, a
     title = subject.removeprefix("Beacon: ")
     push.send(pushed, title, **({"urgent": True} if urgent else {}))
     apns.send(pushed, title, urgent=urgent, about=about)
-    if not configured():
+    if not email or not configured():
         return
     allowed = [r for r in sorted(recipients) if _within_limit(kind + r)]
     if allowed:
         threading.Thread(target=_deliver, args=(allowed, subject, body), daemon=True).start()
+
+
+def chat_message(agent_id: str, owner: str, thread_id: int) -> None:
+    """Their agent wrote to them (backend/chat.py): the fact only, never the words, and no email."""
+    _tell({owner}, f"{agent_id} sent you a message", "", about={"agent": agent_id, "thread": thread_id}, email=False)
 
 
 def _within_limit(address: str) -> bool:

@@ -85,7 +85,7 @@ def payload(subject: str, urgent: bool = False, about: dict | None = None) -> di
         aps["thread-id"] = f"card-{about['card']}"
     body = {"aps": aps}
     if about:
-        body["beacon"] = {k: about[k] for k in ("workflow", "clearance", "kind", "card", "agent", "project")
+        body["beacon"] = {k: about[k] for k in ("workflow", "clearance", "kind", "card", "agent", "project", "thread")
                           if about.get(k) is not None}
     return body
 

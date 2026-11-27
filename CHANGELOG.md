@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
-## [Unreleased]
+### Added
+
+- **Chat with your own agent, Beacon's side** (`reach.chat`, `/api/chat`, `/mesh/{agent}/chat`): a
+  queue both ways, 30 days of history, only the owner, Face ID in the app. Not usable yet: the
+  agent-side plugin and the app screen come next (docs/chat-plan.md).
 
 ### Fixed
 

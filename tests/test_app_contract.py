@@ -130,6 +130,7 @@ def test_the_notification_payloads_match_what_beacon_sends():
         "plain": apns.payload("alpha has not synced for 2 hours"),
         "secret": apns.payload("alpha has a secret for you", about={"agent": "alpha"}),
         "project": apns.payload("project infra is paused", about={"project": 3}),
+        "chat": apns.payload("alpha sent you a message", about={"agent": "alpha", "thread": 5}),
     }
     path = CONTRACT / "apns.json"
     if os.environ.get("BEACON_UPDATE_CONTRACT"):

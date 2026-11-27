@@ -14,7 +14,7 @@ from pydantic import AliasChoices, BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import app_devices, audit, auth, availability, board, bus, clients, cron_store, fleet, gitea_intake, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, projects, push, scheduler, secret_pipe, store, templates, workflow, workhours
+from . import app_devices, audit, auth, availability, board, bus, chat, clients, cron_store, fleet, gitea_intake, intake, mailbox, members, mesh, notify, onboarding, opstore, policy, projects, push, scheduler, secret_pipe, store, templates, workflow, workhours
 from .board_mcp import board_app
 from .drivers import NoSSH, for_agent
 from .schemas import Agent, AgentClient, CronJob, Host, SecretError
@@ -163,6 +163,7 @@ def _require_human_session(request: Request, capability: str, **clearance_params
 
 app.include_router(auth.router)
 app.include_router(app_devices.router)
+app.include_router(chat.router)
 app.add_middleware(auth.CSRFMiddleware)
 app.add_middleware(auth.AuthMiddleware)
 # Outermost — added last, so it runs first, request.session exists by
@@ -1210,6 +1211,7 @@ def mesh_config(id_: str, background: BackgroundTasks, authorization: str | None
         previous = availability.record_health(id_, x_beacon_health, x_beacon_health_detail or "")
         if previous is not None:
             background.add_task(notify.agent_health, id_, x_beacon_health, previous, x_beacon_health_detail or "")
+    background.add_task(chat.purge)  # expiry and the 30 days: no timer either
     # Every pull also looks for agents that stopped pulling: no timer needed
     # while any agent still syncs.
     background.add_task(_tell_about_quiet_agents)
@@ -1313,7 +1315,8 @@ def _access_fields(agent: Agent | None) -> tuple:
     its logs (a member gets the agent through `owner`, backend/members.py)."""
     reach = agent.reach if agent else None
     return (sorted(agent.tags) if agent else [], sorted(reach.callers) if reach and reach.callers is not None else None,
-            bool(reach and reach.board), agent.owner if agent else None, bool(agent and agent.member_logs))
+            bool(reach and reach.board), agent.owner if agent else None, bool(agent and agent.member_logs),
+            bool(reach and reach.chat))
 
 
 @app.put("/api/agents/{id_}")

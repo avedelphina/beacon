@@ -861,6 +861,7 @@ async function fillAgentForm(a) {
   f.reach_network.value = a?.reach?.network ?? "";
   f.reach_bind.value = a?.reach?.bind ?? "";
   f.reach_board.checked = !!a?.reach?.board;
+  f.reach_chat.checked = !!a?.reach?.chat;
   // The record as loaded: saving must keep what the form doesn't show
   // (reach, and whatever fields come later), not rebuild the agent from scratch.
   f.dataset.original = JSON.stringify(a ?? {});
@@ -924,6 +925,7 @@ document.getElementById("agent-form").addEventListener("submit", async (e) => {
       network: f.reach_network.value.trim() || null,
       bind: f.reach_bind.value.trim() || null,
       board: f.reach_board.checked,
+      chat: f.reach_chat.checked,
     } : null,
   };
   try {
