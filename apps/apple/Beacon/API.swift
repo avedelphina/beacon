@@ -48,6 +48,24 @@ nonisolated struct WorkflowRequest: Decodable, Identifiable, Sendable, Hashable 
     let answeredBy: String?
     let onBehalfOf: String?
     let response: Answer?
+    let replacesId: Int?       // the earlier request this one takes the place of
+    let report: Report?        // what the requester says became of an approved request
+    let events: [Event]?       // only when one request is fetched, not in the list
+
+    /// The requester's own account: Beacon checks nothing in it.
+    nonisolated struct Report: Decodable, Sendable, Hashable {
+        let outcome: String    // executed, failed
+        let note: String
+        let by: String
+        let links: [Card.Link]?
+    }
+
+    nonisolated struct Event: Decodable, Sendable, Hashable {
+        let kind: String
+        let toState: String?
+    }
+
+    var wasApproved: Bool { (events ?? []).contains { $0.kind == "responded" && $0.toState == "approved" } }
 
     nonisolated struct Consulted: Decodable, Sendable, Hashable {
         let agent: String
@@ -134,7 +152,7 @@ nonisolated struct Card: Decodable, Sendable {
         let lastSeenState: String?
     }
 
-    nonisolated struct Link: Decodable, Sendable {
+    nonisolated struct Link: Decodable, Sendable, Hashable {
         let url: String
         let label: String?
     }
