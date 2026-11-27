@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-11-27
+
+### Upgrading
+
+From 0.40.0 or earlier, also do the steps under 0.41.0 that apply to you.
+
+1. **Back up the database.** Stop Beacon first, so that the copy is complete, and keep the copy outside
+   the repository folder: it holds your whole fleet.
+
+   ```bash
+   docker compose stop beacon mcp
+   cp -a state ../beacon-state-0.41   # may need sudo: the files belong to uid 10001
+   ```
+
+2. **Get 0.42.0 and rebuild.** Two columns are added to the database on the first start.
+
+   ```bash
+   git fetch --tags && git checkout v0.42.0
+   docker compose up -d --build
+   ```
+
+3. **Reload open Beacon tabs**, and quit and reopen the installed web app. A page left open keeps
+   running the old scripts.
+4. **Restart agent gateways**, so that they load `workflow_withdraw`, `workflow_report` and the
+   `replaces` parameter. Their hosts install agent skill 1.28.0 on the next sync.
+5. **Check your own scripts and agent instructions.** An answer that names an out-of-date plan now
+   leaves the request pending instead of marking it `stale`. Instructions of your own that tell agents
+   to ask a person for each step or commit now contradict the agent skill.
+6. **Only for the app:** install a build made from this release.
+
+No new settings or dependencies.
+
+**To go back to 0.41.0**, stop `beacon` and `mcp`, put the backup back in place of `state/`, check out
+`v0.41.0` and rebuild. Changes made after the backup are lost.
+
 ### Added
 
 - **A requester can keep its request true** instead of opening another. `workflow_revise` now also
