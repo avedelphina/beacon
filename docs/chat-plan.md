@@ -48,8 +48,13 @@ conversation, reading it, and continuing it (the agent recalled what was said
 there); a scheduled job delivered to the plugin; `hermes send`; `a2a_call` to a
 peer named `owner`.
 
-Learned: continuing a conversation **repoints** the chat and stays so, and
-`a2a_call` replaces e-mail addresses and secrets with placeholders.
+Learned: continuing a conversation **repoints** the chat and stays so, it also
+**relabels** the original (its source becomes the plugin), and `a2a_call`
+replaces e-mail addresses and secrets with placeholders.
+
+Shown later (C0, same checkout): **copying** a conversation into a new thread.
+A new child session with the transcript copied into it, without ending the
+parent; the original kept its source, routing and messages.
 
 Not shown: approvals, stop, a live messaging-platform conversation, other Hermes
 versions, a Docker agent.
@@ -166,8 +171,10 @@ app says so, and chat keeps working.
   list, nothing from messaging platforms is shown.
 - **How.** Continue a **copy**: branch the conversation into a new thread and
   leave the original alone, so that Telegram and Beacon never write into one
-  session. Branching was not in the spike; if it cannot be done safely, stop and
-  decide again rather than share the session.
+  session. Never switch a thread to the original: that relabels it. Hermes's own
+  API fork ends the parent, so the plugin makes the copy itself (create a child
+  session, copy the transcript, end nothing). Still to check on a live messaging
+  conversation, and what its platform-specific system prompt does in the copy.
 - Their history is shown only while the agent is online. Beacon stores none of
   it; what is said from then on is a Beacon thread like any other.
 
