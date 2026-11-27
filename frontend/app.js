@@ -1605,6 +1605,9 @@ async function updateWorkflowBadge() {
 }
 
 let workflowCards = {};
+// The requests as they are on screen, by id. An answer must name the plan the person read, not the
+// one Beacon has by the time they click: the requester may have updated it since.
+let shownWorkflows = new Map();
 
 // What waits for an answer comes first, the soonest to expire at the very top; then what waits for its
 // requester, then what is approved and not yet done; the rest by recency, as the server sends them.
@@ -1622,6 +1625,7 @@ function renderWorkflowItems(items) {
   document.getElementById("workflows-empty").hidden = items.length > 0;
   setWorkflowBadge(items);
   items = sortWorkflows(items);
+  shownWorkflows = new Map(items.map((w) => [String(w.id), w]));
   list.innerHTML = items.map((w) => {
     const card = workflowCards[w.card_id];
     // Where to look, from the card: what an agent pointed it at, outside Beacon. The state on a reference is
@@ -1684,6 +1688,7 @@ function renderWorkflowItems(items) {
         <span class="chip">${esc(w.state)}</span>
       </header>
       <p class="wf-from">From <strong>${esc(w.requester)}</strong> to <strong>${esc(responder)}</strong> · expires ${esc(workflowWhen(w.expires_at))}</p>
+      ${w.replaces_id ? `<details class="wf-card-more" data-replaces="${esc(w.replaces_id)}"><summary>Replaces #${esc(w.replaces_id)}: what it said</summary><div></div></details>` : ""}
       <p class="wf-card">On card <a href="#" data-open-card="${esc(w.card_id)}">#${esc(w.card_id)}${card ? ` ${esc(card.title)}` : ""}</a>${
         card ? ` <span class="chip">${esc(card.state)}</span>` : ""}</p>
       ${card ? (sources.length ? `<ul class="wf-sources">${sources.join("")}</ul>`
@@ -1704,6 +1709,18 @@ function renderWorkflowItems(items) {
     </article>`;
   }).join("");
   list.querySelectorAll("[data-workflow-action]").forEach((button) => button.addEventListener("click", () => respondWorkflow(button)));
+  list.querySelectorAll("[data-replaces]").forEach((d) => d.addEventListener("toggle", async () => {
+    const box = d.querySelector("div");
+    if (!d.open || box.innerHTML) return;
+    try {
+      const old = await json(`/api/workflows/${d.dataset.replaces}`);
+      const approved = (old.events || []).some((e) => e.kind === "responded" && e.to_state === "approved");
+      box.innerHTML = `<p class="hint">${approved ? "It had been approved. " : ""}Now ${esc(old.state)}.</p>
+        <p><strong>${esc(old.title)}</strong></p>${renderMarkdown(old.summary)}`;
+    } catch (err) {
+      box.textContent = err.message;
+    }
+  }));
   list.querySelectorAll("[data-open-card]").forEach((a) => a.addEventListener("click", (e) => {
     e.preventDefault();
     openCard(a.dataset.openCard);  // the card opens over this page: nothing to navigate back from
@@ -1726,7 +1743,7 @@ async function renderWorkflows() {
 
 async function respondWorkflow(button) {
   const id = button.dataset.workflowId;
-  const item = (await api.listWorkflows()).find((w) => String(w.id) === String(id));
+  const item = shownWorkflows.get(String(id));
   if (!item) return;
   const action = button.dataset.workflowAction;
   let response = {};
@@ -1749,7 +1766,7 @@ async function respondWorkflow(button) {
     await renderWorkflows();
   } catch (err) {
     alert(err.message);
-    button.disabled = false;
+    await renderWorkflows();  // the plan may have changed: show what there is to answer now
   }
 }
 

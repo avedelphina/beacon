@@ -588,6 +588,7 @@ class WorkflowCreateRequest(BaseModel):
     consulted: list[dict] = []  # peers asked first: [{agent, said, context_id?}]
     consult_skipped: str | None = None  # why none was, when asking a person
     urgent_reason: str | None = None  # why it cannot wait for working hours
+    replaces: int | None = None  # an earlier request of yours on this card, which this one takes the place of
 
 
 class WorkflowResponseRequest(BaseModel):
@@ -600,6 +601,18 @@ class WorkflowResponseRequest(BaseModel):
 
 class WorkflowEscalateRequest(BaseModel):
     reason: str
+    context_id: str | None = None
+
+
+class WorkflowWithdrawRequest(BaseModel):
+    reason: str
+    context_id: str | None = None
+
+
+class WorkflowReportRequest(BaseModel):
+    outcome: str  # executed | failed
+    note: str
+    links: list[dict] = []  # evidence: [{url, label}]
     context_id: str | None = None
 
 
@@ -694,7 +707,7 @@ def _create_workflow(card_id: int, body: WorkflowCreateRequest, request: Request
         clearance=body.clearance, title=body.title, summary=body.summary, options=body.options,
         target=body.target, plan_revision=body.plan_revision, plan_hash=body.plan_hash,
         expires_at=body.expires_at, context_id=body.context_id,
-        consulted=body.consulted, consult_skipped=body.consult_skipped, urgent_reason=body.urgent_reason,
+        consulted=body.consulted, consult_skipped=body.consult_skipped, urgent_reason=body.urgent_reason, replaces=body.replaces,
     )
 
 
@@ -957,8 +970,18 @@ def workflow_require_human(request_id: int, body: WorkflowEscalateRequest, reque
 
 @app.post("/api/workflows/{request_id}/revise")
 def workflow_revise(request_id: int, body: WorkflowReviseRequest, request: Request) -> dict:
-    """The requester's answer to "changes requested": a changed plan, pending again."""
+    """The requester's changed plan, while the request waits or after "changes requested"."""
     return workflow.revise(request_id, actor=_workflow_actor(request), **body.model_dump())
+
+
+@app.post("/api/workflows/{request_id}/withdraw")
+def workflow_withdraw(request_id: int, body: WorkflowWithdrawRequest, request: Request) -> dict:
+    return workflow.withdraw(request_id, actor=_workflow_actor(request), **body.model_dump())
+
+
+@app.post("/api/workflows/{request_id}/report")
+def workflow_report(request_id: int, body: WorkflowReportRequest, request: Request) -> dict:
+    return workflow.report(request_id, actor=_workflow_actor(request), **body.model_dump())
 
 
 @app.get("/api/mailbox")

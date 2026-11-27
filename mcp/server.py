@@ -220,8 +220,8 @@ async def revise_workflow(request_id: int, plan_revision: str, plan_hash: str,
                           title: str | None = None, summary: str | None = None,
                           options: list[str] | None = None, target: dict | None = None,
                           expires_at: float | None = None) -> object:
-    """After a responder asked for changes, send the changed plan: the request
-    goes back to pending under the new plan binding. Only the requester (here,
+    """Send a changed plan, while the request is pending or after a responder
+    asked for changes: it is pending under the new plan binding. Only the requester (here,
     Beacon's MCP service identity) may revise; give only what changed.
     """
     body = {"plan_revision": plan_revision, "plan_hash": plan_hash, "title": title, "summary": summary,

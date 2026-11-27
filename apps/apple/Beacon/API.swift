@@ -82,7 +82,7 @@ nonisolated struct WorkflowRequest: Decodable, Identifiable, Sendable, Hashable 
 }
 
 /// An answer to a workflow request. It names the plan revision and hash of the request it answers:
-/// if the requester changed the plan since, Beacon marks the request stale instead of approving
+/// if the requester changed the plan since, Beacon refuses the answer instead of approving
 /// something else.
 nonisolated struct WorkflowAnswer: Encodable, Sendable {
     let action: String         // approved, rejected, changes_requested, choose_option, answered
