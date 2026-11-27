@@ -324,3 +324,48 @@ struct ProjectTests {
         }
     }
 }
+
+struct ChatTests {
+    private func decode<T: Decodable>(_ type: T.Type, _ name: String) throws -> T {
+        try Client.decoder.decode(T.self, from: contract(name))
+    }
+
+    @Test func whatBeaconAnswersDecodes() throws {
+        let agents = try decode([ChatAgent].self, "chat-agents.json")
+        #expect(agents.first?.id == "alpha" && agents.first?.connectedAt != nil)
+        #expect(try decode([ChatThread].self, "chat-threads.json").first?.agent == "alpha")
+        let answer = try decode(ChatAnswer.self, "chat-thread.json")
+        #expect(answer.messages.map(\.sender) == ["owner", "agent"] && answer.rev > 0)
+        #expect(try decode(ChatMessage.self, "chat-sent.json").state == "queued")
+    }
+
+    @Test func changedMessagesReplaceAndKeepTheOrder() throws {
+        let answer = try decode(ChatAnswer.self, "chat-thread.json")
+        let merged = Chat.merge(answer.messages, [answer.messages[1], answer.messages[0]])
+        #expect(merged.map(\.id) == answer.messages.map(\.id))
+    }
+
+    @Test func aMessageIsSentAsBeaconReadsIt() throws {
+        let body = String(decoding: try JSONEncoder().encode(ChatSend(text: "yes", replyTo: 3)), as: UTF8.self)
+        #expect(body.contains("\"reply_to\":3") && !body.contains("agent"))
+    }
+
+    @Test func anApprovalPromptIsRecognisedOnlyWhileItIsTheLastThingSaid() throws {
+        func message(_ id: Int, _ sender: String, _ text: String) throws -> ChatMessage {
+            try Client.decoder.decode(ChatMessage.self, from: JSONSerialization.data(withJSONObject: [
+                "id": id, "sender": sender, "text": text, "state": "delivered", "created_at": 1.0, "final": true, "rev": id]))
+        }
+        let prompt = try message(1, "agent", "Dangerous command requires approval: rm -rf x. Reply `/approve` to execute")
+        #expect(Chat.awaitsApproval([prompt]))
+        #expect(!Chat.awaitsApproval([prompt, try message(2, "owner", "/deny")]))
+        #expect(!Chat.awaitsApproval([try message(3, "agent", "You can type /approve when asked.")]))
+    }
+
+    @Test func aTappedChatNoticeOpensTheConversationNotTheSecrets() throws {
+        let sent = try JSONSerialization.jsonObject(with: contract("apns.json")) as! [String: [AnyHashable: Any]]
+        let chat = sent["chat"]!
+        #expect(Notices.chat(chat) == ChatTarget(agent: "alpha", thread: 5))
+        #expect(Notices.secretsAgent(chat) == nil && Notices.workflowID(chat) == nil)
+        #expect(Notices.secretsAgent(sent["secret"]!) == "alpha" && Notices.chat(sent["secret"]!) == nil)
+    }
+}

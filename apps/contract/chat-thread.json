@@ -1,0 +1,34 @@
+{
+  "messages": [
+    {
+      "created_at": 1795000000.0,
+      "final": true,
+      "id": 1,
+      "reply_to": null,
+      "rev": 2,
+      "sender": "owner",
+      "state": "queued",
+      "text": "Is the backup done?"
+    },
+    {
+      "created_at": 1795000000.0,
+      "final": true,
+      "id": 2,
+      "reply_to": null,
+      "rev": 3,
+      "sender": "agent",
+      "state": "delivered",
+      "text": "Yes, at **02:00**."
+    }
+  ],
+  "rev": 3,
+  "thread": {
+    "agent": "alpha",
+    "id": 1,
+    "last": "Yes, at **02:00**.",
+    "origin": "app",
+    "title": "Is the backup done?",
+    "unread": 0,
+    "updated_at": 1795000000.0
+  }
+}

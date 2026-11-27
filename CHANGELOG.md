@@ -7,7 +7,10 @@
 - **Chat with your own agent, Beacon's side** (`reach.chat`, `/api/chat`, `/mesh/{agent}/chat`): a
   queue both ways, 30 days of history, only the owner, Face ID in the app (docs/chat-plan.md).
 - **Chat, the agent side.** The host sync installs a Hermes platform plugin for an agent with chat
-  on, and removes it when chat is off. Hosts need this release's sync. The app screen comes next.
+  on, and removes it when chat is off. Hosts need this release's sync.
+- **Chats tab in the app**: conversations with your own agents, opened with Face ID; live answers,
+  stop, approve or deny a command, queued messages you can take back, a tap on the notification
+  opens the conversation.
 
 ### Fixed
 
