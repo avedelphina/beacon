@@ -161,6 +161,11 @@ struct ProjectView: View {
                     if project.state == "paused", let by = project.pausedBy { LabeledContent("Paused by", value: by) }
                     if project.can.steer && project.state == "active" {
                         Button("Pause project…", systemImage: "pause.circle") { confirmPause = true }.disabled(working)
+                            .confirmationDialog("Pause this project?", isPresented: $confirmPause, titleVisibility: .visible) {
+                                Button("Pause", role: .destructive) { change(ProjectChange(state: "paused")) }
+                            } message: {
+                                Text("Its agents are told to stop work on it. Only a person can restart a project a person paused.")
+                            }
                     }
                     if project.can.steer && project.state == "paused" {
                         Button("Resume project", systemImage: "play.circle") { change(ProjectChange(state: "active")) }.disabled(working)
@@ -227,11 +232,6 @@ struct ProjectView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }
-        .confirmationDialog("Pause this project?", isPresented: $confirmPause, titleVisibility: .visible) {
-            Button("Pause", role: .destructive) { change(ProjectChange(state: "paused")) }
-        } message: {
-            Text("Its agents are told to stop work on it. Only a person can restart a project a person paused.")
-        }
     }
 
     private func milestones(_ items: [Milestone]) -> some View {

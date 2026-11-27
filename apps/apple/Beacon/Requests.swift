@@ -171,10 +171,6 @@ struct RequestDetailView: View {
             card = try? await session.client?.get("/api/board/cards/\(request.cardId)")
             if let old = request.replacesId { replaced = try? await session.client?.get("/api/workflows/\(old)") }
         }
-        .confirmationDialog(confirmTitle, isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }),
-                            titleVisibility: .visible, presenting: asking) { action in
-            Button(confirmButton(action), role: action == .rejected ? .destructive : nil) { send(action) }
-        }
         // The requester changed the plan while a dialog was open: ask again, over what is on screen now.
         .onChange(of: request.planHash) {
             asking = nil
@@ -272,19 +268,19 @@ struct RequestDetailView: View {
                 switch request.kind {
                 case "question":
                     TextField("Your answer", text: $answer, axis: .vertical).lineLimit(3...8)
-                    Button("Send answer") { asking = .answered }.disabled(answer.trimmingCharacters(in: .whitespaces).isEmpty)
-                    Button("Decline", role: .destructive) { asking = .rejected }
+                    answerButton("Send answer", .answered).disabled(answer.trimmingCharacters(in: .whitespaces).isEmpty)
+                    answerButton("Decline", .rejected, role: .destructive)
                 case "decision":
                     Picker("Option", selection: $option) { ForEach(request.options, id: \.self) { Text($0).tag($0) } }
                         .pickerStyle(.inline)
-                    Button(faceID("Choose this option")) { asking = .choose_option }
+                    answerButton(faceID("Choose this option"), .choose_option)
                     Button("Request changes") { note = ""; askingChanges = true }
-                    Button("Reject", role: .destructive) { asking = .rejected }
+                    answerButton("Reject", .rejected, role: .destructive)
                 default:
-                    Button(faceID(request.kind == "handoff" ? "Accept handoff" : "Approve")) { asking = .approved }
+                    answerButton(faceID(request.kind == "handoff" ? "Accept handoff" : "Approve"), .approved)
                         .keyboardShortcut(.return, modifiers: .command)  // still asks to confirm
                     Button("Request changes") { note = ""; askingChanges = true }
-                    Button(request.kind == "handoff" ? "Decline" : "Reject", role: .destructive) { asking = .rejected }
+                    answerButton(request.kind == "handoff" ? "Decline" : "Reject", .rejected, role: .destructive)
                 }
             } footer: {
                 if request.needsFaceID { Text("CL\(request.clearance): \(Biometry.name) confirms that it is you.") }
@@ -297,6 +293,16 @@ struct RequestDetailView: View {
                 }
             }
         }
+    }
+
+    /// A button with its own confirmation: iOS points the confirmation at the view that carries it,
+    /// so on the whole form it appears in the middle of the plan, away from the button.
+    private func answerButton(_ label: String, _ action: Action, role: ButtonRole? = nil) -> some View {
+        Button(label, role: role) { asking = action }
+            .confirmationDialog(confirmTitle, isPresented: Binding(get: { asking == action }, set: { if !$0 && asking == action { asking = nil } }),
+                                titleVisibility: .visible) {
+                Button(confirmButton(action), role: action == .rejected ? .destructive : nil) { send(action) }
+            }
     }
 
     private func sendToPerson() {
