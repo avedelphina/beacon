@@ -56,8 +56,26 @@ Shown later (C0, same checkout): **copying** a conversation into a new thread.
 A new child session with the transcript copied into it, without ending the
 parent; the original kept its source, routing and messages.
 
-Not shown: approvals, stop, a live messaging-platform conversation, other Hermes
-versions, a Docker agent.
+C0, on Hermes **0.21.1** in a separate user on a real agent host: queue, real
+reply, streaming, a command approval (`/deny` kept the file, `/approve` ran the
+command), `/stop`, listing, copying with recall and an untouched original,
+`hermes send`.
+
+Not shown: copying a real messaging-platform conversation (the mechanics do not
+depend on the source), a Docker agent.
+
+### Hermes versions
+
+Hosts run 0.21.x and 0.22.x; 0.23 changed how sessions are stored. The platform
+plugin interface is the same on all. The session calls are not:
+
+| | Hermes ≤ 0.22 | Hermes 0.23 |
+|---|---|---|
+| Store | `store._db_for_key(key)` (SQLite `SessionDB`) | `runner.persistence.aio` |
+| List | `list_sessions_rich` | `sessions.list_sessions` |
+| Copy | `create_session(..., model_config={"_branched_from": …})`, `replace_messages` | `NewSession(lineage_kind=BRANCH)`, `replace_transcript` |
+
+`sessions.py` holds both and picks by what it finds.
 
 ## 3. Rules
 
@@ -194,10 +212,8 @@ Android gets the same later (`docs/android-app-plan.md`).
 
 Sizes: S ≈ half a day, M ≈ 1–2 days, L ≈ 3–5 days of focused work.
 
-**C0 — Checks before building (S–M).** On a test agent: approvals and `/stop`
-through the plugin; branching a live Telegram or Delta Chat conversation; a
-Docker agent; the Hermes version on each host has the platform interface.
-Reading real hosts needs the owner's say-so. Update this plan with what is found.
+**C0 — Checks before building (done 2026-11-27, §2).** The Docker check moves to
+C2, where the sync installs the plugin.
 
 **C1 — Beacon (L).** §4.1–4.3, §4.5, retention, grant, clearances, members.
 Acceptance (pytest): only the owner reads or writes, operators included in the
