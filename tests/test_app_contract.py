@@ -141,6 +141,7 @@ def answers(fleet, fake_ssh, monkeypatch):
 
     monkeypatch.setattr(chat.asyncio, "sleep", answer_then_sleep)
     answers |= {
+        "badge.json": member.get("/api/app/badge"),
         "chat-sessions.json": member.get("/api/chat/agents/alpha/sessions"),
         "chat-history.json": member.get("/api/chat/agents/alpha/sessions/s1"),
         "chat-continued.json": member.post("/api/chat/agents/alpha/sessions/s1/continue", json={"title": "Otter plans"}),
@@ -163,6 +164,7 @@ def test_the_notification_payloads_match_what_beacon_sends():
         "secret": apns.payload("alpha has a secret for you", about={"agent": "alpha"}),
         "project": apns.payload("project infra is paused", about={"project": 3}),
         "chat": apns.payload("alpha sent you a message", about={"agent": "alpha", "thread": 5}),
+        "cards": apns.payload("2 board cards not moving", about={"cards": [4, 7]}, badge=3),
     }
     path = CONTRACT / "apns.json"
     if os.environ.get("BEACON_UPDATE_CONTRACT"):
@@ -175,7 +177,7 @@ def test_the_notification_payloads_match_what_beacon_sends():
     "health-events.json", "status.json", "logs.json", "restart-gate.json", "restart.json", "agents-member.json",
     "secrets.json", "secret-put.json", "secret-reveal.json", "projects.json", "project.json", "card-member.json",
     "availability-member.json", "status-member.json", "chat-agents.json", "chat-threads.json", "chat-thread.json",
-    "chat-sent.json", "chat-sessions.json", "chat-history.json", "chat-continued.json"])
+    "chat-sent.json", "chat-sessions.json", "chat-history.json", "chat-continued.json", "badge.json"])
 def test_the_apps_contract_files_match_the_api(answers, name):
     path = CONTRACT / name
     if os.environ.get("BEACON_UPDATE_CONTRACT"):
@@ -183,3 +185,17 @@ def test_the_apps_contract_files_match_the_api(answers, name):
     assert path.exists(), f"{path} is missing: run with BEACON_UPDATE_CONTRACT=1"
     assert _shape(json.loads(path.read_text())) == _shape(answers[name]), (
         f"the API's answer for {name} changed shape: regenerate apps/contract (see this module's docstring)")
+
+
+def test_the_tones_beacon_names_are_the_ones_the_app_ships():
+    from typing import get_args
+
+    from backend import app_devices
+
+    tones = [t for t in get_args(app_devices.Tone) if t not in ("default", "none")]
+    path = CONTRACT / "sounds.json"
+    if os.environ.get("BEACON_UPDATE_CONTRACT"):
+        path.write_text(json.dumps(tones, indent=2) + "\n")
+    assert json.loads(path.read_text()) == tones, "Beacon's tones changed: regenerate apps/contract"
+    bundled = Path(__file__).resolve().parent.parent / "apps" / "apple" / "Beacon" / "Sounds"
+    assert sorted(f.stem for f in bundled.glob("*.wav")) == sorted(tones)

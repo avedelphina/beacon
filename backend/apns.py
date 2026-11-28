@@ -17,6 +17,7 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
@@ -74,9 +75,24 @@ def category(about: dict | None) -> str | None:
     return "WF_APPROVE" if about.get("kind") in ("approval", "review") else "WF_OPEN"
 
 
-def payload(subject: str, urgent: bool = False, about: dict | None = None) -> dict:
+def sound_kind(urgent: bool, about: dict | None) -> str | None:
+    """Which of a device's chosen tones a notice takes (app_devices.Sounds); None: the system's."""
+    if about and about.get("thread") is not None:
+        return "chat"
+    if urgent:
+        return "urgent"
+    return "requests" if about and about.get("workflow") is not None else None
+
+
+def payload(subject: str, urgent: bool = False, about: dict | None = None, sounds: dict | None = None,
+            badge: int | None = None) -> dict:
     cat = category(about)
-    aps: dict = {"alert": {"title": subject}, "sound": "default"}
+    aps: dict = {"alert": {"title": subject}}
+    tone = (sounds or {}).get(sound_kind(urgent, about), "default")
+    if tone != "none":  # a file in the app's bundle, or "default"
+        aps["sound"] = tone if tone == "default" else f"{tone}.wav"
+    if badge is not None:
+        aps["badge"] = badge  # how many things wait on this person; the app sets it again when opened
     if cat:
         aps["category"] = cat
         # Time Sensitive breaks through Focus: for what needs a person now, not for every notice.
@@ -85,7 +101,7 @@ def payload(subject: str, urgent: bool = False, about: dict | None = None) -> di
         aps["thread-id"] = f"card-{about['card']}"
     body = {"aps": aps}
     if about:
-        body["beacon"] = {k: about[k] for k in ("workflow", "clearance", "kind", "card", "agent", "project", "thread")
+        body["beacon"] = {k: about[k] for k in ("workflow", "clearance", "kind", "card", "cards", "agent", "project", "thread")
                           if about.get(k) is not None}
     return body
 
@@ -116,14 +132,27 @@ def deliver(device: dict, body: dict, priority: int) -> int | str:
     return response.status_code
 
 
-def send(people: set[str], subject: str, urgent: bool = False, about: dict | None = None) -> None:
+def send(people: set[str], subject: str, urgent: bool = False, about: dict | None = None,
+         badge: Callable[[str], int] | None = None) -> None:
     """Every app device these people have, in the background, as push.send does for browsers."""
     if not people or not configured():
         return
     devices = app_devices.apns_targets(people)
     if not devices:
         return
-    body = payload(subject, urgent, about)
     # 10 = now; 5 = when it suits the phone's power. A request waiting on someone should not wait more.
     priority = 10 if urgent or category(about) else 5
-    threading.Thread(target=lambda: [deliver(d, body, priority) for d in devices], daemon=True).start()
+    def run() -> None:
+        counts: dict[str, int | None] = {}
+        for d in devices:
+            email = d["email"]
+            if email not in counts:
+                try:
+                    counts[email] = badge(email) if badge else None
+                except Exception:  # a notice matters more than its number
+                    logger.exception("could not count what waits on someone")
+                    counts[email] = None
+            # Built per device: each has its own choice of tones.
+            deliver(d, payload(subject, urgent, about, d.get("sounds"), counts[email]), priority)
+
+    threading.Thread(target=run, daemon=True).start()

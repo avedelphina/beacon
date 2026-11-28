@@ -45,6 +45,7 @@ struct SettingsView: View {
                         Text("Without them this device hears nothing about requests that wait for you.")
                     }
                 }
+                SoundsSection()
                 Section {
                     Button("Log out", role: .destructive, action: logOut)
                 }

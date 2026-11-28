@@ -20,6 +20,7 @@ Approve work. CL4 and CL5 need more: each such request carries a signature by th
 
 import base64
 import hashlib
+import json
 import math
 import os
 import secrets
@@ -189,9 +190,14 @@ def apns_targets(people: set[str]) -> list[dict]:
     """The devices of these people that Apple can deliver to, and not idle past their expiry."""
     people = {p.casefold() for p in people}
     with opstore.connect() as db:
-        rows = db.execute("SELECT id, email, apns_token, apns_env FROM app_devices"
+        rows = db.execute("SELECT id, email, apns_token, apns_env, sounds FROM app_devices"
                           " WHERE apns_token IS NOT NULL AND last_seen_at > ?", (time.time() - IDLE_SECONDS,)).fetchall()
-    return [dict(r) for r in rows if r["email"] in people]
+    return [dict(r) | {"sounds": json.loads(r["sounds"] or "{}")} for r in rows if r["email"] in people]
+
+
+def set_sounds(device_id: str, sounds: dict) -> None:
+    with opstore.connect() as db:
+        db.execute("UPDATE app_devices SET sounds = ? WHERE id = ?", (json.dumps(sounds, sort_keys=True), device_id))
 
 
 def devices(email: str | None) -> list[dict]:
@@ -263,6 +269,27 @@ def register_apns(body: ApnsRegistration, request: Request) -> dict:
     if device is None:
         raise HTTPException(409, "only a device logged in through the app has an APNs token")
     set_apns(device["id"], body.token.lower(), body.env)
+    return {"ok": True}
+
+
+# The system's sound, silence, or one of the tones the app ships (scripts/make_app_tones.py).
+Tone = Literal["default", "none", "chime", "ping", "knock", "rise", "bell"]
+
+
+class Sounds(BaseModel):
+    """What this device plays, by kind of notice. Everything else plays the system's sound."""
+
+    requests: Tone = "default"
+    urgent: Tone = "default"
+    chat: Tone = "default"
+
+
+@router.put("/api/app/devices/self/sounds")
+def choose_sounds(body: Sounds, request: Request) -> dict:
+    device = getattr(request.state, "app_device", None)
+    if device is None:
+        raise HTTPException(409, "only a device logged in through the app has sounds")
+    set_sounds(device["id"], body.model_dump())
     return {"ok": True}
 
 

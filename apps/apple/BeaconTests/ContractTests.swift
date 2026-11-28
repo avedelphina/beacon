@@ -376,3 +376,42 @@ struct ChatTests {
         #expect(Notices.secretsAgent(sent["secret"]!) == "alpha" && Notices.chat(sent["secret"]!) == nil)
     }
 }
+
+struct SoundTests {
+    @Test func theAppShipsEveryToneBeaconMayName() throws {
+        let named = try JSONDecoder().decode([String].self, from: contract("sounds.json"))
+        #expect(named == Tones.files)
+        for tone in named {
+            #expect(Tones.url(tone) != nil, "\(tone).wav is not in the app's bundle")
+        }
+        #expect(Tones.url("default") == nil && Tones.url("none") == nil && Tones.url("../x") == nil)
+    }
+
+    @Test func theChoiceIsKeptAndSentAsBeaconReadsIt() throws {
+        let defaults = try #require(UserDefaults(suiteName: "sounds-test"))
+        defaults.removePersistentDomain(forName: "sounds-test")
+        #expect(SoundChoices.load(from: defaults) == SoundChoices())
+        SoundChoices(requests: "bell", urgent: "default", chat: "none").save(to: defaults)
+        #expect(SoundChoices.load(from: defaults).chat == "none")
+        let sent = String(decoding: try JSONEncoder().encode(SoundChoices.load(from: defaults)), as: UTF8.self)
+        #expect(sent.contains("\"requests\":\"bell\""))
+    }
+}
+
+struct WaitingTests {
+    @Test func theBadgeAndTheStuckFlagDecode() throws {
+        let waiting = try Client.decoder.decode(Waiting.self, from: contract("badge.json"))
+        #expect(waiting.requests >= 0 && waiting.chats >= 0)
+        let cards = try Client.decoder.decode([CardSummary].self, from: contract("board.json"))
+        #expect(cards.allSatisfy { $0.stuck == false })
+    }
+
+    @Test func aTappedStuckCardsNoticeNamesTheCards() throws {
+        let sent = try JSONSerialization.jsonObject(with: contract("apns.json")) as! [String: [AnyHashable: Any]]
+        let notice = sent["cards"]!
+        #expect(Notices.cardIDs(notice) == [4, 7] && Notices.workflowID(notice) == nil)
+        #expect(Notices.chat(notice) == nil && Notices.secretsAgent(notice) == nil && Notices.projectID(notice) == nil)
+        #expect((notice["aps"] as? [String: Any])?["badge"] as? Int == 3)
+        #expect(Notices.cardIDs(sent["chat"]!) == nil)
+    }
+}

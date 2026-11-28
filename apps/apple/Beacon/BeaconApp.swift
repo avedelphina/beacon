@@ -31,6 +31,10 @@ final class Session {
     var openProject: Int?
     /// A conversation to show, from a tapped notification ("alpha sent you a message").
     var openChat: ChatTarget?
+    /// Cards to show, from a tapped notification ("2 board cards not moving").
+    var openCards: [Int]?
+    /// What waits on this person (GET /api/app/badge): the app icon's number and the tabs'.
+    var waiting = Waiting()
     /// Bumped when something changed the requests (a notice arrived, an answer from a notification).
     var refreshes = 0
     var pushProblem: String?
@@ -68,6 +72,7 @@ final class Session {
         UIApplication.shared.unregisterForRemoteNotifications()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         UNUserNotificationCenter.current().setBadgeCount(0)
+        waiting = Waiting()
     }
 
     /// Checks that this Beacon's `api` is one the app understands. Called after login and at launch.
@@ -115,7 +120,9 @@ struct MainView: View {
     var body: some View {
         TabView(selection: $tab) {
             Tab("Requests", systemImage: "tray", value: Tabs.requests) { RequestsSplitView() }
+                .badge(session.waiting.requests)
             Tab("Chats", systemImage: "bubble.left.and.bubble.right", value: Tabs.chats) { ChatsView() }
+                .badge(session.waiting.chats)
             Tab("Agents", systemImage: "cpu", value: Tabs.agents) { AgentsView() }
             Tab("Board", systemImage: "rectangle.stack", value: Tabs.board) { BoardView() }
             Tab("Projects", systemImage: "flag", value: Tabs.projects) { ProjectsView() }
@@ -125,11 +132,17 @@ struct MainView: View {
             }
         }
         .tabViewStyle(.sidebarAdaptable)
-        .onChange(of: phase) { if phase == .active { Task { await session.resumeNotifications() } } }
+        .onChange(of: phase) {
+            if phase == .active { Task { await session.resumeNotifications() } }
+            Task { await session.refreshBadge() }
+        }
+        // At launch, after a notice, and when moving between tabs (something may have been read or answered).
+        .task(id: "\(session.refreshes)-\(tab)") { await session.refreshBadge() }
         // A tapped notification is about a request, whichever tab was open.
         .onChange(of: session.openRequest, initial: true) { if session.openRequest != nil { tab = .requests } }
         .onChange(of: session.openSecrets, initial: true) { if session.openSecrets != nil { tab = .agents } }
         .onChange(of: session.openProject, initial: true) { if session.openProject != nil { tab = .projects } }
         .onChange(of: session.openChat, initial: true) { if session.openChat != nil { tab = .chats } }
+        .onChange(of: session.openCards, initial: true) { if session.openCards != nil { tab = .board } }
     }
 }

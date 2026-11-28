@@ -100,6 +100,11 @@ None of this can be checked in the simulator or in CI.
       Deny and each does what it says.
 - [ ] After 15 minutes unused, chat asks for Face ID again. The app switcher shows nothing of it.
 - [ ] Continue another conversation: only your own are listed; the copy remembers; the original is as before.
+- [ ] Sounds: choosing a tone plays it; a request, an urgent request and a chat message each arrive with
+      the chosen tone, "None" arrives silently, from a locked phone too.
+- [ ] The icon's number rises with a new request or chat message while the app is closed, and is right after
+      answering or reading.
+- [ ] A "cards not moving" notification opens the board with those cards under "Not moving".
 - [ ] iPhone: five tabs, no "More"; the gear on Requests opens Settings and closes again.
 - [ ] iPad: both orientations, Split View, a hardware keyboard (⌘R, ⌘↩).
 - [ ] Dark mode, the largest Dynamic Type size, and VoiceOver on the answer

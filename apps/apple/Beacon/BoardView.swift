@@ -13,8 +13,13 @@ struct BoardView: View {
         NavigationSplitView {
             List(selection: $selected) {
                 if let problem { Text(problem).foregroundStyle(.red) }
+                // Not moving: first, whatever column they are in. Listed once, so selecting stays simple.
+                let stuck = matching.filter { $0.stuck == true }
+                if !stuck.isEmpty {
+                    Section("Not moving") { ForEach(stuck) { card in CardRow(card: card, showState: true).tag(card.id) } }
+                }
                 ForEach(Board.states, id: \.self) { state in
-                    let column = matching.filter { $0.state == state }
+                    let column = matching.filter { $0.state == state && $0.stuck != true }
                     if !column.isEmpty {
                         Section(state.capitalized) {
                             ForEach(column) { card in CardRow(card: card).tag(card.id) }
@@ -40,6 +45,14 @@ struct BoardView: View {
             }
         }
         .task(id: showDone) { await load() }
+        // A tapped "cards not moving" notice: they are at the top; a single one is opened.
+        .task(id: session.openCards) {
+            guard let ids = session.openCards else { return }
+            search = ""
+            await load()
+            if ids.count == 1 { selected = ids[0] }
+            session.openCards = nil
+        }
     }
 
     private var matching: [CardSummary] {
@@ -63,11 +76,13 @@ struct BoardView: View {
 
 struct CardRow: View {
     let card: CardSummary
+    var showState = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(card.title).lineLimit(2)
-            Text(["#\(card.id)", card.assignee ?? "unassigned", card.project, card.blockedReason,
+            if card.stuck == true { Text("STUCK").font(.caption.bold()).foregroundStyle(.red) }
+            Text(["#\(card.id)", showState ? card.state : nil, card.assignee ?? "unassigned", card.project, card.blockedReason,
                   card.helpBy == nil ? nil : "help wanted",
                   card.blockedByCount.flatMap { $0 > 0 ? "after \($0) other\($0 == 1 ? "" : "s")" : nil }]
                 .compactMap { $0 }.joined(separator: " · "))
@@ -92,6 +107,10 @@ struct CardView: View {
             if let card {
                 Section {
                     Text(card.title).font(.headline)
+                    if card.stuck == true {
+                        Text("Stuck: people were told it is not moving, and nothing has changed since.")
+                            .font(.footnote).foregroundStyle(.red)
+                    }
                     LabeledContent("Assignee", value: card.assignee ?? "unassigned")
                     if let project = card.project { LabeledContent("Project", value: project) }
                     LabeledContent("Made by", value: card.createdBy)

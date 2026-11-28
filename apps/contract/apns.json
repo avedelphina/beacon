@@ -16,6 +16,21 @@
       "workflow": 17
     }
   },
+  "cards": {
+    "aps": {
+      "alert": {
+        "title": "2 board cards not moving"
+      },
+      "badge": 3,
+      "sound": "default"
+    },
+    "beacon": {
+      "cards": [
+        4,
+        7
+      ]
+    }
+  },
   "chat": {
     "aps": {
       "alert": {

@@ -134,6 +134,7 @@ nonisolated struct Card: Decodable, Sendable {
     let waitingOn: String?
     let events: [CardEvent]?
     let milestoneId: Int?
+    let stuck: Bool?
     let helpBy: String?          // who is asking for help; nil when none is wanted
     let helpRoles: [String]?
     /// Only in a member's answer: false for someone else's card in a project they take part in.

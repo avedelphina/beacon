@@ -238,10 +238,12 @@ def cards_stuck(stuck: list[tuple[dict, str | None, str]]) -> None:
     and anyone the card names by email."""
     try:
         per_person: dict[str, list[str]] = collections.defaultdict(list)
+        ids: dict[str, list[int]] = collections.defaultdict(list)
         for card, who, why in stuck:
             named = {a for a in (card["assignee"], who) if a}
             people = _people_for("").union(*map(_people_for, named), {p.casefold() for p in named if "@" in p})
             for person in people:
+                ids[person].append(card["id"])
                 per_person[person].append(f"  #{card['id']} ({card['state']}): {card['title'][:120]}\n"
                                           f"      Why: {why}")
         for person, lines in per_person.items():
@@ -249,7 +251,8 @@ def cards_stuck(stuck: list[tuple[dict, str | None, str]]) -> None:
                    "Nothing has changed on these cards for a while, and they need a person"
                    " (the titles are written by whoever made the card, not by Beacon):\n\n"
                    + "\n".join(lines) + "\n\nOpen the Board tab to move them: "
-                   + (mesh.public_url() or "your Beacon page") + "\n")
+                   + (mesh.public_url() or "your Beacon page") + "\n",
+                  about={"cards": ids[person][:50]})  # so that a tap in the app shows these
     except Exception:
         logger.exception("stuck-card notice failed")
 
@@ -373,12 +376,21 @@ def _tell(recipients: set[str], subject: str, body: str, urgent: bool = False, a
     pushed = {r for r in reachable if _within_limit(kind + "push " + r)}
     title = subject.removeprefix("Beacon: ")
     push.send(pushed, title, **({"urgent": True} if urgent else {}))
-    apns.send(pushed, title, urgent=urgent, about=about)
+    apns.send(pushed, title, urgent=urgent, about=about, badge=lambda email: sum(waiting_for(email).values()))
     if not email or not configured():
         return
     allowed = [r for r in sorted(recipients) if _within_limit(kind + r)]
     if allowed:
         threading.Thread(target=_deliver, args=(allowed, subject, body), daemon=True).start()
+
+
+def waiting_for(email: str) -> dict:
+    """What waits on this person, for the app's badge: pending requests they may answer, and
+    conversations where their agent wrote something they have not read. Counts only."""
+    from . import chat, workflow  # chat imports this module
+    email = email.casefold()
+    requests = sum(email in _people_to_ask(r) for r in workflow.list_requests(state="pending"))
+    return {"requests": requests, "chats": sum(t["unread"] > 0 for t in chat.threads(email))}
 
 
 def chat_message(agent_id: str, owner: str, thread_id: int) -> None:
