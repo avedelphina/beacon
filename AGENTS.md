@@ -61,6 +61,8 @@ backend/
   notify.py       workflow and health notices: mailbox to agents, email (opt-in SMTP) and push to people
   push.py         Web Push to people's browsers/PWA (RFC 8291 + VAPID, key derived from
                   BEACON_A2A_SECRET); sends only to known push-service hosts
+  chat.py         an owner talking with their own agent: queue both ways, 30 days, Face ID
+                  grant for the app; only the owner, and never an approval (docs/chat-plan.md)
   apns.py         notifications to the native app (APNs, HTTP/2 via httpx[http2]):
                   subject only, plus request ids and a category for the actions
   app_devices.py  native app login: Beacon-issued device tokens (from a Zitadel native

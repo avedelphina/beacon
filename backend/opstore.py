@@ -349,6 +349,37 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     created_at  REAL NOT NULL
 );
 
+-- Owners talking with their agents (backend/chat.py). Private to the owner; deleted after 30 days.
+CREATE TABLE IF NOT EXISTS chat_threads (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent       TEXT NOT NULL,
+    owner       TEXT NOT NULL,      -- casefolded email: a later owner of the agent does not see it
+    title       TEXT NOT NULL,
+    origin      TEXT NOT NULL,      -- app | home
+    created_at  REAL NOT NULL,
+    updated_at  REAL NOT NULL,
+    read_at     REAL NOT NULL,
+    notified    INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id   INTEGER NOT NULL REFERENCES chat_threads (id),
+    sender      TEXT NOT NULL,      -- owner | agent
+    body        TEXT NOT NULL,
+    state       TEXT NOT NULL,      -- queued | delivered | cancelled | expired
+    remote_id   TEXT,               -- the plugin's id for an agent message, so that edits find it
+    reply_to    INTEGER,
+    created_at  REAL NOT NULL,
+    expires_at  REAL,               -- only for a queued message
+    final       INTEGER NOT NULL DEFAULT 1,
+    rev         INTEGER NOT NULL    -- grows with every change: what a long poll asks about
+);
+CREATE INDEX IF NOT EXISTS chat_messages_by_thread ON chat_messages (thread_id, rev);
+CREATE TABLE IF NOT EXISTS chat_rev (id INTEGER PRIMARY KEY AUTOINCREMENT);
+-- An app device's Face ID grant for chat, and when each agent's chat plugin was last there.
+CREATE TABLE IF NOT EXISTS chat_grants (device_id TEXT PRIMARY KEY, expires_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS chat_seen (agent TEXT PRIMARY KEY, at REAL NOT NULL, plugin TEXT, hermes TEXT);
+
 -- Phones and tablets logged in through the native app, one row per device (backend/app_devices.py).
 -- The token is kept only as a hash; the public key is the device's Secure Enclave key, which signs
 -- what needs a person (CL4/CL5). Logging out or revoking deletes the row.

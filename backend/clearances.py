@@ -120,9 +120,15 @@ CAPABILITY_CLEARANCES: dict[str, tuple[Clearance, str]] = {
         "Turns a client off, or revokes one of its tokens: it only takes access away, reversible by the "
         "operator it acts for. Any operator may, so a lost token can be stopped by whoever notices.",
     ),
+    "chat": (
+        Clearance.CL1,
+        "An agent's owner talks with it. No confirm step per message: only the owner, never a token of an "
+        "AI client or agent, and the app only after Face ID. Turning chat on is `set_agent_access` (CL4). "
+        "Nothing said in a chat is an approval.",
+    ),
     "set_agent_access": (
         Clearance.CL4,
-        "Tags, `reach.callers`, and `reach.board` decide who may call whom and who may use "
+        "Tags, `reach.callers`, `reach.board` and `reach.chat` decide who may reach whom and who may use "
         "the board, so changing them is a policy change by another route. Human browser "
         "session only, like the policy editor.",
     ),

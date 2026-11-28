@@ -14,6 +14,7 @@
       "board": true,
       "callers": null,
       "capabilities": [],
+      "chat": false,
       "endpoint": "http://alpha.test:9900",
       "network": null,
       "transport": "a2a"

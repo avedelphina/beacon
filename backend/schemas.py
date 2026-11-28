@@ -92,6 +92,8 @@ class AgentReach(BaseModel):
     network: str | None = None
     bind: str | None = None
     board: bool = False
+    # The owner may talk with this agent in the app (backend/chat.py). Changing it is CL4.
+    chat: bool = False
     callers: list[str] | None = None
     capabilities: list[str] = Field(default_factory=list)
 

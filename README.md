@@ -776,6 +776,38 @@ old instance's `BEACON_PUBLIC_URL` to the new URL. Every agent's sync
 switches over on its next pull, and nobody has to touch the agents' hosts.
 Keep the old instance until every agent has moved.
 
+### Chat with your own agent
+
+An agent's **owner** can talk with it (`backend/chat.py`; plan and design in
+[docs/chat-plan.md](docs/chat-plan.md)). This release has Beacon's side only:
+the agent-side plugin and the app screen are not built yet, so nothing can be
+done with it so far.
+
+- Turn it on per agent (`reach.chat`, "Its owner may chat with it" in the agent
+  form). Like other changes to `reach`, only a person can (CL4).
+- Only the owner reads or writes: not operators, not AI clients, not other
+  agents. It needs login (OIDC). A new owner does not see the old one's
+  conversations, and what the old one queued is not delivered.
+- A message for an agent that is away waits as long as agent mail does
+  (`mailbox_ttl`, 72 h by default) and can be taken back until delivered.
+- Conversations are kept **30 days** in `state/beacon.db`, so your backups hold
+  them too.
+- The only slash commands accepted are `/stop`, `/new`, `/approve` and `/deny`.
+- The app must unlock chat with Face ID or Touch ID; the unlock lasts 15 minutes
+  from the last use.
+- A notification says that an agent wrote, never what.
+- Nothing said in a chat answers a workflow request or satisfies a clearance.
+
+| Route | Who | |
+|---|---|---|
+| `POST /api/chat/unlock` | owner | the app's signed request that opens chat |
+| `GET /api/chat/agents` | owner | their agents with chat on, and when the plugin was last there |
+| `GET`, `POST /api/chat/threads` | owner | list; start one with `{agent, text}` |
+| `GET /api/chat/threads/{id}?since=` | owner | messages changed after a revision; with `since`, a long poll |
+| `POST /api/chat/threads/{id}/messages` | owner | `{text, reply_to?}` |
+| `DELETE /api/chat/messages/{id}`, `…/threads/{id}` | owner | take back a queued message; delete a conversation |
+| `GET`, `POST /mesh/{agent}/chat` | the agent's pull token | the plugin takes what waits and posts what the agent says |
+
 ### Secret transfer
 
 Beacon can move a secret without keeping it (`backend/secret_pipe.py`). The value passes through

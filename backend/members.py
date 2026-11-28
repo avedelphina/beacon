@@ -27,6 +27,7 @@ What a member may do, and why those:
 - use projects freely (backend/projects.py): start them for themselves or their agents,
   steer the ones on their side (other agents' cards in them included), and read and
   comment on the ones they or their agents take part in.
+They also talk with their own agents (backend/chat.py).
 Nothing else: no hosts, templates, policy, cron, config, deploy, enrollment,
 or any other person's agent.
 """
@@ -84,6 +85,15 @@ _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject i
     ("GET", r"/api/app/devices", None),
     ("PUT", r"/api/app/devices/self/apns", None),
     ("DELETE", r"/api/app/devices/[^/]+", None),
+    # Talking with their own agents; backend/chat.py keeps every person, operators too, to their own.
+    ("POST", r"/api/chat/unlock", None),
+    ("GET", r"/api/chat/agents", None),
+    ("GET", r"/api/chat/threads", None),
+    ("POST", r"/api/chat/threads", None),
+    ("GET", r"/api/chat/threads/\d+", None),
+    ("POST", r"/api/chat/threads/\d+/messages", None),
+    ("DELETE", r"/api/chat/threads/\d+", None),
+    ("DELETE", r"/api/chat/messages/\d+", None),
 )]
 
 

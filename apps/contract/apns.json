@@ -16,6 +16,18 @@
       "workflow": 17
     }
   },
+  "chat": {
+    "aps": {
+      "alert": {
+        "title": "alpha sent you a message"
+      },
+      "sound": "default"
+    },
+    "beacon": {
+      "agent": "alpha",
+      "thread": 5
+    }
+  },
   "human": {
     "aps": {
       "alert": {
