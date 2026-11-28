@@ -187,6 +187,7 @@ struct ChatsView: View {
             threads = try await client.get("/api/chat/threads")
             locked = false
             problem = nil
+            await session.refreshBadge()
         } catch APIError.loggedOut {
             session.forget()
         } catch APIError.refused(423, _) {

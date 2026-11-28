@@ -1064,6 +1064,7 @@ function boardCardHtml(c) {
         <span>#${esc(c.id)} ${esc(c.title)}</span>
         <span class="board-card-meta">${esc(c.assignee ?? "unassigned")}${c.project ? ` · ${esc(c.project)}` : ""}${
           c.help_by ? ' <span class="chip chip-warn">help wanted</span>' : ""}${
+          c.stuck ? ' <span class="chip chip-warn" title="People were told it is not moving, and nothing has changed since">stuck</span>' : ""}${
           boardWaiting[c.id] ? ` <span class="chip chip-warn">${boardWaiting[c.id]} open request${boardWaiting[c.id] > 1 ? "s" : ""}</span>` : ""}${
           c.blocked_by_count ? ` <span class="chip chip-warn" title="unfinished dependencies">blocked by ${esc(c.blocked_by_count)}</span>` : ""}${
           c.state === "blocked" ? ` <span class="chip${c.blocked_reason === "cannot" ? " chip-warn" : ""}"${c.waiting_on ? ` title="${esc(c.waiting_on)}"` : ""}>${esc(c.blocked_reason ?? "no reason")}</span>` : ""}${

@@ -1651,6 +1651,24 @@ Each push is encrypted to the browser (RFC 8291), so the push service cannot
 read it. The manifest, the service worker and the icons load without a
 session: they contain nothing about the fleet.
 
+### Badge and stuck cards
+
+The app's icon shows what waits on you: pending requests you may answer, plus
+conversations with unread messages from your agents (`GET /api/app/badge`; each
+push carries the number, and the app asks again when opened). Answering in the
+web page changes the number at the next notice or when the app is opened.
+
+A card is shown as **stuck** (web and app) once people have been told nothing
+moved it, until anything about it changes. It is a flag, not a state. Tapping the
+"cards not moving" notification opens the board, where they are listed first.
+
+### Tones
+
+In the app's Settings each device picks a tone for requests, for urgent notices
+and for chat messages: the system's, none, or one of five the app ships
+(`PUT /api/app/devices/self/sounds`; Beacon names the tone in each push). Web
+Push has no choice of sound.
+
 ### Native app login
 
 The iOS and iPadOS app lives in [`apps/apple/`](apps/apple)

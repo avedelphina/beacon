@@ -70,6 +70,7 @@ struct RequestsSplitView: View {
             requests = try await client.get("/api/workflows")
             problem = nil
             try? await UNUserNotificationCenter.current().setBadgeCount(Self.split(requests, me: session.email).mine.count)
+            await session.refreshBadge()  // Beacon's count, chats included, where it has one
         } catch APIError.loggedOut {
             session.forget()
         } catch {

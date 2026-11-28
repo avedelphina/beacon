@@ -52,6 +52,11 @@ nonisolated enum Notices {
         (userInfo["beacon"] as? [String: Any])?["project"] as? Int
     }
 
+    /// The cards a "not moving" notice is about, if it is one.
+    static func cardIDs(_ userInfo: [AnyHashable: Any]) -> [Int]? {
+        (userInfo["beacon"] as? [String: Any])?["cards"] as? [Int]
+    }
+
     static func tokenHex(_ token: Data) -> String { Signing.hex(token) }
 
     /// Which APNs Beacon must use for this build: Xcode's (debug) builds get sandbox tokens,
@@ -98,6 +103,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             session.openSecrets = Notices.secretsAgent(content.userInfo)
             session.openProject = Notices.projectID(content.userInfo)
             session.openChat = Notices.chat(content.userInfo)
+            session.openCards = Notices.cardIDs(content.userInfo)
             return
         }
         switch response.actionIdentifier {
@@ -113,7 +119,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 }
 
+/// How many things wait on this person, as Beacon counts them.
+nonisolated struct Waiting: Decodable, Sendable, Equatable {
+    var requests = 0
+    var chats = 0
+}
+
 extension Session {
+    /// The number on the app's icon. An older Beacon has no count (404): the requests list sets it then.
+    func refreshBadge() async {
+        guard let client, loggedIn, let now: Waiting = try? await client.get("/api/app/badge") else { return }
+        waiting = now
+        try? await UNUserNotificationCenter.current().setBadgeCount(now.requests + now.chats)
+    }
+
     /// Asks once for permission, then registers with APNs each launch (Apple may change the token).
     func startNotifications() async {
         let center = UNUserNotificationCenter.current()
@@ -136,6 +155,7 @@ extension Session {
         } catch {
             pushProblem = error.localizedDescription
         }
+        try? await sendSounds()  // this registration may be a new device to Beacon; an older one answers 404
     }
 
     /// Approve or Reject from the notification. What is approved is the request's plan as Beacon has

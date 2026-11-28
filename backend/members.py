@@ -84,6 +84,8 @@ _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject i
     # (backend/app_devices.py).
     ("GET", r"/api/app/devices", None),
     ("PUT", r"/api/app/devices/self/apns", None),
+    ("PUT", r"/api/app/devices/self/sounds", None),
+    ("GET", r"/api/app/badge", None),  # how many things wait on them
     ("DELETE", r"/api/app/devices/[^/]+", None),
     # Talking with their own agents; backend/chat.py keeps every person, operators too, to their own.
     ("POST", r"/api/chat/unlock", None),

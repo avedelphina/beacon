@@ -66,6 +66,7 @@ nonisolated struct CardSummary: Decodable, Identifiable, Sendable, Hashable {
     let blockedByCount: Int?
     let updatedAt: Double
     let helpBy: String?
+    let stuck: Bool?   // people were told it is not moving, and nothing changed since
 }
 
 nonisolated struct CardEvent: Decodable, Identifiable, Sendable {

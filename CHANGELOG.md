@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Notification tones in the app**: per device, a tone for requests, urgent notices and chat
+  messages (system default, none, or one of five).
+- **A number on the app's icon** for what waits on you (requests and unread chats), also on the
+  Requests and Chats tabs.
+- **Stuck cards are marked** on the board, in the web page and the app.
+
+### Fixed
+
+- Tapping a "cards not moving" notification opened the app without saying which cards: it now opens
+  the board with them listed first, or the one card.
+
 ## [0.43.0] — 2026-11-28
 
 Talking with your own agent. **Off until you turn it on for an agent**; without that nothing changes

@@ -45,6 +45,7 @@
     "reminded_at": null,
     "reminders": 0,
     "state": "todo",
+    "stuck": false,
     "title": "Rotate the DNS key",
     "updated_at": 1795000000.0,
     "waiting_on": null

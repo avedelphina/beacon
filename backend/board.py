@@ -1139,6 +1139,10 @@ def _card(row) -> dict:
     card = dict(row)
     card["links"] = json.loads(card["links"] or "[]")
     card["help_roles"] = json.loads(card.get("help_roles") or "[]")
+    # Not a state: a stuck card is still doing or in review. People were told that nothing moved it
+    # (remind), and nothing has changed since; any change to the card ends that.
+    card["stuck"] = bool(card.get("state") != "done" and card.get("escalated_at") is not None
+                         and card["escalated_at"] >= card["updated_at"])
     return card
 
 

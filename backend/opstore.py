@@ -393,7 +393,8 @@ CREATE TABLE IF NOT EXISTS app_devices (
     created_at      REAL NOT NULL,
     last_seen_at    REAL NOT NULL,
     apns_token      TEXT,               -- where Apple delivers this device's notifications (backend/apns.py)
-    apns_env        TEXT                -- "sandbox" (a build from Xcode) or "production" (TestFlight)
+    apns_env        TEXT,               -- "sandbox" (a build from Xcode) or "production" (TestFlight)
+    sounds          TEXT                -- JSON {kind: tone}; null: the system's default for all
 );
 CREATE INDEX IF NOT EXISTS app_devices_by_email ON app_devices (email);
 """
@@ -466,7 +467,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if delivery_columns and "claim_token" not in delivery_columns:
         conn.execute("ALTER TABLE intake_deliveries ADD COLUMN claim_token TEXT")
     device_columns = {row[1] for row in conn.execute("PRAGMA table_info(app_devices)")}
-    for column in ("apns_token", "apns_env"):
+    for column in ("apns_token", "apns_env", "sounds"):
         if device_columns and column not in device_columns:
             conn.execute(f"ALTER TABLE app_devices ADD COLUMN {column} TEXT")
     claim_columns = {row[1] for row in conn.execute("PRAGMA table_info(card_reference_claims)")}

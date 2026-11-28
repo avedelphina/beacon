@@ -197,6 +197,15 @@ async def _csp(request, call_next):
     return response
 
 
+@app.get("/api/app/badge")
+def app_badge(request: Request) -> dict:
+    """How many things wait on the person asking: numbers only, so no Face ID is needed to ask."""
+    email = (auth.current_user(request) or {}).get("email")
+    if not email or getattr(request.state, "auth_via_mcp", False):
+        return {"requests": 0, "chats": 0}
+    return notify.waiting_for(email)
+
+
 @app.get("/api/version")
 def get_version() -> dict:
     """`api` changes only when a change breaks the app (backend/app_devices.py), which checks it."""
