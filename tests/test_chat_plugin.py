@@ -10,7 +10,7 @@ import types
 
 import pytest
 
-from backend import mesh, store
+from backend import chat as chat_module, mesh, store
 from backend.schemas import Agent
 from tests.conftest import make_host
 from tests.test_sync_preserve import _mesh, host  # noqa: F401 (fixture)
@@ -252,3 +252,11 @@ def test_a_request_is_answered_even_when_hermes_breaks(plugin, monkeypatch):
     monkeypatch.setenv("BEACON_CHAT_OWNER_IDS", "telegram:11, signal:x")
     asyncio.run(adapter._answer({"id": "q2", "kind": "copy", "session": "t1", "chat": "t9"}))
     assert plugin.posted[-1] == {"type": "answer", "request": "q2", "data": {"ok": True}}
+
+
+def test_the_plugin_refuses_other_commands_whatever_beacon_says(plugin):
+    adapter = plugin.BeaconChatAdapter(None)
+    for number, text in enumerate(["/yolo", " /approve always", "/resume x"]):
+        asyncio.run(adapter._deliver({"id": number, "chat": "t1", "text": text}))
+    assert adapter.got == [] and len(plugin.posted) == 3  # receipted, so not offered again
+    assert chat_module.COMMANDS == plugin.COMMANDS

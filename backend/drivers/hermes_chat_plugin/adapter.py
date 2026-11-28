@@ -33,6 +33,8 @@ MAX_LENGTH = 32000           # Beacon keeps 32 KB
 POLL_TIMEOUT = 40            # above Beacon's long poll
 RETRY = (2, 5, 15, 30, 60)
 STALE_SECONDS = 10 * 60      # older than this, the agent is told when it was written
+# Beacon refuses other commands; the plugin does too, so that no Beacon can send one such as /yolo.
+COMMANDS = frozenset({"/stop", "/new", "/approve", "/deny"})
 logger = logging.getLogger("beacon-chat")
 
 
@@ -146,7 +148,10 @@ class BeaconChatAdapter(BasePlatformAdapter):
                 failures += 1
 
     async def _deliver(self, message: dict) -> None:
-        if message["id"] not in self._handled:
+        text = message["text"].strip()
+        if text.startswith("/") and text not in COMMANDS:
+            logger.warning("beacon-chat: refused a command Beacon should not have sent")
+        elif message["id"] not in self._handled:
             chat = message["chat"]
             mid = f"beacon-{message['id']}"
             source = self._owner_source(chat, mid)

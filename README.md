@@ -787,7 +787,8 @@ plugin into the profile (`plugins/beacon-chat`), enables it, writes
 `BEACON_CHAT_*` to `.env` and restarts the gateway once. The plugin connects out
 to Beacon with the agent's pull token: no port is opened. Turning chat off
 removes the folder and the settings again (Hermes keeps the plugin's name in its
-disabled list). A folder of that name Beacon did not make is left alone. The
+disabled list). The plugin's code comes from Beacon: turning chat on lets whoever
+controls Beacon run code in that agent, as `update_sync` does for the host sync. A folder of that name Beacon did not make is left alone. The
 host needs the sync from this release, and the gateway's Python must trust
 Beacon's certificate (`SSL_CERT_FILE` for a private CA).
 
