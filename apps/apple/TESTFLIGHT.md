@@ -94,6 +94,12 @@ None of this can be checked in the simulator or in CI.
 - [ ] With a value shown, the app switcher shows a blank card; after returning from another app it is gone.
 - [ ] Pause a project from the phone: its agents get the notice; resume it. A "project … is paused"
       notification opens that project.
+- [ ] Chats: opening the tab asks for Face ID once; a message to a stopped agent shows "waiting for the
+      agent", arrives when it starts, and the answer notifies; the tap opens that conversation.
+- [ ] A streamed answer grows on screen; Stop ends a long task; a dangerous command shows Approve and
+      Deny and each does what it says.
+- [ ] After 15 minutes unused, chat asks for Face ID again. The app switcher shows nothing of it.
+- [ ] iPhone: five tabs, no "More"; the gear on Requests opens Settings and closes again.
 - [ ] iPad: both orientations, Split View, a hardware keyboard (⌘R, ⌘↩).
 - [ ] Dark mode, the largest Dynamic Type size, and VoiceOver on the answer
       buttons and the availability labels.

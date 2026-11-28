@@ -212,7 +212,8 @@ Android gets the same later (`docs/android-app-plan.md`).
 
 Sizes: S ≈ half a day, M ≈ 1–2 days, L ≈ 3–5 days of focused work.
 
-**C1 and C2 are built.** Seen end to end on Hermes 0.21.1 with the real sync and
+**C1 to C3 are built**; C3 has not run on a real phone against a real agent yet.
+ Seen end to end on Hermes 0.21.1 with the real sync and
 plugin: queue while the gateway was down, streaming, approval and denial, stop,
 `hermes send`, a scheduled job, removal. Found: an approval prompt also offers
 `/approve session` and `always`, which Beacon refuses, so the app shows its own

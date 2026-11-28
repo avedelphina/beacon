@@ -37,7 +37,14 @@ nonisolated enum Notices {
 
     /// The agent whose secrets a notice is about, if it is one.
     static func secretsAgent(_ userInfo: [AnyHashable: Any]) -> String? {
-        (userInfo["beacon"] as? [String: Any])?["agent"] as? String
+        chat(userInfo) == nil ? (userInfo["beacon"] as? [String: Any])?["agent"] as? String : nil
+    }
+
+    /// The conversation a notice is about, if it is a chat message. Such a notice names the agent too.
+    static func chat(_ userInfo: [AnyHashable: Any]) -> ChatTarget? {
+        guard let about = userInfo["beacon"] as? [String: Any], let thread = about["thread"] as? Int,
+              let agent = about["agent"] as? String else { return nil }
+        return ChatTarget(agent: agent, thread: thread)
     }
 
     /// The project a notice is about, if it is one.
@@ -90,6 +97,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             // Any other notice: the app opens, at what it is about if Beacon said.
             session.openSecrets = Notices.secretsAgent(content.userInfo)
             session.openProject = Notices.projectID(content.userInfo)
+            session.openChat = Notices.chat(content.userInfo)
             return
         }
         switch response.actionIdentifier {

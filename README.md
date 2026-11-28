@@ -779,8 +779,8 @@ Keep the old instance until every agent has moved.
 ### Chat with your own agent
 
 An agent's **owner** can talk with it (`backend/chat.py`; plan and design in
-[docs/chat-plan.md](docs/chat-plan.md)). Beacon and the agent side exist; the app
-screen is not built yet, so for now only the API reaches it.
+[docs/chat-plan.md](docs/chat-plan.md)), in the iOS/iPadOS app's **Chats** tab. The
+web page has no chat.
 
 With chat on, the agent's host sync installs Beacon's `beacon-chat` platform
 plugin into the profile (`plugins/beacon-chat`), enables it, writes

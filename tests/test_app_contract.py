@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 from itsdangerous import TimestampSigner
 
-from backend import auth, availability, board, mesh, opstore, secret_pipe, store, workflow
+from backend import auth, availability, board, chat, mesh, opstore, secret_pipe, store, workflow
 from backend.app import app
 from backend.schemas import Agent
 from backend.ssh import SSHResult
@@ -113,6 +113,21 @@ def answers(fleet, fake_ssh, monkeypatch):
         "status-member.json": member.get("/api/agents/alpha/status"),
         "card-member.json": member.get(f"/api/board/cards/{card['id']}"),
     }
+    # Chat: ann owns alpha and talks with it; the agent's plugin answers.
+    store.upsert_agent(store.get_agent("alpha").model_copy(update={
+        "reach": store.get_agent("alpha").reach.model_copy(update={"chat": True})}))
+    thread = member.post("/api/chat/threads", json={"agent": "alpha", "text": "Is the backup done?"}).json()
+    plugin = {"Authorization": f"Bearer {mesh.token('alpha', mesh.BEACON_PEER)}", "X-Beacon-Chat-Plugin": "1.0.0",
+              "X-Hermes-Version": "0.21.1"}
+    chat.seen("alpha", "1.0.0", "0.21.1")
+    client.post("/mesh/alpha/chat", headers=plugin,
+                json={"type": "message", "chat": f"t{thread['id']}", "text": "Yes, at **02:00**.", "remote_id": "r1"})
+    answers |= {
+        "chat-agents.json": member.get("/api/chat/agents"),
+        "chat-threads.json": member.get("/api/chat/threads"),
+        "chat-thread.json": member.get(f"/api/chat/threads/{thread['id']}"),
+        "chat-sent.json": member.post(f"/api/chat/threads/{thread['id']}/messages", json={"text": "Thanks"}),
+    }
     assert all(r.status_code == 200 for r in answers.values()), {k: r.text for k, r in answers.items()}
     return {k: r.json() for k, r in answers.items()}
 
@@ -142,7 +157,8 @@ def test_the_notification_payloads_match_what_beacon_sends():
     "workflow.json", "workflows.json", "card.json", "version.json", "board.json", "agents.json", "availability.json",
     "health-events.json", "status.json", "logs.json", "restart-gate.json", "restart.json", "agents-member.json",
     "secrets.json", "secret-put.json", "secret-reveal.json", "projects.json", "project.json", "card-member.json",
-    "availability-member.json", "status-member.json"])
+    "availability-member.json", "status-member.json", "chat-agents.json", "chat-threads.json", "chat-thread.json",
+    "chat-sent.json"])
 def test_the_apps_contract_files_match_the_api(answers, name):
     path = CONTRACT / name
     if os.environ.get("BEACON_UPDATE_CONTRACT"):

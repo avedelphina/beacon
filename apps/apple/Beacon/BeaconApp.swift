@@ -29,6 +29,8 @@ final class Session {
     var openSecrets: String?
     /// A project to show, from a tapped notification.
     var openProject: Int?
+    /// A conversation to show, from a tapped notification ("alpha sent you a message").
+    var openChat: ChatTarget?
     /// Bumped when something changed the requests (a notice arrived, an answer from a notification).
     var refreshes = 0
     var pushProblem: String?
@@ -105,17 +107,22 @@ struct RootView: View {
 struct MainView: View {
     @Environment(Session.self) private var session
     @Environment(\.scenePhase) private var phase
+    @Environment(\.horizontalSizeClass) private var width
     @State private var tab = Tabs.requests
 
-    enum Tabs: Hashable { case requests, agents, board, projects, settings }
+    enum Tabs: Hashable { case requests, chats, agents, board, projects, settings }
 
     var body: some View {
         TabView(selection: $tab) {
             Tab("Requests", systemImage: "tray", value: Tabs.requests) { RequestsSplitView() }
+            Tab("Chats", systemImage: "bubble.left.and.bubble.right", value: Tabs.chats) { ChatsView() }
             Tab("Agents", systemImage: "cpu", value: Tabs.agents) { AgentsView() }
             Tab("Board", systemImage: "rectangle.stack", value: Tabs.board) { BoardView() }
             Tab("Projects", systemImage: "flag", value: Tabs.projects) { ProjectsView() }
-            Tab("Settings", systemImage: "gearshape", value: Tabs.settings) { SettingsView() }
+            // A phone's tab bar holds five: there Settings is the gear on Requests.
+            if width != .compact {
+                Tab("Settings", systemImage: "gearshape", value: Tabs.settings) { SettingsView() }
+            }
         }
         .tabViewStyle(.sidebarAdaptable)
         .onChange(of: phase) { if phase == .active { Task { await session.resumeNotifications() } } }
@@ -123,5 +130,6 @@ struct MainView: View {
         .onChange(of: session.openRequest, initial: true) { if session.openRequest != nil { tab = .requests } }
         .onChange(of: session.openSecrets, initial: true) { if session.openSecrets != nil { tab = .agents } }
         .onChange(of: session.openProject, initial: true) { if session.openProject != nil { tab = .projects } }
+        .onChange(of: session.openChat, initial: true) { if session.openChat != nil { tab = .chats } }
     }
 }
