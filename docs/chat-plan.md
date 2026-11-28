@@ -1,6 +1,6 @@
 # Talking with your agent through Beacon — technical plan
 
-Status: decisions taken 2026-11-27 (§9), nothing built.
+Status: built and released in Beacon 0.43.0 (§2, §8); decisions in §9.
 
 Audience: whoever builds it — a person or an agent with this repository. Each
 phase is one PR (or a few) with its own tests and acceptance checks.

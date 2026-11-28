@@ -1,6 +1,46 @@
 # Changelog
 
-## [Unreleased]
+## [0.43.0] — 2026-11-28
+
+Talking with your own agent. **Off until you turn it on for an agent**; without that nothing changes
+for your fleet except the new reserved name.
+
+### Upgrading
+
+From 0.41.0 or earlier, also do the steps under the releases in between that apply to you.
+
+1. **No agent may be called `owner` any more.** Rename one before upgrading.
+2. **Back up the database.** Stop Beacon first, so that the copy is complete, and keep the copy outside
+   the repository folder: it holds your whole fleet.
+
+   ```bash
+   docker compose stop beacon mcp
+   cp -a state ../beacon-state-0.42   # may need sudo: the files belong to uid 10001
+   ```
+
+3. **Get 0.43.0 and rebuild.** New tables are added on the first start.
+
+   ```bash
+   git fetch --tags && git checkout v0.43.0
+   docker compose up -d --build
+   ```
+
+4. **Reload open Beacon tabs**, and quit and reopen the installed web app.
+5. **Only for chat**, per agent:
+   - Its host needs this release's sync: hosts with `update_sync` fetch it themselves, others need the
+     install command again.
+   - The gateway's Python must trust Beacon's certificate (`SSL_CERT_FILE` for a private CA), inside
+     the container for a Docker agent.
+   - The agent needs an owner. Tick **Its owner may chat with it in the app** (a person only). On the
+     next sync the plugin is installed and the gateway restarts once.
+   - From now on your database and its backups hold conversations (30 days).
+6. **For the app:** install a build made from this release. An older app keeps working, without chat.
+
+No new settings or dependencies.
+
+**To go back to 0.42.0**, turn chat off for every agent and let each host sync once (it removes the
+plugin), stop `beacon` and `mcp`, put the backup back in place of `state/`, check out `v0.42.0` and
+rebuild. Changes made after the backup are lost.
 
 ### Added
 
