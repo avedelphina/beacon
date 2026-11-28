@@ -862,6 +862,7 @@ async function fillAgentForm(a) {
   f.reach_bind.value = a?.reach?.bind ?? "";
   f.reach_board.checked = !!a?.reach?.board;
   f.reach_chat.checked = !!a?.reach?.chat;
+  f.reach_chat_ids.value = (a?.reach?.chat_ids ?? []).join(", ");
   // The record as loaded: saving must keep what the form doesn't show
   // (reach, and whatever fields come later), not rebuild the agent from scratch.
   f.dataset.original = JSON.stringify(a ?? {});
@@ -926,6 +927,7 @@ document.getElementById("agent-form").addEventListener("submit", async (e) => {
       bind: f.reach_bind.value.trim() || null,
       board: f.reach_board.checked,
       chat: f.reach_chat.checked,
+      chat_ids: f.reach_chat_ids.value.split(",").map((s) => s.trim()).filter(Boolean),
     } : null,
   };
   try {

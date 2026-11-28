@@ -107,6 +107,9 @@ def test_the_member_list_holds_only_what_the_design_names():
         ("POST", "/api/agents/(?P<id>[^/]+)/secrets"),
         ("POST", "/api/agents/(?P<id>[^/]+)/secrets/[^/]+/reveal"),
         ("GET", "/api/chat/agents"),  # which of their own agents they may talk with (backend/chat.py)
+        # their own agent's other conversations; the plugin lists only what is theirs
+        ("GET", "/api/chat/agents/[^/]+/sessions"), ("GET", "/api/chat/agents/[^/]+/sessions/[^/]+"),
+        ("POST", "/api/chat/agents/[^/]+/sessions/[^/]+/continue"),
     ]
 
 

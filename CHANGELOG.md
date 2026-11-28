@@ -13,6 +13,8 @@
   opens the conversation.
 - **An agent can write to its owner first**, with `a2a_call` to the peer `owner` (agent skill
   1.29.0). `owner` is now a reserved agent id.
+- **Continue another conversation** of your agent (command line, desktop, or your own direct messages
+  on other platforms, once your id there is on the agent) as a copy; the original is not touched.
 
 ### Fixed
 

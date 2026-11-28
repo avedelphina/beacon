@@ -250,3 +250,67 @@ def test_the_owner_peer_refuses_what_it_should(chatting, monkeypatch):
 def test_no_agent_may_be_called_owner():
     with pytest.raises(ValueError, match="reserved"):
         Agent.model_validate({"id": "owner", "type": "hermes", "host": "h1"})
+
+
+# --- other conversations --------------------------------------------------------
+
+def plugin_answers(client, monkeypatch, replies, agent_id="tombot"):
+    """Stand in for the plugin: each time the owner's request waits, take it and answer it."""
+    seen = []
+    real = chat.asyncio.sleep
+
+    async def sleep(seconds):
+        for request in pull_requests(client, agent_id):
+            seen.append(request)
+            reply = replies[request["kind"]]
+            post(client, agent_id, type="answer", request=request["id"], **reply)
+        await real(0)
+
+    monkeypatch.setattr(chat.asyncio, "sleep", sleep)
+    return seen
+
+
+def pull_requests(client, agent_id):
+    return client.get(f"/mesh/{agent_id}/chat", headers=agent_headers(agent_id)).json()["requests"]
+
+
+def test_the_owner_lists_reads_and_continues_a_conversation(chatting, monkeypatch):
+    asked = plugin_answers(chatting, monkeypatch, {
+        "list": {"data": {"sessions": [{"id": "s1", "source": "cli"}], "hints": []}},
+        "history": {"data": {"messages": [{"role": "user", "text": "private words"}]}},
+        "copy": {"data": {"ok": True}}})
+    tom = browser(chatting, TOM)
+    assert chatting.get("/api/chat/agents/tombot/sessions", headers=tom).json()["sessions"][0]["id"] == "s1"
+    assert chatting.get("/api/chat/agents/tombot/sessions/s1", headers=tom).json()["messages"][0]["text"] == "private words"
+    with opstore.connect() as db:  # none of it is kept
+        assert "private words" not in "\n".join(db.iterdump())
+    thread = chatting.post("/api/chat/agents/tombot/sessions/s1/continue", json={"title": "Otter plans"}, headers=tom).json()
+    assert thread["origin"] == "continued" and thread["title"] == "Otter plans"
+    assert asked[-1] == asked[-1] | {"kind": "copy", "session": "s1", "chat": f"t{thread['id']}"}
+    chatting.post(f"/api/chat/threads/{thread['id']}/messages", json={"text": "go on"}, headers=tom)
+    assert pull(chatting)[0]["chat"] == f"t{thread['id']}"
+
+
+def test_a_copy_that_fails_leaves_no_conversation(chatting, monkeypatch):
+    plugin_answers(chatting, monkeypatch, {"copy": {"error": "no such conversation"}})
+    tom = browser(chatting, TOM)
+    refused = chatting.post("/api/chat/agents/tombot/sessions/s9/continue", json={}, headers=tom)
+    assert refused.status_code == 502 and "no such conversation" in refused.json()["detail"]
+    assert chatting.get("/api/chat/threads", headers=tom).json() == []
+
+
+def test_other_conversations_are_the_owners_only_and_need_the_agent(chatting, monkeypatch):
+    monkeypatch.setattr(chat, "REQUEST_SECONDS", 0.3)
+    assert chatting.get("/api/chat/agents/annsbot/sessions", headers=browser(chatting, TOM)).status_code == 404
+    assert chatting.get("/api/chat/agents/tombot/sessions", headers=MCP).status_code == 403
+    assert chatting.get("/api/chat/agents/tombot/sessions", headers=browser(chatting, TOM)).status_code == 504
+    assert chatting.get("/api/chat/agents/tombot/sessions/..%2Fx", headers=browser(chatting, TOM)).status_code in (400, 404)
+
+
+def test_ids_on_other_platforms_are_checked_and_changing_them_takes_a_person(chatting):
+    record = store.get_agent("tombot").model_dump()
+    record["reach"]["chat_ids"] = ["telegram:123"]
+    assert chatting.put("/api/agents/tombot", json=record, headers=MCP).status_code == 403
+    assert chatting.put("/api/agents/tombot", json=record, headers=browser(chatting, TOM)).status_code == 200
+    record["reach"]["chat_ids"] = ["no colon"]
+    assert chatting.put("/api/agents/tombot", json=record, headers=browser(chatting, TOM)).status_code == 422

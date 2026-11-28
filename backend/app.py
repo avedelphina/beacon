@@ -1346,7 +1346,7 @@ def _access_fields(agent: Agent | None) -> tuple:
     reach = agent.reach if agent else None
     return (sorted(agent.tags) if agent else [], sorted(reach.callers) if reach and reach.callers is not None else None,
             bool(reach and reach.board), agent.owner if agent else None, bool(agent and agent.member_logs),
-            bool(reach and reach.chat))
+            bool(reach and reach.chat), sorted(reach.chat_ids) if reach else [])
 
 
 @app.put("/api/agents/{id_}")

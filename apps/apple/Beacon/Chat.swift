@@ -68,6 +68,36 @@ nonisolated enum Chat {
     }
 }
 
+/// The agent's other conversations (listed by the agent itself; Beacon keeps none of it).
+nonisolated struct ChatSessions: Decodable, Sendable {
+    let sessions: [ChatSession]
+    let hints: [String]        // "platform:user id" of the agent's home chat there, if it is not shown
+}
+
+nonisolated struct ChatSession: Decodable, Identifiable, Sendable, Hashable {
+    let id: String
+    let source: String         // cli, desktop, telegram, …
+    let title: String
+    let preview: String
+    let updatedAt: Double?
+
+    var name: String { title.isEmpty ? (preview.isEmpty ? id : preview) : title }
+}
+
+nonisolated struct ChatHistory: Decodable, Sendable {
+    let messages: [Turn]
+
+    nonisolated struct Turn: Decodable, Sendable, Hashable {
+        let role: String       // user, assistant
+        let text: String
+    }
+}
+
+nonisolated struct ContinueTitle: Encodable, Sendable { let title: String }
+
+nonisolated struct SessionsTarget: Hashable, Sendable { let agent: String }
+nonisolated struct SessionTarget: Hashable, Sendable { let agent: String; let session: ChatSession }
+
 /// Face ID, then Beacon opens chat for this device.
 private func unlockChat(_ client: Client) async throws {
     guard let key = DeviceKey.load() else {
@@ -81,7 +111,7 @@ struct ChatsView: View {
     @Environment(\.scenePhase) private var phase
     @State private var threads: [ChatThread] = []
     @State private var agents: [ChatAgent] = []
-    @State private var path: [ChatTarget] = []
+    @State private var path = NavigationPath()
     @State private var locked = false
     @State private var problem: String?
 
@@ -111,7 +141,14 @@ struct ChatsView: View {
                     Menu("New conversation", systemImage: "square.and.pencil") {
                         ForEach(agents) { agent in
                             Button(agent.isConnected() ? agent.id : "\(agent.id) (away)") {
-                                path = [ChatTarget(agent: agent.id, thread: nil)]
+                                path = NavigationPath([ChatTarget(agent: agent.id, thread: nil)])
+                            }
+                        }
+                        Menu("Continue another conversation") {
+                            ForEach(agents) { agent in
+                                // Only a connected agent can say what else it has talked about.
+                                Button(agent.id) { path.append(SessionsTarget(agent: agent.id)) }
+                                    .disabled(!agent.isConnected())
                             }
                         }
                     }
@@ -120,6 +157,12 @@ struct ChatsView: View {
             }
             .navigationDestination(for: ChatTarget.self) { target in
                 ChatThreadView(target: target, onChange: { Task { await load() } })
+            }
+            .navigationDestination(for: SessionsTarget.self) { SessionsView(agent: $0.agent) }
+            .navigationDestination(for: SessionTarget.self) { target in
+                SessionView(target: target) { thread in
+                    path = NavigationPath([ChatTarget(agent: thread.agent, thread: thread.id)])
+                }
             }
             .refreshable { await load() }
         }
@@ -131,7 +174,7 @@ struct ChatsView: View {
         .onChange(of: session.openChat, initial: true) {
             if let chat = session.openChat {
                 session.openChat = nil
-                path = [ChatTarget(agent: chat.agent, thread: chat.thread)]
+                path = NavigationPath([chat])
             }
         }
         .privacyBlank(phase != .active)
@@ -224,8 +267,12 @@ struct ChatThreadView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(messages) { message in
-                        Bubble(message: message, reply: { replying = message }, cancel: { cancel(message) })
+                        Bubble(message: message, newest: message.id == messages.last?.id, reply: { replying = message }, cancel: { cancel(message) })
                             .id(message.id)
+                    }
+                    if messages.isEmpty && threadID != nil && problem == nil && !locked {
+                        Text("What was said before stays with the agent and is not shown here; it remembers it.")
+                            .font(.footnote).foregroundStyle(.secondary)
                     }
                     if let problem { Text(verbatim: problem).foregroundStyle(.red) }
                     if locked { Button("Unlock with \(Biometry.name)", systemImage: "lock") { Task { await unlock() } } }
@@ -363,6 +410,7 @@ struct ChatThreadView: View {
 
 struct Bubble: View {
     let message: ChatMessage
+    let newest: Bool
     let reply: () -> Void
     let cancel: () -> Void
 
@@ -380,18 +428,142 @@ struct Bubble: View {
                 if !message.fromOwner { Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply) }
                 if message.state == "queued" { Button("Do not send", systemImage: "trash", role: .destructive, action: cancel) }
             }
-            if let note = Self.note(message) { Text(note).font(.caption2).foregroundStyle(.secondary) }
+            if let note = Self.note(message, newest: newest) { Text(note).font(.caption2).foregroundStyle(.secondary) }
         }
         .frame(maxWidth: .infinity, alignment: message.fromOwner ? .trailing : .leading)
     }
 
-    static func note(_ message: ChatMessage) -> String? {
-        if !message.final { return "writing…" }
+    /// Only the newest message can still be growing: Hermes leaves its progress lines open for good.
+    static func note(_ message: ChatMessage, newest: Bool) -> String? {
+        if !message.final && newest { return "writing…" }
         switch message.state {
         case "queued": return "waiting for the agent"
         case "cancelled": return "not sent: you took it back"
         case "expired": return "not delivered: the agent was away too long"
         default: return nil
+        }
+    }
+}
+
+struct SessionsView: View {
+    @Environment(Session.self) private var session
+    @Environment(\.scenePhase) private var phase
+    let agent: String
+
+    @State private var found: ChatSessions?
+    @State private var problem: String?
+
+    var body: some View {
+        List {
+            if let problem { Text(verbatim: problem).foregroundStyle(.red) }
+            if let found {
+                ForEach(found.sessions) { other in
+                    NavigationLink(value: SessionTarget(agent: agent, session: other)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verbatim: other.name).lineLimit(2)
+                            Text(verbatim: other.source + (other.updatedAt.map {
+                                " · " + Date(timeIntervalSince1970: $0).formatted(date: .abbreviated, time: .shortened) } ?? ""))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if found.sessions.isEmpty { Text("Nothing to continue").foregroundStyle(.secondary) }
+                if !found.hints.isEmpty {
+                    Section {
+                        ForEach(found.hints, id: \.self) { Text(verbatim: $0).font(.body.monospaced()).textSelection(.enabled) }
+                    } footer: {
+                        Text("Direct messages from other platforms are shown once your id there is on the agent in Beacon. "
+                             + "This is the id of the agent's home chat: add it if that chat is yours.")
+                    }
+                }
+            } else if problem == nil {
+                ProgressView("Asking \(agent)…")
+            }
+        }
+        .navigationTitle(agent)
+        .task { await load() }
+        .privacyBlank(phase != .active)
+    }
+
+    private func load() async {
+        guard let client = session.client else { return }
+        do {
+            found = try await client.send("GET", "/api/chat/agents/\(agent)/sessions", body: nil, timeout: Chat.pollTimeout)
+            problem = nil
+        } catch {
+            problem = error.localizedDescription
+        }
+    }
+}
+
+/// One other conversation, read only, with the way to continue it.
+struct SessionView: View {
+    @Environment(Session.self) private var session
+    @Environment(\.scenePhase) private var phase
+    let target: SessionTarget
+    let continued: (ChatThread) -> Void
+
+    @State private var history: ChatHistory?
+    @State private var working = false
+    @State private var problem: String?
+
+    private var path: String { "/api/chat/agents/\(target.agent)/sessions/\(target.session.id)" }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 10) {
+                if let history {
+                    ForEach(Array(history.messages.enumerated()), id: \.offset) { _, turn in
+                        Text(AgentText.render(turn.text))
+                            .textSelection(.enabled)
+                            .padding(10)
+                            .background(turn.role == "user" ? AnyShapeStyle(.tint.opacity(0.18)) : AnyShapeStyle(.quaternary),
+                                        in: RoundedRectangle(cornerRadius: 14))
+                            .frame(maxWidth: .infinity, alignment: turn.role == "user" ? .trailing : .leading)
+                    }
+                } else if problem == nil {
+                    ProgressView()
+                }
+                if let problem { Text(verbatim: problem).foregroundStyle(.red) }
+            }
+            .padding()
+        }
+        .defaultScrollAnchor(.bottom)
+        .safeAreaInset(edge: .bottom) {
+            Button(action: continueIt) {
+                Text(working ? "Copying…" : "Continue here").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(working || history == nil)
+            .padding(10)
+            .background(.bar)
+        }
+        .navigationTitle(target.session.source)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+        .task {
+            guard let client = session.client else { return }
+            do {
+                history = try await client.send("GET", path, body: nil, timeout: Chat.pollTimeout)
+            } catch {
+                problem = error.localizedDescription
+            }
+        }
+        .privacyBlank(phase != .active)
+    }
+
+    private func continueIt() {
+        guard let client = session.client, !working else { return }
+        working = true
+        problem = nil
+        Task {
+            defer { working = false }
+            do {
+                let thread: ChatThread = try await client.send("POST", path + "/continue", json: ContinueTitle(title: target.session.name))
+                continued(thread)
+            } catch {
+                problem = error.localizedDescription
+            }
         }
     }
 }

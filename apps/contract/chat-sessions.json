@@ -1,0 +1,14 @@
+{
+  "hints": [
+    "telegram:42"
+  ],
+  "sessions": [
+    {
+      "id": "s1",
+      "preview": "Otter plans",
+      "source": "cli",
+      "title": "",
+      "updated_at": 1795000000.0
+    }
+  ]
+}
