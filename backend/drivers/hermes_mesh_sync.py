@@ -47,6 +47,7 @@ import os
 import re
 import errno
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -63,6 +64,8 @@ INBOUND_KEYS = ("A2A_PORT", "A2A_HOST", "A2A_AGENT_NAME", "A2A_PEER_TOKENS", "A2
                 "A2A_REPLY_TIMEOUT")
 BOARD_TOKEN_KEY = "BEACON_BOARD_TOKEN"
 BOARD_SERVER = "beacon-board"
+CHAT_PLUGIN = "beacon-chat"
+CHAT_KEYS = ("BEACON_CHAT_URL", "BEACON_CHAT_TOKEN", "BEACON_CHAT_ALLOWED_USERS", "BEACON_CHAT_HOME_CHANNEL")
 MAX_LOG_BYTES = 1_000_000
 MAX_SYNC_BYTES = 1_000_000
 UPDATE_RETRY_SECONDS = 3600
@@ -104,8 +107,10 @@ def new_token_envs(mesh: dict) -> list:
 
 def owned_keys(mesh: dict, managed: dict) -> set:
     """The .env keys Beacon writes or removes: the fixed A2A settings, the
-    token variables it created before or creates now, and the board token."""
-    return set(INBOUND_KEYS) | set(managed["token_envs"]) | set(new_token_envs(mesh)) | {BOARD_TOKEN_KEY}
+    token variables it created before or creates now, the board token, and the
+    chat settings while Beacon's chat plugin is, or is being, installed."""
+    chat = set(CHAT_KEYS) if mesh.get("chat") or managed.get("chat") else set()
+    return set(INBOUND_KEYS) | set(managed["token_envs"]) | set(new_token_envs(mesh)) | {BOARD_TOKEN_KEY} | chat
 
 
 def env_settings(mesh: dict, pull_token: str, managed: dict, current: dict) -> dict:
@@ -131,6 +136,9 @@ def env_settings(mesh: dict, pull_token: str, managed: dict, current: dict) -> d
         settings[token_env(peer["name"])] = peer["token"]
     if mesh.get("board") and pull_token:
         settings[BOARD_TOKEN_KEY] = pull_token
+    if mesh.get("chat") and pull_token:
+        settings.update({"BEACON_CHAT_URL": mesh["chat"]["url"], "BEACON_CHAT_TOKEN": pull_token,
+                         "BEACON_CHAT_ALLOWED_USERS": "owner", "BEACON_CHAT_HOME_CHANNEL": "owner"})
     return settings
 
 
@@ -341,6 +349,69 @@ def install_skills(skills: list, skills_dir: Path) -> list:
             for path in (target.parent, target):
                 os.chown(path, owner.st_uid, owner.st_gid)
         changed.append(name)
+    return changed
+
+
+PLUGIN_FILE_RE = re.compile(r"^[a-z_]+\.(py|yaml)$")
+
+
+def match_owner(path: Path, like: Path) -> None:
+    """When run as root, give a new file the owner of the folder it went into: a
+    Docker agent's files belong to the container user, not root."""
+    if os.geteuid() == 0:
+        owner = like.stat()
+        os.chown(path, owner.st_uid, owner.st_gid)
+
+
+def install_chat(cfg: dict, state: Path, mesh: dict, managed: dict) -> bool:
+    """Install, update or remove Beacon's chat plugin; True when the gateway must
+    restart. A plugin folder of that name Beacon did not make is left alone."""
+    home = Path(cfg["env_file"]).parent
+    target = home / "plugins" / CHAT_PLUGIN
+    offer = mesh.get("chat")
+    if not offer:
+        if not managed.get("chat"):
+            return False
+        run_hermes(cfg, ["plugins", "disable", CHAT_PLUGIN], tolerate="not")
+        shutil.rmtree(target, ignore_errors=True)
+        del managed["chat"]
+        save_managed(state, managed)
+        log("chat plugin removed")
+        return True
+    if target.exists() and not managed.get("chat"):
+        log(f"chat plugin not installed: {target} exists and is not Beacon's")
+        return False
+    files = []
+    for item in offer.get("plugin") or []:
+        name, content = item.get("name", ""), item.get("content", "")
+        if (not PLUGIN_FILE_RE.fullmatch(name) or len(content.encode()) > MAX_SKILL_BYTES
+                or hashlib.sha256(content.encode()).hexdigest() != item.get("sha256")):
+            log(f"chat plugin not installed: {name!r} is not a valid file")
+            return False  # all of it or nothing: half a plugin does not load
+        files.append((name, content))
+    if not files:
+        return False
+    # Recorded first, so that a run that stops halfway can still be undone.
+    managed.setdefault("chat", {"enabled": False})
+    save_managed(state, managed)
+    for folder in (target.parent, target):
+        if not folder.exists():
+            folder.mkdir()
+            match_owner(folder, folder.parent)
+    changed = False
+    for name, content in files:
+        path = target / name
+        if not path.exists() or path.read_text() != content:
+            path.write_text(content)
+            match_owner(path, target)
+            changed = True
+    if not managed["chat"]["enabled"]:
+        run_hermes(cfg, ["plugins", "enable", CHAT_PLUGIN, "--no-allow-tool-override"])
+        managed["chat"]["enabled"] = True
+        save_managed(state, managed)
+        changed = True
+    if changed:
+        log("chat plugin installed or updated")
     return changed
 
 
@@ -662,7 +733,13 @@ def sync(state: Path) -> int:
         for name in install_skills(mesh.get("skills") or [], Path(cfg["env_file"]).parent / "skills"):
             log(f"skill installed or updated: {name}")
 
-        restarting = any(settings.get(k) != current.get(k) for k in INBOUND_KEYS) or (board_changed and (board or previous))
+        try:
+            chat_changed = install_chat(cfg, state, mesh, managed)
+        except (OSError, subprocess.CalledProcessError) as exc:  # chat must never stop the rest of the sync
+            log(f"chat plugin: {exc}")
+            chat_changed = False
+        restarting = (any(settings.get(k) != current.get(k) for k in (*INBOUND_KEYS, *CHAT_KEYS))
+                      or (board_changed and (board or previous)) or chat_changed)
         if restarting:
             restart(cfg, state)
         else:

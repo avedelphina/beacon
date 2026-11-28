@@ -91,6 +91,8 @@ backend/
     __init__.py   DRIVERS registry + for_agent() resolution
     hermes.py     the only driver so far: status/logs/deploy/reconcile/
                   config_diff/push_config/decommission/plugins
+    hermes_chat_plugin/  Hermes platform plugin for chat with the owner; shipped in the mesh
+                  config, installed and removed by the host sync
     hermes_mesh_sync.py  stdlib-only host-side sync, shipped by `mesh install`
     hermes_config_schema.yaml  checked-in snapshot of Hermes's DEFAULT_CONFIG,
                   used to validate config paths before push

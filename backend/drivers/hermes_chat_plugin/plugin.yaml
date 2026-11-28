@@ -1,0 +1,18 @@
+name: beacon-chat
+label: Beacon chat
+kind: platform
+version: 1.0.0
+description: >
+  Talk with your agent in the Beacon app. The agent connects out to Beacon, takes
+  what its owner wrote and posts what it says. Installed and removed by Beacon's
+  host sync; its settings are BEACON_CHAT_* in the profile's .env.
+author: Beacon
+requires_env:
+  - name: BEACON_CHAT_URL
+    description: "Beacon's chat address for this agent (set by the host sync)"
+    prompt: "Beacon chat URL"
+    password: false
+  - name: BEACON_CHAT_TOKEN
+    description: "This agent's Beacon token (set by the host sync)"
+    prompt: "Beacon chat token"
+    password: true
