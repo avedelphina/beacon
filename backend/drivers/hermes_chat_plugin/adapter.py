@@ -16,6 +16,8 @@ import httpx
 from gateway.config import Platform, PlatformConfig
 from gateway.platforms.base import BasePlatformAdapter, MessageEvent, MessageType, SendResult
 
+from . import sessions
+
 try:  # how a profile's secrets are read where one gateway serves several
     from agent.secret_scope import get_secret as _secret
 except ImportError:
@@ -24,13 +26,15 @@ except ImportError:
     def _secret(name, default=""):
         return _environ.get(name, default)
 
-PLUGIN_VERSION = "1.0.0"
+PLUGIN_VERSION = "1.1.0"
 OWNER = "owner"              # the only user there is; also the home channel's name
 HOME = "home"                # Beacon's name for the conversation scheduled results go to
 MAX_LENGTH = 32000           # Beacon keeps 32 KB
 POLL_TIMEOUT = 40            # above Beacon's long poll
 RETRY = (2, 5, 15, 30, 60)
 STALE_SECONDS = 10 * 60      # older than this, the agent is told when it was written
+# Beacon refuses other commands; the plugin does too, so that no Beacon can send one such as /yolo.
+COMMANDS = frozenset({"/stop", "/new", "/approve", "/deny"})
 logger = logging.getLogger("beacon-chat")
 
 
@@ -40,6 +44,21 @@ def _setting(name: str) -> str:
 
 def _configured() -> bool:
     return bool(_setting("BEACON_CHAT_URL") and _setting("BEACON_CHAT_TOKEN"))
+
+
+def owner_ids() -> frozenset:
+    return frozenset(i.strip() for i in _setting("BEACON_CHAT_OWNER_IDS").split(",") if i.strip())
+
+
+def home_chats() -> dict:
+    """{platform source: its home chat id}, as Hermes's settings name them."""
+    found = {}
+    for source, name in (("telegram", "TELEGRAM"), ("deltachat-platform", "DELTACHAT"), ("signal", "SIGNAL"),
+                         ("matrix", "MATRIX"), ("whatsapp", "WHATSAPP"), ("discord", "DISCORD"), ("slack", "SLACK")):
+        value = _setting(f"{name}_HOME_CHANNEL")
+        if value:
+            found[source] = value
+    return found
 
 
 def hermes_version() -> str:
@@ -81,6 +100,7 @@ def compose(message: dict, now: float | None = None) -> str:
 
 class BeaconChatAdapter(BasePlatformAdapter):
     MAX_MESSAGE_LENGTH = MAX_LENGTH
+    REQUIRES_EDIT_FINALIZE = True  # so that a streamed answer is closed, and loses its cursor
 
     def __init__(self, config: PlatformConfig):
         super().__init__(config=config, platform=Platform("beacon"))
@@ -116,6 +136,8 @@ class BeaconChatAdapter(BasePlatformAdapter):
                     response.raise_for_status()
                 for message in response.json()["messages"]:
                     await self._deliver(message)
+                for request in response.json().get("requests", []):
+                    await self._answer(request)
                 failures = 0
             except asyncio.CancelledError:
                 raise
@@ -126,11 +148,13 @@ class BeaconChatAdapter(BasePlatformAdapter):
                 failures += 1
 
     async def _deliver(self, message: dict) -> None:
-        if message["id"] not in self._handled:
+        text = message["text"].strip()
+        if text.startswith("/") and text not in COMMANDS:
+            logger.warning("beacon-chat: refused a command Beacon should not have sent")
+        elif message["id"] not in self._handled:
             chat = message["chat"]
             mid = f"beacon-{message['id']}"
-            source = self.build_source(chat_id=chat, chat_name="Owner", chat_type="dm", user_id=OWNER,
-                                       user_name="Owner", message_id=mid)
+            source = self._owner_source(chat, mid)
             await self.handle_message(MessageEvent(text=compose(message), message_type=MessageType.TEXT,
                                                    source=source, message_id=mid))
             self._handled[message["id"]] = time.time()
@@ -138,6 +162,32 @@ class BeaconChatAdapter(BasePlatformAdapter):
                 del self._handled[old]
         # Only after Hermes has it: a message lost in between is offered again.
         await _post({"type": "receipt", "ids": [message["id"]]})
+
+    def _owner_source(self, chat: str, message_id: str | None = None):
+        return self.build_source(chat_id=chat, chat_name="Owner", chat_type="dm", user_id=OWNER,
+                                 user_name="Owner", message_id=message_id)
+
+    async def _answer(self, request: dict) -> None:
+        """List, read or copy another conversation (sessions.py). Whatever goes wrong there is an
+        answer, never an end to chat."""
+        reply = {"type": "answer", "request": request["id"]}
+        try:
+            store = sessions.backend(self, "agent:main:beacon:dm:owner")
+            ids = owner_ids()
+            if request["kind"] == "list":
+                reply["data"] = await sessions.listing(store, ids, home_chats())
+            elif request["kind"] == "history":
+                reply["data"] = await sessions.read(store, ids, request["session"])
+            elif request["kind"] == "copy":
+                reply["data"] = await sessions.copy(store, ids, request["session"], self._owner_source(request["chat"]))
+            else:
+                reply["error"] = "this plugin does not know that request: update it"
+        except sessions.Unavailable as exc:
+            reply["error"] = str(exc)
+        except Exception as exc:
+            logger.warning("beacon-chat: %s of another conversation failed: %s", request.get("kind"), exc)
+            reply["error"] = "this Hermes could not do that (chat still works)"
+        await _post(reply)
 
     async def send(self, chat_id: str, content: str, reply_to=None, metadata=None) -> SendResult:
         remote_id = uuid.uuid4().hex

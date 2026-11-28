@@ -10,7 +10,7 @@ import types
 
 import pytest
 
-from backend import mesh, store
+from backend import chat as chat_module, mesh, store
 from backend.schemas import Agent
 from tests.conftest import make_host
 from tests.test_sync_preserve import _mesh, host  # noqa: F401 (fixture)
@@ -55,7 +55,8 @@ def test_the_sync_installs_the_plugin_then_removes_only_what_it_made(host):
     assert values["BEACON_CHAT_URL"] == "https://beacon.test/mesh/alpha/chat" and values["BEACON_CHAT_TOKEN"] == "tok"
     assert values["BEACON_CHAT_ALLOWED_USERS"] == "owner" and values["KEEP"] == "1"
     assert _chat_calls(host) == ["plugins enable beacon-chat --no-allow-tool-override"]
-    assert host.managed()["chat"] == {"enabled": True}
+    assert [c for c in host.calls() if c.startswith("tools")] == ["tools enable --platform beacon a2a"]
+    assert host.managed()["chat"] == {"enabled": True, "a2a": True}
 
     host.sync.sync(host.state)  # nothing new: not enabled again
     assert len(_chat_calls(host)) == 1
@@ -176,3 +177,86 @@ def test_what_the_agent_says_and_edits_goes_to_beacon(plugin):
     assert first["chat"] == "t3" and edit == {"type": "edit", "remote_id": sent.message_id, "text": "Hello", "final": True}
     assert home["chat"] == "home"
     assert asyncio.run(plugin._standalone_send(None, "owner", "cron"))["success"]
+
+
+# --- other conversations --------------------------------------------------------
+
+@pytest.fixture
+def sessions(plugin):
+    return plugin.sessions
+
+
+ROWS = [
+    {"id": "c1", "source": "cli", "preview": "mine"},
+    {"id": "t1", "source": "telegram", "chat_type": "dm", "user_id": "11", "chat_id": "11"},
+    {"id": "t2", "source": "telegram", "chat_type": "dm", "user_id": "22", "chat_id": "22", "preview": "a stranger"},
+    {"id": "g1", "source": "telegram", "chat_type": "group", "user_id": "11", "chat_id": "-5"},
+    {"id": "a1", "source": "a2a", "chat_type": "dm", "user_id": "alpha"},
+    {"id": "j1", "source": "cron"},
+    {"id": "b1", "source": "beacon", "chat_type": "dm", "user_id": "owner"},
+]
+
+
+class FakeStore:
+    def __init__(self, copied=True):
+        self.copies, self.copied = [], copied
+
+    async def rows(self):
+        return ROWS
+
+    async def row(self, session_id):
+        return next((r for r in ROWS if r["id"] == session_id), None)
+
+    async def messages(self, session_id):
+        return [{"role": "system", "content": "secret prompt"}, {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": [{"type": "text", "text": "hi"}, {"type": "image"}]},
+                {"role": "tool", "content": "output"}, {"role": "assistant", "content": ""}]
+
+    async def copy(self, parent, source):
+        self.copies.append((parent["id"], source))
+        return self.copied
+
+
+def test_only_what_is_the_owners_is_listed(sessions):
+    def ids(owner_ids):
+        return [s["id"] for s in asyncio.run(sessions.listing(FakeStore(), frozenset(owner_ids), {}))["sessions"]]
+
+    assert ids([]) == ["c1"]
+    assert ids(["telegram:11"]) == ["c1", "t1"]  # not the group, not the stranger, not agents or jobs
+
+
+def test_the_only_hint_is_the_agents_own_home_chat(sessions):
+    found = asyncio.run(sessions.listing(FakeStore(), frozenset(), {"telegram": "11"}))
+    assert found["hints"] == ["telegram:11"] and "stranger" not in str(found)
+
+
+def test_what_is_not_theirs_can_be_neither_read_nor_copied(sessions):
+    store = FakeStore()
+    for forbidden in ("t2", "g1", "a1", "nope"):
+        with pytest.raises(sessions.Unavailable):
+            asyncio.run(sessions.read(store, frozenset({"telegram:11"}), forbidden))
+        with pytest.raises(sessions.Unavailable):
+            asyncio.run(sessions.copy(store, frozenset({"telegram:11"}), forbidden, "src"))
+    assert store.copies == []
+    said = asyncio.run(sessions.read(store, frozenset(), "c1"))["messages"]
+    assert said == [{"role": "user", "text": "hello"}, {"role": "assistant", "text": "hi\n[image]"}]
+
+
+def test_a_request_is_answered_even_when_hermes_breaks(plugin, monkeypatch):
+    adapter = plugin.BeaconChatAdapter(None)
+    monkeypatch.setattr(plugin.sessions, "backend", lambda adapter, key: (_ for _ in ()).throw(AttributeError("gone")))
+    asyncio.run(adapter._answer({"id": "q1", "kind": "list", "session": "", "chat": ""}))
+    assert plugin.posted == [{"type": "answer", "request": "q1", "error": "this Hermes could not do that (chat still works)"}]
+
+    monkeypatch.setattr(plugin.sessions, "backend", lambda adapter, key: FakeStore())
+    monkeypatch.setenv("BEACON_CHAT_OWNER_IDS", "telegram:11, signal:x")
+    asyncio.run(adapter._answer({"id": "q2", "kind": "copy", "session": "t1", "chat": "t9"}))
+    assert plugin.posted[-1] == {"type": "answer", "request": "q2", "data": {"ok": True}}
+
+
+def test_the_plugin_refuses_other_commands_whatever_beacon_says(plugin):
+    adapter = plugin.BeaconChatAdapter(None)
+    for number, text in enumerate(["/yolo", " /approve always", "/resume x"]):
+        asyncio.run(adapter._deliver({"id": number, "chat": "t1", "text": text}))
+    assert adapter.got == [] and len(plugin.posted) == 3  # receipted, so not offered again
+    assert chat_module.COMMANDS == plugin.COMMANDS

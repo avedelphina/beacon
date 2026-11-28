@@ -1,7 +1,7 @@
 name: beacon-chat
 label: Beacon chat
 kind: platform
-version: 1.0.0
+version: 1.1.0
 description: >
   Talk with your agent in the Beacon app. The agent connects out to Beacon, takes
   what its owner wrote and posts what it says. Installed and removed by Beacon's

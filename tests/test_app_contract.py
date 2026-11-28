@@ -128,6 +128,23 @@ def answers(fleet, fake_ssh, monkeypatch):
         "chat-thread.json": member.get(f"/api/chat/threads/{thread['id']}"),
         "chat-sent.json": member.post(f"/api/chat/threads/{thread['id']}/messages", json={"text": "Thanks"}),
     }
+    # What the agent says about its other conversations (Beacon passes it on as it comes).
+    replies = {"list": {"sessions": [{"id": "s1", "source": "cli", "title": "", "preview": "Otter plans",
+                                      "updated_at": NOW}], "hints": ["telegram:42"]},
+               "history": {"messages": [{"role": "user", "text": "hello"}]}, "copy": {"ok": True}}
+    real_sleep = chat.asyncio.sleep
+
+    async def answer_then_sleep(seconds):
+        for request in chat.pending_requests(store.get_agent("alpha")):
+            chat.answered(store.get_agent("alpha"), request["id"], replies[request["kind"]], "")
+        await real_sleep(0)
+
+    monkeypatch.setattr(chat.asyncio, "sleep", answer_then_sleep)
+    answers |= {
+        "chat-sessions.json": member.get("/api/chat/agents/alpha/sessions"),
+        "chat-history.json": member.get("/api/chat/agents/alpha/sessions/s1"),
+        "chat-continued.json": member.post("/api/chat/agents/alpha/sessions/s1/continue", json={"title": "Otter plans"}),
+    }
     assert all(r.status_code == 200 for r in answers.values()), {k: r.text for k, r in answers.items()}
     return {k: r.json() for k, r in answers.items()}
 
@@ -158,7 +175,7 @@ def test_the_notification_payloads_match_what_beacon_sends():
     "health-events.json", "status.json", "logs.json", "restart-gate.json", "restart.json", "agents-member.json",
     "secrets.json", "secret-put.json", "secret-reveal.json", "projects.json", "project.json", "card-member.json",
     "availability-member.json", "status-member.json", "chat-agents.json", "chat-threads.json", "chat-thread.json",
-    "chat-sent.json"])
+    "chat-sent.json", "chat-sessions.json", "chat-history.json", "chat-continued.json"])
 def test_the_apps_contract_files_match_the_api(answers, name):
     path = CONTRACT / name
     if os.environ.get("BEACON_UPDATE_CONTRACT"):

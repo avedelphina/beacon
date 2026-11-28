@@ -339,6 +339,13 @@ struct ChatTests {
         #expect(try decode(ChatMessage.self, "chat-sent.json").state == "queued")
     }
 
+    @Test func otherConversationsDecode() throws {
+        let found = try decode(ChatSessions.self, "chat-sessions.json")
+        #expect(found.sessions.first?.name == "Otter plans" && found.hints == ["telegram:42"])
+        #expect(try decode(ChatHistory.self, "chat-history.json").messages.first?.role == "user")
+        #expect(try decode(ChatThread.self, "chat-continued.json").origin == "continued")
+    }
+
     @Test func changedMessagesReplaceAndKeepTheOrder() throws {
         let answer = try decode(ChatAnswer.self, "chat-thread.json")
         let merged = Chat.merge(answer.messages, [answer.messages[1], answer.messages[0]])

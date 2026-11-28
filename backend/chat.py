@@ -11,7 +11,10 @@ only up to CL3, and must not be enough to command an agent that has a terminal.
 """
 
 import asyncio
+import json
+import re
 import time
+import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -21,6 +24,7 @@ from . import auth, members, mesh, notify, opstore, store
 KEEP_SECONDS = 30 * 24 * 3600
 GRANT_SECONDS = 15 * 60      # from the last use
 MAX_BODY = 32 * 1024
+MAX_ANSWER = 512 * 1024      # a list of conversations, or the end of one
 POLL_SECONDS = 25            # how long a long poll waits; below usual proxy timeouts
 POLL_STEP = 1.0
 MAX_AGENT_MESSAGES_PER_HOUR = 300
@@ -313,6 +317,73 @@ def from_peer_call(agent, text: str, message_id: str) -> tuple[int, str] | None:
     return agent_says(agent, HOME, text, remote_id, True)
 
 
+# --- other conversations -------------------------------------------------------
+
+# What the owner asks the agent about its other conversations, and the answers, for as long as it
+# takes: in memory only, so that Beacon stores none of them. One process, one table.
+_requests: dict[str, dict] = {}
+REQUEST_SECONDS = 30
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
+
+
+def pending_requests(agent) -> list[dict]:
+    """Not yet handed to the agent; each is handed out once, and the owner retries if it is lost."""
+    now = time.time()
+    for key in [k for k, r in _requests.items() if r["at"] < now - 2 * REQUEST_SECONDS]:
+        del _requests[key]
+    out = []
+    for key, request in _requests.items():
+        if request["agent"] == agent.id and request["owner"] == agent.owner.casefold() and not request["sent"]:
+            request["sent"] = True
+            out.append({"id": key, "kind": request["kind"], "session": request["session"], "chat": request["chat"]})
+    return out
+
+
+def answered(agent, request_id: str, data: dict | None, error: str) -> None:
+    request = _requests.get(request_id)
+    if request is not None and request["agent"] == agent.id:
+        request["answer"] = {"data": data, "error": error}
+
+
+async def ask(agent, kind: str, session: str = "", chat: str = "") -> dict:
+    if session and not SESSION_ID_RE.fullmatch(session):
+        raise ChatError(400, "not a conversation id")
+    key = uuid.uuid4().hex
+    _requests[key] = {"agent": agent.id, "owner": agent.owner.casefold(), "kind": kind, "session": session,
+                      "chat": chat, "at": time.time(), "sent": False, "answer": None}
+    try:
+        deadline = time.monotonic() + REQUEST_SECONDS
+        while time.monotonic() < deadline:
+            answer = _requests[key]["answer"]
+            if answer is not None:
+                if answer["error"]:
+                    raise ChatError(502, answer["error"][:300])
+                return answer["data"] or {}
+            await asyncio.sleep(0.2)
+        raise ChatError(504, f"{agent.id} did not answer: other conversations are visible only while it is connected")
+    finally:
+        _requests.pop(key, None)
+
+
+async def continue_session(email: str, agent, session: str, title: str) -> dict:
+    """A new thread whose Hermes session is a copy of that conversation."""
+    def make():
+        with opstore.connect() as db:
+            return _thread(db, agent.id, email, " ".join(title.split())[:60] or "Continued conversation", "continued")
+
+    def view(thread_id):
+        with opstore.connect() as db:
+            return _thread_view(db, _own_thread(db, email, thread_id))
+
+    thread_id = await asyncio.to_thread(make)
+    try:
+        await ask(agent, "copy", session, f"t{thread_id}")
+    except ChatError:
+        await asyncio.to_thread(delete_thread, email, thread_id)
+        raise
+    return await asyncio.to_thread(view, thread_id)
+
+
 # --- routes -------------------------------------------------------------------
 
 router = APIRouter()
@@ -419,12 +490,15 @@ def remove_thread(thread_id: int, request: Request) -> dict:
 
 
 class AgentEvent(BaseModel):
-    type: str  # message | edit | receipt
+    type: str  # message | edit | receipt | answer
     chat: str = Field(HOME, max_length=40)
     text: str = Field("", max_length=4 * MAX_BODY)
     remote_id: str = Field("", max_length=100)
     final: bool = True
     ids: list[int] = Field(default_factory=list, max_length=200)
+    request: str = Field("", max_length=40)
+    data: dict | None = None
+    error: str = Field("", max_length=1000)
 
 
 def _plugin_agent(agent_id: str, authorization: str | None):
@@ -448,8 +522,9 @@ async def agent_poll(agent_id: str, authorization: str | None = Header(None),
     deadline = time.monotonic() + POLL_SECONDS
     while True:
         messages = await asyncio.to_thread(waiting, agent)
-        if messages or time.monotonic() >= deadline:
-            return {"messages": messages}
+        requests = pending_requests(agent)
+        if messages or requests or time.monotonic() >= deadline:
+            return {"messages": messages, "requests": requests}
         await asyncio.sleep(POLL_STEP)
 
 
@@ -459,6 +534,10 @@ def agent_event(agent_id: str, event: AgentEvent, background: BackgroundTasks,
     agent = _plugin_agent(agent_id, authorization)
     if event.type == "receipt":
         receipt(agent, event.ids)
+    elif event.type == "answer":
+        if len(json.dumps(event.data)) > MAX_ANSWER:
+            raise HTTPException(413, "the answer is too long")
+        answered(agent, event.request, event.data, event.error)
     elif event.type in ("message", "edit"):
         if not event.remote_id:
             raise HTTPException(400, "remote_id is required")
@@ -471,3 +550,32 @@ def agent_event(agent_id: str, event: AgentEvent, background: BackgroundTasks,
     else:
         raise HTTPException(400, f"unknown event {event.type!r}")
     return {"ok": True}
+
+
+class Continue(BaseModel):
+    title: str = Field("", max_length=300)
+
+
+async def _about_sessions(request: Request, agent_id: str, work) -> dict:
+    try:
+        email = await asyncio.to_thread(_person, request)
+        agent = await asyncio.to_thread(_agent_for, email, agent_id)
+        return await work(email, agent)
+    except ChatError as exc:
+        raise HTTPException(exc.status, exc.detail)
+
+
+@router.get("/api/chat/agents/{agent_id}/sessions")
+async def other_conversations(agent_id: str, request: Request) -> dict:
+    return await _about_sessions(request, agent_id, lambda email, agent: ask(agent, "list"))
+
+
+@router.get("/api/chat/agents/{agent_id}/sessions/{session_id}")
+async def other_conversation(agent_id: str, session_id: str, request: Request) -> dict:
+    return await _about_sessions(request, agent_id, lambda email, agent: ask(agent, "history", session_id))
+
+
+@router.post("/api/chat/agents/{agent_id}/sessions/{session_id}/continue")
+async def continue_conversation(agent_id: str, session_id: str, body: Continue, request: Request) -> dict:
+    return await _about_sessions(request, agent_id,
+                                 lambda email, agent: continue_session(email, agent, session_id, body.title))

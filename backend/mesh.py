@@ -180,7 +180,7 @@ def chat_offer(agent: Agent, beacon_url: str | None) -> dict | None:
     for path in sorted([*CHAT_PLUGIN_DIR.glob("*.py"), *CHAT_PLUGIN_DIR.glob("*.yaml")]):
         content = path.read_text()
         files.append({"name": path.name, "sha256": hashlib.sha256(content.encode()).hexdigest(), "content": content})
-    return {"url": f"{beacon_url}/mesh/{agent.id}/chat", "plugin": files}
+    return {"url": f"{beacon_url}/mesh/{agent.id}/chat", "plugin": files, "owner_ids": agent.reach.chat_ids}
 
 
 def config(agent_id: str) -> dict:

@@ -94,6 +94,17 @@ class AgentReach(BaseModel):
     board: bool = False
     # The owner may talk with this agent in the app (backend/chat.py). Changing it is CL4.
     chat: bool = False
+    # The owner's own user ids on other platforms ("platform:user id", as Hermes keeps them): their
+    # direct messages there may be continued in the app. Without any, none are shown.
+    chat_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("chat_ids")
+    @classmethod
+    def _chat_ids(cls, v: list[str]) -> list[str]:
+        for item in v:
+            if not re.fullmatch(r"[a-z0-9_-]{1,40}:[^,\s]{1,100}", item):
+                raise ValueError(f"chat id {item!r} must be platform:user-id, without spaces or commas")
+        return v
     callers: list[str] | None = None
     capabilities: list[str] = Field(default_factory=list)
 

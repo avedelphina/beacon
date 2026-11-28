@@ -65,7 +65,8 @@ INBOUND_KEYS = ("A2A_PORT", "A2A_HOST", "A2A_AGENT_NAME", "A2A_PEER_TOKENS", "A2
 BOARD_TOKEN_KEY = "BEACON_BOARD_TOKEN"
 BOARD_SERVER = "beacon-board"
 CHAT_PLUGIN = "beacon-chat"
-CHAT_KEYS = ("BEACON_CHAT_URL", "BEACON_CHAT_TOKEN", "BEACON_CHAT_ALLOWED_USERS", "BEACON_CHAT_HOME_CHANNEL")
+CHAT_KEYS = ("BEACON_CHAT_URL", "BEACON_CHAT_TOKEN", "BEACON_CHAT_ALLOWED_USERS", "BEACON_CHAT_HOME_CHANNEL",
+             "BEACON_CHAT_OWNER_IDS")
 MAX_LOG_BYTES = 1_000_000
 MAX_SYNC_BYTES = 1_000_000
 UPDATE_RETRY_SECONDS = 3600
@@ -139,6 +140,9 @@ def env_settings(mesh: dict, pull_token: str, managed: dict, current: dict) -> d
     if mesh.get("chat") and pull_token:
         settings.update({"BEACON_CHAT_URL": mesh["chat"]["url"], "BEACON_CHAT_TOKEN": pull_token,
                          "BEACON_CHAT_ALLOWED_USERS": "owner", "BEACON_CHAT_HOME_CHANNEL": "owner"})
+        ids = [i for i in mesh["chat"].get("owner_ids") or [] if re.fullmatch(r"[a-z0-9_-]+:[^,\s]+", i)]
+        if ids:
+            settings["BEACON_CHAT_OWNER_IDS"] = ",".join(ids)
     return settings
 
 
@@ -410,6 +414,16 @@ def install_chat(cfg: dict, state: Path, mesh: dict, managed: dict) -> bool:
         managed["chat"]["enabled"] = True
         save_managed(state, managed)
         changed = True
+    if not managed["chat"].get("a2a"):
+        # So that the agent can write to its owner first (the `owner` peer): Hermes
+        # turns toolsets on per platform. `tools enable` keeps the others.
+        try:
+            run_hermes(cfg, ["tools", "enable", "--platform", "beacon", "a2a"])
+            managed["chat"]["a2a"] = True
+            save_managed(state, managed)
+            changed = True
+        except subprocess.CalledProcessError as exc:
+            log(f"chat: could not turn the a2a tools on, so the agent cannot write first: {exc}")
     if changed:
         log("chat plugin installed or updated")
     return changed

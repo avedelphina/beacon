@@ -787,17 +787,37 @@ plugin into the profile (`plugins/beacon-chat`), enables it, writes
 `BEACON_CHAT_*` to `.env` and restarts the gateway once. The plugin connects out
 to Beacon with the agent's pull token: no port is opened. Turning chat off
 removes the folder and the settings again (Hermes keeps the plugin's name in its
-disabled list). A folder of that name Beacon did not make is left alone. The
+disabled list). The plugin's code comes from Beacon: turning chat on lets whoever
+controls Beacon run code in that agent, as `update_sync` does for the host sync. A folder of that name Beacon did not make is left alone. The
 host needs the sync from this release, and the gateway's Python must trust
 Beacon's certificate (`SSL_CERT_FILE` for a private CA).
 
 Scheduled jobs (`deliver: beacon`), `hermes send --to beacon` and Hermes's own
 restart notices arrive in one conversation of their own.
 
+**Continuing other conversations.** While the agent is connected, the app lists
+its command-line and desktop conversations, and direct messages from the ids the
+owner put on the agent (`reach.chat_ids`, `platform:user id` as Hermes keeps
+them; changing them is CL4). Never group chats, other people's direct messages,
+or what agents said to each other. The app offers the id of the agent's home chat
+as a hint when it is not on the list. A conversation is continued as a **copy**;
+the original is not touched. Beacon passes the list and the messages on and keeps
+none of them. Command-line conversations belong to whoever used the host's shell:
+for an agent owned by someone else than its administrator, that includes the
+administrator's. This part uses Hermes internals (`sessions.py` in the plugin);
+if an update breaks it, only "continue" stops working.
+
+| Route | Who | |
+|---|---|---|
+| `GET /api/chat/agents/{agent}/sessions[/{id}]` | owner | the agent's other conversations; one of them |
+| `POST …/sessions/{id}/continue` | owner | a new thread holding a copy of it |
+
 **The agent writes first.** An agent with chat on also gets a mailbox peer named
 `owner` (`/a2a/owner`): an ordinary `a2a_call` to it lands in that same
 conversation and notifies. It reaches only the agent's own owner, at most 20
-times an hour, and `owner` cannot be an agent's name. Hermes removes e-mail
+times an hour, and `owner` cannot be an agent's name. The host sync turns the
+agent's `a2a` tools on for the chat; to let it write from its other platforms or
+scheduled jobs, enable them there. Hermes removes e-mail
 addresses and secrets from what it sends this way. A reply goes through the chat
 plugin, quoting the message.
 

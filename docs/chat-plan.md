@@ -212,7 +212,12 @@ Android gets the same later (`docs/android-app-plan.md`).
 
 Sizes: S ≈ half a day, M ≈ 1–2 days, L ≈ 3–5 days of focused work.
 
-**C1 to C3 are built**; C3 has not run on a real phone against a real agent yet.
+**All phases are built.** The app has not run on a real phone against a real agent yet.
+
+C5 was seen on Hermes 0.21.1 and 0.23: listing, reading, copying, recall, an untouched original, and a
+made-up stranger's chat neither listed nor readable by id. Writing first needs the `a2a` toolset on the
+platform; the sync turns it on for the chat. Command-line conversations are the host shell's, which on an
+agent owned by someone else includes the administrator's.
  Seen end to end on Hermes 0.21.1 with the real sync and
 plugin: queue while the gateway was down, streaming, approval and denial, stop,
 `hermes send`, a scheduled job, removal. Found: an approval prompt also offers

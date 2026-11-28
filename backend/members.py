@@ -94,6 +94,9 @@ _ROUTES = [(method, re.compile(pattern), subject) for method, pattern, subject i
     ("POST", r"/api/chat/threads/\d+/messages", None),
     ("DELETE", r"/api/chat/threads/\d+", None),
     ("DELETE", r"/api/chat/messages/\d+", None),
+    ("GET", r"/api/chat/agents/[^/]+/sessions", None),
+    ("GET", r"/api/chat/agents/[^/]+/sessions/[^/]+", None),
+    ("POST", r"/api/chat/agents/[^/]+/sessions/[^/]+/continue", None),
 )]
 
 
