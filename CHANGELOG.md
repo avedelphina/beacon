@@ -1,6 +1,36 @@
 # Changelog
 
-## [Unreleased]
+## [0.44.0] — 2026-11-28
+
+Notifications in the app: your own choice of tone, a number on the icon, and stuck cards you can find.
+
+### Upgrading
+
+From 0.42.0 or earlier, also do the steps under the releases in between that apply to you.
+
+1. **Back up the database.** Stop Beacon first, so that the copy is complete, and keep the copy outside
+   the repository folder: it holds your whole fleet.
+
+   ```bash
+   docker compose stop beacon mcp
+   cp -a state ../beacon-state-0.43   # may need sudo: the files belong to uid 10001
+   ```
+
+2. **Get 0.44.0 and rebuild.** One column is added to the database on the first start.
+
+   ```bash
+   git fetch --tags && git checkout v0.44.0
+   docker compose up -d --build
+   ```
+
+3. **Reload open Beacon tabs**, and quit and reopen the installed web app.
+4. **For the app:** install a build made from this release. Against an older Beacon it plays the system's
+   sound; an older app on this Beacon works as before, with the number on its icon.
+
+No new settings or dependencies. Hosts need nothing.
+
+**To go back to 0.43.0**, stop `beacon` and `mcp`, put the backup back in place of `state/`, check out
+`v0.43.0` and rebuild. Changes made after the backup are lost.
 
 ### Added
 
