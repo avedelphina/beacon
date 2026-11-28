@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import logging
 import os
+import uuid
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -1106,7 +1107,7 @@ async def intake_event(source: str, request: Request):
 
 
 @app.post("/a2a/{id_}")
-async def a2a_mailbox(id_: str, request: Request):
+async def a2a_mailbox(id_: str, request: Request, background: BackgroundTasks):
     """The Beacon mailbox, speaking A2A on behalf of agent `id_` (relay now,
     or hold and deliver later — backend/mailbox.py). Outside /api/: callers
     are fleet agents, authenticated by their own pairwise token for `id_`.
@@ -1119,6 +1120,8 @@ async def a2a_mailbox(id_: str, request: Request):
     caller = mailbox.caller_for(id_, request.headers.get("authorization"))
     if caller is None:
         return _a2a_error(req_id, -32050, "unauthorized", 401)
+    if id_ == chat.OWNER_PEER:
+        return await run_in_threadpool(_a2a_to_owner, caller, req, background)
     try:
         target = store.get_agent(id_)
     except store.NotFound:
@@ -1153,17 +1156,44 @@ async def a2a_mailbox(id_: str, request: Request):
     return {"jsonrpc": "2.0", "id": req_id, "result": {"task": task} if A2A_METHODS[method] else task}
 
 
+def _a2a_to_owner(caller: str, req: dict, background: BackgroundTasks):
+    """An agent's message to its own owner (backend/chat.py). Answered at once: the owner is a person,
+    and a reply, if one comes, reaches the agent through its chat."""
+    req_id, method = req.get("id"), req.get("method")
+    agent = store.get_agent(caller)
+    if not chat.may_call_owner(agent):
+        return _a2a_error(req_id, -32052, "chat with your owner is off", 403)
+    if method not in A2A_METHODS:
+        return _a2a_error(req_id, -32601, "your owner takes messages only: no tasks to poll or stream", 200)
+    message = (req.get("params") or {}).get("message") or {}
+    text = "\n".join(p["text"] for p in message.get("parts") or [] if isinstance(p, dict) and isinstance(p.get("text"), str))
+    if not text.strip():
+        return _a2a_error(req_id, -32602, "message has no text", 200)
+    try:
+        tell = chat.from_peer_call(agent, text, str(message.get("messageId") or uuid.uuid4().hex))
+    except chat.ChatError as exc:
+        return _a2a_error(req_id, -32003, exc.detail, 200)
+    if tell:
+        background.add_task(notify.chat_message, agent.id, tell[1], tell[0])
+    said = "Delivered to your owner. A reply, if there is one, arrives in your chat with them, not here."
+    status = {"state": "TASK_STATE_COMPLETED",
+              "message": {"role": "ROLE_AGENT", "parts": [{"text": said}], "messageId": uuid.uuid4().hex}}
+    task = {"id": f"owner-{uuid.uuid4().hex[:12]}", "contextId": message.get("contextId") or "owner", "status": status}
+    return {"jsonrpc": "2.0", "id": req_id, "result": {"task": task} if A2A_METHODS[method] else task}
+
+
 @app.get("/a2a/{id_}/.well-known/agent-card.json")
 @app.get("/a2a/{id_}/.well-known/agent.json")
 def a2a_mailbox_card(id_: str, request: Request) -> dict:
     """Agent Card for the mailbox. Its URL must point back here: Hermes's
     client posts to the URL a card advertises, not the one it was given.
     """
-    store.get_agent(id_)
+    if id_ != chat.OWNER_PEER:
+        store.get_agent(id_)
     url = f"{mesh.public_url() or str(request.base_url).rstrip('/')}/a2a/{id_}"
     return {
         "name": f"{id_} (Beacon mailbox)",
-        "description": (f"Reaches {id_} through Beacon. Use it when {id_} cannot be reached directly, or for "
+        "description": "Writes to your own owner, who reads it in the Beacon app." if id_ == chat.OWNER_PEER else (f"Reaches {id_} through Beacon. Use it when {id_} cannot be reached directly, or for "
                         f"work that may take longer than a minute or two: the message is delivered now if "
                         f"possible, otherwise when {id_} is back online, and a reply that is not ready at once "
                         "arrives later as a new message."),

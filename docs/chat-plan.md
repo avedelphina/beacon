@@ -144,7 +144,7 @@ applies to operators.
 
 `mesh.config` adds an outbound peer `owner` (`<beacon>/a2a/owner`) for agents
 with an owner and `reach.chat`. The mailbox takes a message for `owner`, stores
-it in a thread with origin `agent`, answers at once "delivered to your owner; a
+it in the home thread (what the agent says on its own), answers at once "delivered to your owner; a
 reply, if any, arrives as a new message", and notifies. `owner` becomes a
 reserved agent id. Limit per agent: 20 an hour.
 
