@@ -187,9 +187,9 @@ class AgentClient(BaseModel):
         return v
 
 
-# Names the mesh uses for itself or as workflow eligibility sentinels; no
-# agent may take one (see Agent.id).
-RESERVED_AGENT_IDS = frozenset({"beacon", "human"})
+# Names the mesh uses for itself ("owner": an agent's own owner, backend/chat.py)
+# or as workflow eligibility sentinels; no agent may take one (see Agent.id).
+RESERVED_AGENT_IDS = frozenset({"beacon", "human", "owner"})
 
 
 class Agent(BaseModel):

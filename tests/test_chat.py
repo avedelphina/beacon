@@ -206,3 +206,47 @@ def test_deleting_a_conversation(chatting):
     assert chatting.delete(f"/api/chat/threads/{thread['id']}", headers=browser(chatting, TOM)).status_code == 200
     assert chatting.get("/api/chat/threads", headers=browser(chatting, TOM)).json() == []
     assert pull(chatting) == []
+
+
+# --- the agent writes first -----------------------------------------------------
+
+def to_owner(client, text, agent_id="tombot", message_id="m1", token=None, method="SendMessage"):
+    return client.post("/a2a/owner", headers={"Authorization": f"Bearer {token or mesh.token(agent_id, 'owner')}"},
+                       json={"jsonrpc": "2.0", "id": "1", "method": method,
+                             "params": {"message": {"role": "ROLE_USER", "messageId": message_id,
+                                                    "parts": [{"text": text}]}}}).json()
+
+
+def test_an_agent_with_chat_gets_its_owner_as_a_peer(chatting, monkeypatch):
+    monkeypatch.setenv("BEACON_PUBLIC_URL", "https://beacon.test")
+    peers = {p["name"]: p for p in mesh.config("tombot")["outbound"]}
+    assert peers["owner"]["url"] == "https://beacon.test/a2a/owner"
+    assert "owner" not in {p["name"] for p in mesh.config("worker")["outbound"]}
+    card = chatting.get("/a2a/owner/.well-known/agent-card.json").json()
+    assert card["url"] == "https://beacon.test/a2a/owner" and "your own owner" in card["description"]
+
+
+def test_what_an_agent_writes_first_reaches_its_owner_and_only_them(chatting):
+    answer = to_owner(chatting, "The disk is almost full.")
+    assert answer["result"]["task"]["status"]["state"] == "TASK_STATE_COMPLETED"
+    to_owner(chatting, "The disk is almost full.")  # sent again: stored once
+    [home] = chatting.get("/api/chat/threads", headers=browser(chatting, TOM)).json()
+    assert home["origin"] == "home" and home["agent"] == "tombot"
+    assert [m["text"] for m in messages(chatting, home["id"])["messages"]] == ["The disk is almost full."]
+    assert chatting.told[0][0][0] == {TOM} and "disk" not in str(chatting.told)
+    to_owner(chatting, "Hello Ann", agent_id="annsbot")
+    assert len(chatting.get("/api/chat/threads", headers=browser(chatting, TOM)).json()) == 1
+
+
+def test_the_owner_peer_refuses_what_it_should(chatting, monkeypatch):
+    assert to_owner(chatting, "x", token="nonsense")["error"]["code"] == -32050
+    assert to_owner(chatting, "x", agent_id="worker")["error"]["code"] == -32052  # chat is off
+    assert to_owner(chatting, "x", method="tasks/get")["error"]["code"] == -32601
+    monkeypatch.setattr(chat, "MAX_OWNER_CALLS_PER_HOUR", 1)
+    to_owner(chatting, "one", message_id="a")
+    assert to_owner(chatting, "two", message_id="b")["error"]["code"] == -32003
+
+
+def test_no_agent_may_be_called_owner():
+    with pytest.raises(ValueError, match="reserved"):
+        Agent.model_validate({"id": "owner", "type": "hermes", "host": "h1"})

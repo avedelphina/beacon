@@ -29,6 +29,8 @@ READING_SECONDS = 60         # an owner who polled a thread this recently is rea
 # (/yolo) or change what a chat is attached to; /approve takes no argument, so never "always".
 COMMANDS = frozenset({"/stop", "/new", "/approve", "/deny"})
 HOME = "home"                # the plugin's name for the thread scheduled results go to
+OWNER_PEER = "owner"         # the mailbox peer an agent writes to on its own (`a2a_call`)
+MAX_OWNER_CALLS_PER_HOUR = 20
 
 
 class ChatError(Exception):
@@ -288,6 +290,27 @@ def agent_edits(agent, remote_id: str, text: str, final: bool) -> None:
         db.execute("UPDATE chat_messages SET body = ?, final = ?, rev = ? WHERE sender = 'agent' AND remote_id = ?"
                    " AND thread_id IN (SELECT id FROM chat_threads WHERE agent = ? AND owner = ?)",
                    (text[:MAX_BODY], int(final), _rev(db), remote_id, agent.id, agent.owner.casefold()))
+
+
+# --- the agent writes first -----------------------------------------------------
+
+def may_call_owner(agent) -> bool:
+    """The one rule for the `owner` peer, beside mesh.may_call: an agent reaches only its own owner,
+    and only while chat is on. There is no way to name anyone else."""
+    return enabled(agent)
+
+
+def from_peer_call(agent, text: str, message_id: str) -> tuple[int, str] | None:
+    """What the agent sent to `owner`: it joins the thread of what the agent says on its own.
+    (thread, owner) when the owner should be told."""
+    remote_id = f"a2a-{message_id}"[:100]
+    with opstore.connect() as db:
+        count = db.execute("SELECT COUNT(*) FROM chat_messages m JOIN chat_threads t ON t.id = m.thread_id"
+                           " WHERE t.agent = ? AND m.remote_id LIKE 'a2a-%' AND m.created_at > ?",
+                           (agent.id, time.time() - 3600)).fetchone()[0]
+    if count >= MAX_OWNER_CALLS_PER_HOUR:
+        raise ChatError(429, "too many messages to your owner in an hour: send less, or collect them into one")
+    return agent_says(agent, HOME, text, remote_id, True)
 
 
 # --- routes -------------------------------------------------------------------

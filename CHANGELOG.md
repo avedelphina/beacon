@@ -11,6 +11,8 @@
 - **Chats tab in the app**: conversations with your own agents, opened with Face ID; live answers,
   stop, approve or deny a command, queued messages you can take back, a tap on the notification
   opens the conversation.
+- **An agent can write to its owner first**, with `a2a_call` to the peer `owner` (agent skill
+  1.29.0). `owner` is now a reserved agent id.
 
 ### Fixed
 

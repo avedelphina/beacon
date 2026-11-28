@@ -794,6 +794,13 @@ Beacon's certificate (`SSL_CERT_FILE` for a private CA).
 Scheduled jobs (`deliver: beacon`), `hermes send --to beacon` and Hermes's own
 restart notices arrive in one conversation of their own.
 
+**The agent writes first.** An agent with chat on also gets a mailbox peer named
+`owner` (`/a2a/owner`): an ordinary `a2a_call` to it lands in that same
+conversation and notifies. It reaches only the agent's own owner, at most 20
+times an hour, and `owner` cannot be an agent's name. Hermes removes e-mail
+addresses and secrets from what it sends this way. A reply goes through the chat
+plugin, quoting the message.
+
 - Turn it on per agent (`reach.chat`, "Its owner may chat with it" in the agent
   form). Like other changes to `reach`, only a person can (CL4).
 - Only the owner reads or writes: not operators, not AI clients, not other

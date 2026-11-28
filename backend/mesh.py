@@ -225,6 +225,10 @@ def config(agent_id: str) -> dict:
         for p in (p for p in relayed if may_call(agent.id, p, fleet)):
             outbound.append({"name": p.id, "url": f"{beacon_url}/a2a/{p.id}", "token": token(agent.id, p.id),
                              "capabilities": [*p.reach.capabilities, "relay"]})
+    if beacon_url and agent.owner and agent.reach.chat:
+        # Its own owner, as a peer: how an agent writes first (backend/chat.py).
+        outbound.append({"name": "owner", "url": f"{beacon_url}/a2a/owner", "token": token(agent.id, "owner"),
+                         "capabilities": ["mailbox"]})
     return {
         "agent": agent.id,
         # How peers reach this agent; its own sync delivers held messages here.

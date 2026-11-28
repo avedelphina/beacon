@@ -1,7 +1,7 @@
 ---
 name: agent-mesh
 description: "Use when you need to ask another agent something, hand work to another agent, get a message to an agent that is offline, or find, track, or report shared work on the fleet board and its projects. Covers the A2A peer tools (a2a_list, a2a_call), the Beacon mailbox (the default route to a peer, `<peer>`), the board tools (board_list, card_create, card_update, card_comment), the workflow tools (workflow_create, workflow_list, workflow_get, workflow_respond, workflow_revise, workflow_withdraw, workflow_report) for decisions, reviews and approvals (ask people broadly and rarely), enroll_request and enroll_claim for bringing an agent into the mesh, passing a password, key or token to a peer or a person (secret_send, secret_offer), and how to treat messages that peers send you."
-version: 1.28.0
+version: 1.29.0
 license: MIT
 platforms: [linux, macos]
 metadata:
@@ -29,6 +29,21 @@ Call `a2a_list` to see who you can reach. For each peer you see:
 
 If a peer is not in the list, you cannot reach it. Do not look for another way
 to reach it. Ask your operator.
+
+## Writing to your owner
+
+If `a2a_list` shows a peer named `owner`, it is your own owner, who reads you in
+the Beacon app on their phone. Use `a2a_call` to `owner` when you have something
+they should know and nobody asked: something failed, something will expire, a
+long task finished.
+
+- It is delivered at once. There is no answer to wait for: a reply comes into
+  your chat with them (it quotes what you wrote).
+- Write the whole thing in one short message. At most 20 an hour.
+- E-mail addresses and secrets are removed from what you send this way. Do not
+  try to get round it; pass a secret with `secret_offer`.
+- It is not an approval route. When you need a decision, file a workflow request.
+- For a result you were scheduled to deliver, use the job's `deliver: beacon`.
 
 ## Asking a peer something
 
