@@ -5,6 +5,9 @@ import UserNotifications
 struct RequestsSplitView: View {
     @Environment(Session.self) private var session
     @Environment(\.scenePhase) private var phase
+    /// The window's width, not the sidebar column's: a column is narrow on an iPad too.
+    @Environment(\.horizontalSizeClass) private var width
+    @State private var settings = false
     @State private var requests: [WorkflowRequest] = []
     @State private var selected: WorkflowRequest.ID?
     @State private var problem: String?
@@ -32,6 +35,9 @@ struct RequestsSplitView: View {
             .navigationTitle("Requests")
             .toolbar {
                 ToolbarItem { Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }.keyboardShortcut("r") }
+                if width == .compact {
+                    ToolbarItem(placement: .topBarLeading) { Button("Settings", systemImage: "gearshape") { settings = true } }
+                }
             }
             .refreshable { await load() }
         } detail: {
@@ -45,6 +51,7 @@ struct RequestsSplitView: View {
                 ContentUnavailableView("No request selected", systemImage: "tray")
             }
         }
+        .sheet(isPresented: $settings) { SettingsView(asSheet: true) }
         .task { await load() }
         .onChange(of: phase) { if phase == .active { Task { await load() } } }
         .onChange(of: session.refreshes) { Task { await load() } }

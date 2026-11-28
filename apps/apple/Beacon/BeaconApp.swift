@@ -107,6 +107,7 @@ struct RootView: View {
 struct MainView: View {
     @Environment(Session.self) private var session
     @Environment(\.scenePhase) private var phase
+    @Environment(\.horizontalSizeClass) private var width
     @State private var tab = Tabs.requests
 
     enum Tabs: Hashable { case requests, chats, agents, board, projects, settings }
@@ -118,7 +119,10 @@ struct MainView: View {
             Tab("Agents", systemImage: "cpu", value: Tabs.agents) { AgentsView() }
             Tab("Board", systemImage: "rectangle.stack", value: Tabs.board) { BoardView() }
             Tab("Projects", systemImage: "flag", value: Tabs.projects) { ProjectsView() }
-            Tab("Settings", systemImage: "gearshape", value: Tabs.settings) { SettingsView() }
+            // A phone's tab bar holds five: there Settings is the gear on Requests.
+            if width != .compact {
+                Tab("Settings", systemImage: "gearshape", value: Tabs.settings) { SettingsView() }
+            }
         }
         .tabViewStyle(.sidebarAdaptable)
         .onChange(of: phase) { if phase == .active { Task { await session.resumeNotifications() } } }

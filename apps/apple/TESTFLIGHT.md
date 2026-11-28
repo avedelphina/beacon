@@ -99,6 +99,7 @@ None of this can be checked in the simulator or in CI.
 - [ ] A streamed answer grows on screen; Stop ends a long task; a dangerous command shows Approve and
       Deny and each does what it says.
 - [ ] After 15 minutes unused, chat asks for Face ID again. The app switcher shows nothing of it.
+- [ ] iPhone: five tabs, no "More"; the gear on Requests opens Settings and closes again.
 - [ ] iPad: both orientations, Split View, a hardware keyboard (⌘R, ⌘↩).
 - [ ] Dark mode, the largest Dynamic Type size, and VoiceOver on the answer
       buttons and the availability labels.

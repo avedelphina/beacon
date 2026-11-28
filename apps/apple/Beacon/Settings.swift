@@ -4,6 +4,9 @@ import UserNotifications
 /// Who is logged in where, this person's devices, and logging out.
 struct SettingsView: View {
     @Environment(Session.self) private var session
+    @Environment(\.dismiss) private var dismiss
+    /// Shown from the gear on a phone, which then needs a way to close it.
+    var asSheet = false
     @State private var devices: [Device] = []
     @State private var version: Version?
     @State private var problem: String?
@@ -48,6 +51,9 @@ struct SettingsView: View {
                 if let problem { Section { Text(problem).foregroundStyle(.red) } }
             }
             .navigationTitle("Settings")
+            .toolbar {
+                if asSheet { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            }
             .task(id: phase) { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
             .task {
                 guard let client = session.client else { return }
